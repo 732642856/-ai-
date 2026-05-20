@@ -2,7 +2,7 @@
  * ChatAttachmentPreview - Chat 附件预览
  */
 
-import { X, Plus } from "lucide-react"
+import { File, Music, Plus, Video, X } from "lucide-react"
 import type { ChatAttachment } from "../../hooks/useChatAttachments"
 import { DESIGN_TOKENS } from "../../styles/designSystem"
 import { formatFileSize, truncateFileName } from "../../utils/generateId"
@@ -33,16 +33,24 @@ export function ChatAttachmentPreview({
             border: `1px solid ${DESIGN_TOKENS.border}`,
           }}
         >
-          {/* 缩略图 */}
+          {/* 缩略图 / 文件图标 */}
           <div
-            className="h-10 w-10 flex-shrink-0 overflow-hidden rounded"
+            className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded"
             style={{ backgroundColor: "rgba(0,0,0,0.3)" }}
           >
-            <img
-              src={attachment.src}
-              alt={attachment.name}
-              className="h-full w-full object-cover"
-            />
+            {attachment.type === "image" ? (
+              <img
+                src={attachment.src}
+                alt={attachment.name}
+                className="h-full w-full object-cover"
+              />
+            ) : attachment.type === "video" ? (
+              <Video size={18} style={{ color: DESIGN_TOKENS.textMuted }} />
+            ) : attachment.type === "audio" ? (
+              <Music size={18} style={{ color: DESIGN_TOKENS.textMuted }} />
+            ) : (
+              <File size={18} style={{ color: DESIGN_TOKENS.textMuted }} />
+            )}
           </div>
 
           {/* 文件信息 */}
@@ -57,7 +65,7 @@ export function ChatAttachmentPreview({
               className="text-xs"
               style={{ color: DESIGN_TOKENS.textMuted }}
             >
-              {formatFileSize(attachment.size)}
+              {attachment.type.toUpperCase()} · {formatFileSize(attachment.size)}
             </span>
           </div>
 

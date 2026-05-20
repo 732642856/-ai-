@@ -2,7 +2,7 @@
  * LeftToolbar - 左侧胶囊工具栏，TapNow 风格
  */
 
-import { FolderOpen, Image, Sparkles, FileText, MessageCircle, History } from "lucide-react"
+import { FolderOpen, Image, Sparkles, FileText, MessageCircle, History, Film, PanelsTopLeft, Video, Clapperboard } from "lucide-react"
 import { DESIGN_TOKENS } from "../../styles/designSystem"
 
 interface LeftToolbarProps {
@@ -11,6 +11,8 @@ interface LeftToolbarProps {
   onUploadImage: () => void
   onAddPrompt: () => void
   onAddText: () => void
+  onAddWorkflowNode?: (nodeKind: "storyboard" | "image-generation" | "video-generation" | "composition") => void
+  onCreateVideoWorkflow?: () => void
   onToggleChat: () => void
   isChatOpen: boolean
   onToggleHistory: () => void
@@ -24,6 +26,8 @@ export function LeftToolbar({
   onUploadImage,
   onAddPrompt,
   onAddText,
+  onAddWorkflowNode,
+  onCreateVideoWorkflow,
   onToggleChat,
   isChatOpen,
   onToggleHistory,
@@ -31,9 +35,13 @@ export function LeftToolbar({
   onOpenUserMenu,
 }: LeftToolbarProps) {
   const tools = [
-    { icon: Image, label: "上传图片", onClick: onUploadImage },
-    { icon: Sparkles, label: "Prompt", onClick: onAddPrompt },
-    { icon: FileText, label: "文本", onClick: onAddText },
+    { icon: Film, label: "前期流程", onClick: onCreateVideoWorkflow || onCreateNode },
+    { icon: Image, label: "参考图", onClick: onUploadImage },
+    { icon: Sparkles, label: "创意Prompt", onClick: onAddPrompt },
+    { icon: FileText, label: "创意文本", onClick: onAddText },
+    { icon: PanelsTopLeft, label: "分镜草稿", onClick: () => onAddWorkflowNode?.("storyboard") },
+    { icon: Video, label: "关键画面", onClick: () => onAddWorkflowNode?.("image-generation") },
+    { icon: Clapperboard, label: "交接包", onClick: () => onAddWorkflowNode?.("composition") },
     { icon: FolderOpen, label: "素材库", onClick: onOpenAssetLibrary },
   ]
 

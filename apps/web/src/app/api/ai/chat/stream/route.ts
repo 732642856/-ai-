@@ -94,42 +94,100 @@ const wantsCanvasContext = (input: string): boolean => {
 // ============================================================================
 // MESSAGE BUILDING
 // ============================================================================
+type CanvasNodeContext = {
+  id: string
+  type?: string
+  nodeKind?: string
+  title?: string
+  prompt?: string
+  content?: string
+  summary?: string
+  workflowRole?: string
+  status?: string
+  model?: string
+  duration?: string
+  fileName?: string
+  mimeType?: string
+  imageUrl?: string
+  assetUrl?: string
+  inputs?: Array<{ label?: string; type?: string }>
+  outputs?: Array<{ label?: string; type?: string; url?: string }>
+}
+
+function summarizeNode(node: CanvasNodeContext): string {
+  const pieces = [
+    `[${node.nodeKind || node.type || "node"}] ${node.title || "未命名节点"}`,
+    node.workflowRole ? `角色: ${node.workflowRole}` : undefined,
+    node.status ? `状态: ${node.status}` : undefined,
+    node.model ? `模型: ${node.model}` : undefined,
+    node.duration ? `时长: ${node.duration}` : undefined,
+    node.prompt ? `Prompt: ${node.prompt.slice(0, 180)}` : undefined,
+    node.content ? `内容: ${node.content.slice(0, 180)}` : undefined,
+    node.summary ? `摘要: ${node.summary.slice(0, 180)}` : undefined,
+    node.fileName ? `文件: ${node.fileName}` : undefined,
+    node.imageUrl ? "包含图片素材" : undefined,
+    node.inputs?.length ? `输入: ${node.inputs.map((item) => item.label).join("/")}` : undefined,
+    node.outputs?.length ? `输出: ${node.outputs.map((item) => item.label).join("/")}` : undefined,
+  ]
+
+  return pieces.filter(Boolean).join(" | ")
+}
+
 function buildSystemPrompt(context?: {
-  nodes?: Array<{id: string; type: string; title?: string; prompt?: string; imageUrl?: string}>
+  nodes?: CanvasNodeContext[]
+  selectedNode?: CanvasNodeContext
   selectedNodeId?: string
+  mentionedNodes?: CanvasNodeContext[]
+  attachments?: Array<{ id?: string; type?: string; name?: string; size?: number; mimeType?: string; width?: number; height?: number }>
+  canvasStats?: { total?: number; byKind?: Record<string, number> }
   mode?: string
 }): string {
   let prompt = `你是星轨（StarTrails）的创作助手，一个专注于影视创作的 AI 工具。星轨帮助用户：
 1. 把导演意图整理成 Prompt
 2. 拆分镜头和分镜
 3. 生成首帧图像
-4. 在画布上组织创作节点
+4. 组织文生视频 / 图生视频 / 音频 / 字幕 / 合成工作流
+5. 在画布上理解并串联创作节点
 
-请用中文简洁、专业的语言回答。`
-  
-  if (context?.nodes && context.nodes.length > 0 && context.selectedNodeId) {
-    const selectedNode = context.nodes.find(n => n.id === context.selectedNodeId)
-    if (selectedNode) {
-      prompt += `\n\n当前选中的节点信息：`
-      prompt += `\n- 类型: ${selectedNode.type}`
-      prompt += `\n- 标题: ${selectedNode.title || "无标题"}`
-      if (selectedNode.prompt) {
-        prompt += `\n- 内容: ${selectedNode.prompt.slice(0, 200)}${selectedNode.prompt.length > 200 ? "..." : ""}`
-      }
-      if (selectedNode.imageUrl) {
-        prompt += `\n- 包含图片`
-      }
+请用中文简洁、专业的语言回答。若用户正在讨论画布，请优先基于下方画布上下文回答，不要假装没看见节点。`
+
+  const selectedNode = context?.selectedNode || (context?.selectedNodeId ? context.nodes?.find(n => n.id === context.selectedNodeId) : undefined)
+  if (selectedNode) {
+    prompt += `\n\n【当前选中节点】\n- ${summarizeNode(selectedNode)}`
+  }
+
+  if (context?.mentionedNodes?.length) {
+    prompt += `\n\n【用户 @ 提到的节点】`
+    context.mentionedNodes.slice(0, 8).forEach((node, i) => {
+      prompt += `\n${i + 1}. ${summarizeNode(node)}`
+    })
+  }
+
+  if (context?.canvasStats?.total || context?.nodes?.length) {
+    const byKind = context.canvasStats?.byKind
+      ? Object.entries(context.canvasStats.byKind).map(([kind, count]) => `${kind}:${count}`).join("，")
+      : ""
+    prompt += `\n\n【画布概况】\n- 节点总数：${context.canvasStats?.total ?? context.nodes?.length ?? 0}`
+    if (byKind) prompt += `\n- 类型分布：${byKind}`
+  }
+
+  if (context?.nodes?.length) {
+    prompt += `\n\n【画布节点摘要】`
+    context.nodes.slice(0, 20).forEach((node, i) => {
+      prompt += `\n${i + 1}. ${summarizeNode(node)}`
+    })
+    if (context.nodes.length > 20) {
+      prompt += `\n... 还有 ${context.nodes.length - 20} 个节点未展开。`
     }
   }
 
-  if (context?.nodes && context.nodes.length > 0) {
-    prompt += `\n\n画布上的节点（${context.nodes.length}个）：`
-    context.nodes.slice(0, 10).forEach((node, i) => {
-      prompt += `\n${i + 1}. [${node.type}] ${node.title || "无标题"}`
+  if (context?.attachments?.length) {
+    prompt += `\n\n【本轮附件】`
+    context.attachments.forEach((attachment, i) => {
+      const sizeKb = attachment.size ? `${Math.round(attachment.size / 1024)}KB` : "未知大小"
+      const dimensions = attachment.width && attachment.height ? `，尺寸 ${attachment.width}x${attachment.height}` : ""
+      prompt += `\n${i + 1}. [${attachment.type || "file"}] ${attachment.name || attachment.id || "未命名附件"}，${attachment.mimeType || "未知类型"}，${sizeKb}${dimensions}`
     })
-    if (context.nodes.length > 10) {
-      prompt += `\n... 还有 ${context.nodes.length - 10} 个节点`
-    }
   }
 
   return prompt
@@ -261,8 +319,10 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Determine if we need canvas context
-    const needsCanvasContext = !isCasualMessage(message) && wantsCanvasContext(message)
+    // Determine if we need canvas context. Explicit canvas payload from the UI should be honored;
+    // casual greetings can still skip it to keep replies light.
+    const hasCanvasPayload = Boolean(context?.selectedNode || context?.nodes?.length || context?.mentionedNodes?.length || context?.attachments?.length)
+    const needsCanvasContext = !isCasualMessage(message) && (hasCanvasPayload || wantsCanvasContext(message))
     
     // Build messages
     const systemPrompt = buildSystemPrompt(needsCanvasContext ? context : undefined)

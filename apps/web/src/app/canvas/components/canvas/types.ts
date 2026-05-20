@@ -8,15 +8,44 @@ import type { ReactNode } from 'react'
 // Node Types
 // ============================================================================
 export type AgentNodeType = "text" | "prompt" | "image" | "storyboard" | "reference" | "group"
-export type CanvasNodeKind = AgentNodeType | "previs" | "uploaded-image" | "uploaded-video" | "uploaded-audio" | "uploaded-file" | "image-result" | "text-result"
+export type VideoWorkflowNodeKind =
+  | "script"
+  | "image-generation"
+  | "video-generation"
+  | "audio"
+  | "subtitle"
+  | "composition"
+  | "video-result"
+export type CanvasNodeKind =
+  | AgentNodeType
+  | VideoWorkflowNodeKind
+  | "previs"
+  | "uploaded-image"
+  | "uploaded-video"
+  | "uploaded-audio"
+  | "uploaded-file"
+  | "image-result"
+  | "text-result"
+
+export type WorkflowNodeStatus = "draft" | "ready" | "running" | "done" | "error"
 
 export type CanvasNodeData = {
   label?: ReactNode
   title?: string
   nodeKind?: CanvasNodeKind
+  workflowRole?: string
+  status?: WorkflowNodeStatus
   summary?: string
   prompt?: string
+  content?: string
   negativePrompt?: string
+  instruction?: string
+  inputs?: Array<{ id?: string; label: string; type?: string }>
+  outputs?: Array<{ id?: string; label: string; type?: string; url?: string }>
+  duration?: string
+  model?: string
+  resultUrl?: string
+  errorMessage?: string
   imageUrl?: string
   assetUrl?: string
   fileName?: string
@@ -341,5 +370,54 @@ export const nodeToneStyles: Record<CanvasNodeKind, {
     meta: "text-purple-200/60",
     border: "1px solid rgba(216, 180, 254, 0.35)",
     background: "rgba(126, 34, 206, 0.16)",
+  },
+  script: {
+    eyebrow: "text-cyan-200",
+    body: "text-cyan-100/75",
+    meta: "text-cyan-200/60",
+    border: "1px solid rgba(103, 232, 249, 0.35)",
+    background: "rgba(8, 145, 178, 0.16)",
+  },
+  "image-generation": {
+    eyebrow: "text-pink-200",
+    body: "text-pink-100/75",
+    meta: "text-pink-200/60",
+    border: "1px solid rgba(244, 114, 182, 0.35)",
+    background: "rgba(190, 24, 93, 0.16)",
+  },
+  "video-generation": {
+    eyebrow: "text-sky-200",
+    body: "text-sky-100/75",
+    meta: "text-sky-200/60",
+    border: "1px solid rgba(56, 189, 248, 0.35)",
+    background: "rgba(2, 132, 199, 0.16)",
+  },
+  audio: {
+    eyebrow: "text-emerald-200",
+    body: "text-emerald-100/75",
+    meta: "text-emerald-200/60",
+    border: "1px solid rgba(52, 211, 153, 0.35)",
+    background: "rgba(5, 150, 105, 0.16)",
+  },
+  subtitle: {
+    eyebrow: "text-amber-200",
+    body: "text-amber-100/75",
+    meta: "text-amber-200/60",
+    border: "1px solid rgba(251, 191, 36, 0.35)",
+    background: "rgba(217, 119, 6, 0.16)",
+  },
+  composition: {
+    eyebrow: "text-violet-200",
+    body: "text-violet-100/75",
+    meta: "text-violet-200/60",
+    border: "1px solid rgba(167, 139, 250, 0.4)",
+    background: "rgba(91, 33, 182, 0.2)",
+  },
+  "video-result": {
+    eyebrow: "text-blue-200",
+    body: "text-blue-100/75",
+    meta: "text-blue-200/60",
+    border: "1px solid rgba(96, 165, 250, 0.4)",
+    background: "rgba(37, 99, 235, 0.18)",
   },
 }

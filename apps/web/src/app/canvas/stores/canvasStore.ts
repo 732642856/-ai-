@@ -4,7 +4,27 @@
 import { create } from 'zustand'
 import { addEdge, type Connection, type Edge, type Node, type Viewport } from '@xyflow/react'
 
-export type CanvasNodeKind = "text" | "prompt" | "image" | "storyboard" | "reference" | "group" | "previs" | "uploaded-image" | "uploaded-video" | "uploaded-audio" | "uploaded-file" | "image-result" | "text-result"
+export type CanvasNodeKind =
+  | "text"
+  | "prompt"
+  | "image"
+  | "storyboard"
+  | "reference"
+  | "group"
+  | "script"
+  | "image-generation"
+  | "video-generation"
+  | "audio"
+  | "subtitle"
+  | "composition"
+  | "video-result"
+  | "previs"
+  | "uploaded-image"
+  | "uploaded-video"
+  | "uploaded-audio"
+  | "uploaded-file"
+  | "image-result"
+  | "text-result"
 export type ChatMode = "ASK" | "EXECUTE" | "STORYBOARD" | "ORGANIZE" | "IMAGE_PROMPT"
 export type RightPanelMode = "chat" | "storyboard" | "previs" | "models" | "queue" | "asset" | "profile"
 

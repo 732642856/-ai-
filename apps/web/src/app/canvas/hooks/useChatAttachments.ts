@@ -9,7 +9,7 @@ const DEBUG_CHAT = typeof window !== "undefined" && window.localStorage.getItem(
 
 export interface ChatAttachment {
   id: string
-  type: "image"
+  type: "image" | "video" | "audio" | "file"
   file: File
   src: string
   name: string
@@ -19,7 +19,14 @@ export interface ChatAttachment {
   height?: number
 }
 
-const MAX_FILE_SIZE = 20 * 1024 * 1024 // 20MB
+const MAX_FILE_SIZE = 80 * 1024 * 1024 // 80MB
+
+function getAttachmentType(file: File): ChatAttachment["type"] {
+  if (file.type.startsWith("image/")) return "image"
+  if (file.type.startsWith("video/")) return "video"
+  if (file.type.startsWith("audio/")) return "audio"
+  return "file"
+}
 
 export function useChatAttachments() {
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
@@ -27,20 +34,40 @@ export function useChatAttachments() {
 
   // 添加附件
   const addAttachments = useCallback((files: File[]) => {
-    const newAttachments: ChatAttachment[] = []
+    setError(null)
 
     for (const file of files) {
-      if (!file.type.startsWith("image/")) {
-        setError("仅支持图片文件")
-        continue
-      }
-
       if (file.size > MAX_FILE_SIZE) {
-        setError("图片过大，请压缩后再试")
+        setError("文件过大，请控制在 80MB 以内")
         continue
       }
 
       const src = URL.createObjectURL(file)
+      const type = getAttachmentType(file)
+
+      if (type !== "image") {
+        const attachment: ChatAttachment = {
+          id: generateId(),
+          type,
+          file,
+          src,
+          name: file.name,
+          size: file.size,
+          mimeType: file.type || "application/octet-stream",
+        }
+
+        setAttachments((prev) => [...prev, attachment])
+
+        if (DEBUG_CHAT) {
+          console.log("[DEBUG_CHAT_ATTACHMENTS] Added attachment:", {
+            id: attachment.id,
+            type: attachment.type,
+            name: attachment.name,
+          })
+        }
+        continue
+      }
+
       const img = new Image()
 
       img.onload = () => {
@@ -61,10 +88,16 @@ export function useChatAttachments() {
         if (DEBUG_CHAT) {
           console.log("[DEBUG_CHAT_ATTACHMENTS] Added attachment:", {
             id: attachment.id,
+            type: attachment.type,
             name: attachment.name,
             dimensions: `${attachment.width}x${attachment.height}`,
           })
         }
+      }
+
+      img.onerror = () => {
+        URL.revokeObjectURL(src)
+        setError("图片读取失败，请换一张再试")
       }
 
       img.src = src
@@ -116,9 +149,7 @@ export function useChatAttachments() {
       e.preventDefault()
       e.stopPropagation()
 
-      const files = Array.from(e.dataTransfer.files).filter((f) =>
-        f.type.startsWith("image/")
-      )
+      const files = Array.from(e.dataTransfer.files)
 
       if (files.length > 0) {
         addAttachments(files)

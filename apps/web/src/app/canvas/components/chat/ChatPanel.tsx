@@ -22,11 +22,72 @@ import { useChatSSE } from "../../hooks/useChatSSE"
 import { generateId } from "../../utils/generateId"
 import type { Node } from "@xyflow/react"
 
+type CanvasNodeContextSnapshot = {
+  id: string
+  type?: string
+  nodeKind?: string
+  title?: string
+  prompt?: string
+  content?: string
+  summary?: string
+  workflowRole?: string
+  status?: string
+  model?: string
+  duration?: string
+  fileName?: string
+  mimeType?: string
+  imageUrl?: string
+  assetUrl?: string
+  inputs?: Array<{ label?: string; type?: string }>
+  outputs?: Array<{ label?: string; type?: string; url?: string }>
+}
+
 const isDebugEnabled = (key: string) =>
   typeof window !== "undefined" && window.localStorage.getItem(key) === "1"
 
 const DEBUG_CHAT = isDebugEnabled("DEBUG_CHAT_ATTACHMENTS")
 const DEBUG_AI = isDebugEnabled("DEBUG_AI_PAYLOAD")
+
+function getNodeTitle(node: Node): string {
+  const data = node.data as Record<string, any> | undefined
+  const fallbackText = data?.content || data?.text || data?.prompt || data?.summary
+  return String(data?.title || data?.fileName || (fallbackText ? fallbackText.slice(0, 28) : "未命名节点"))
+}
+
+function toCanvasNodeContext(node: Node): CanvasNodeContextSnapshot {
+  const data = node.data as Record<string, any> | undefined
+
+  return {
+    id: node.id,
+    type: node.type,
+    nodeKind: data?.nodeKind,
+    title: getNodeTitle(node),
+    prompt: data?.prompt,
+    content: data?.content || data?.text,
+    summary: data?.summary,
+    workflowRole: data?.workflowRole,
+    status: data?.status,
+    model: data?.model,
+    duration: data?.duration,
+    fileName: data?.fileName,
+    mimeType: data?.mimeType,
+    imageUrl: data?.imageUrl || data?.src,
+    assetUrl: data?.assetUrl || data?.resultUrl,
+    inputs: data?.inputs,
+    outputs: data?.outputs,
+  }
+}
+
+function getMentionedNodes(input: string, nodes: Node[]): CanvasNodeContextSnapshot[] {
+  if (!input.includes("@")) return []
+
+  return nodes
+    .filter((node) => {
+      const title = getNodeTitle(node)
+      return input.includes(`@${title}`) || input.includes(`@${node.id}`)
+    })
+    .map(toCanvasNodeContext)
+}
 
 interface Message {
   id: string
@@ -193,20 +254,32 @@ export function ChatPanel({
     thinkingStartRef.current = Date.now()
 
     try {
+        const canvasContext = canvasNodes.slice(0, 30).map(toCanvasNodeContext)
+        const mentionedNodes = getMentionedNodes(userMessage.content, canvasNodes)
+
         await sendMessage(userMessage.content, {
           mode,
           selectedNodeId,
-          selectedNode: selectedNode
-            ? {
-                id: selectedNode.id,
-                type: selectedNode.type,
-                title: selectedNode.data?.title,
-              }
-            : undefined,
+          selectedNode: selectedNode ? toCanvasNodeContext(selectedNode) : undefined,
+          nodes: canvasContext,
+          mentionedNodes,
+          canvasStats: {
+            total: canvasNodes.length,
+            byKind: canvasNodes.reduce<Record<string, number>>((acc, node) => {
+              const data = node.data as Record<string, any> | undefined
+              const kind = String(data?.nodeKind || node.type || "node")
+              acc[kind] = (acc[kind] || 0) + 1
+              return acc
+            }, {}),
+          },
           attachments: userMessage.attachments?.map((a) => ({
             id: a.id,
+            type: a.type,
             name: a.name,
+            size: a.size,
             mimeType: a.mimeType,
+            width: a.width,
+            height: a.height,
           })),
           model,
         })
@@ -218,6 +291,7 @@ export function ChatPanel({
     attachmentsState,
     selectedNodeId,
     selectedNode,
+    canvasNodes,
     sendMessage,
   ])
 

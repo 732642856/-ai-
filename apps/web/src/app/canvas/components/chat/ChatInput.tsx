@@ -286,7 +286,7 @@ export function ChatInput({
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*,video/*,audio/*"
+            accept="image/*,video/*,audio/*,.txt,.md,.pdf,.doc,.docx,.srt,.vtt,.json"
             multiple
             onChange={onAttachmentsChange.handleFileSelect}
             className="hidden"

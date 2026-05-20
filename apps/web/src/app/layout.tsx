@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "StarTrails 星轨",
-  description: "Tapnow-like AI creative canvas with BYOK, storyboard, and SaaS-ready architecture.",
+  title: "星轨画布（前期）",
+  description: "面向创意构思、分镜草稿和视觉设计的 StarTrails 前期画布。",
   icons: {
     icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
     apple: [{ url: "/startrails-icon.svg", type: "image/svg+xml" }],

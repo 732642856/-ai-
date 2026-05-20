@@ -10,6 +10,7 @@ interface EmptyCanvasGuideProps {
   onOpenChat: () => void
   onOpenAssetLibrary: () => void
   onUploadImage: () => void
+  onCreateVideoWorkflow?: () => void
 }
 
 export function EmptyCanvasGuide({
@@ -17,31 +18,32 @@ export function EmptyCanvasGuide({
   onOpenChat,
   onOpenAssetLibrary,
   onUploadImage,
+  onCreateVideoWorkflow,
 }: EmptyCanvasGuideProps) {
   const actions = [
     {
       icon: Sparkles,
-      label: "文字生视频",
-      onClick: () => onQuickStart("帮我生成一段视频", "text-to-video"),
+      label: "前期流程",
+      onClick: () => onCreateVideoWorkflow?.() || onQuickStart("帮我从一句创意拆成前期分镜和视觉方案", "pre-production"),
     },
     {
       icon: Image,
-      label: "图片换背景",
+      label: "参考图",
       onClick: () => onUploadImage(),
     },
     {
       icon: Wand2,
-      label: "首帧生成视频",
-      onClick: () => onUploadImage(),
+      label: "关键画面",
+      onClick: () => onQuickStart("帮我生成角色、场景或首帧关键画面提示词", "keyframe-design"),
     },
     {
       icon: Music,
-      label: "音频生视频",
+      label: "声音意图",
       onClick: () => onOpenChat(),
     },
     {
       icon: LayoutGrid,
-      label: "模板",
+      label: "素材模板",
       onClick: () => onOpenAssetLibrary(),
     },
   ]
@@ -52,7 +54,7 @@ export function EmptyCanvasGuide({
         {/* 引导文字 */}
         <div className="flex items-center gap-2 text-sm" style={{ color: DESIGN_TOKENS.textSecondary }}>
           <Sparkles size={16} strokeWidth={1.5} style={{ color: DESIGN_TOKENS.accent }} />
-          <span>双击画布自由生成，或查看模板</span>
+          <span>星轨画布（前期）：先把创意、分镜草稿、关键画面整理成可交接项目包</span>
         </div>
 
         {/* 快捷操作按钮 */}
