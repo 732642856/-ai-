@@ -55,8 +55,8 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   const [testMessage, setTestMessage] = useState("")
   const [serverConfig, setServerConfig] = useState<AiHealthResponse["config"] | null>(null)
 
-  // AI Usage stats
-  const usageStats = useAIUsageStore((s) => s.getStats())
+  // AI Usage stats — use cached `stats` for React 19 ref stability
+  const usageStats = useAIUsageStore((s) => s.stats)
   const usageRecords = useAIUsageStore((s) => s.usageRecords)
 
   // ── Load from localStorage ──────────────────────────

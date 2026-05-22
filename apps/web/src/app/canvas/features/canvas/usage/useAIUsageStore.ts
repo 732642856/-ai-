@@ -40,26 +40,30 @@ function saveRecords(records: AIUsageRecord[]) {
 
 interface AIUsageStoreState {
   usageRecords: AIUsageRecord[]
+  stats: UsageStats // cached for React 19 useSyncExternalStore ref stability
 
   // Mutations
   addUsageRecord: (record: AIUsageRecord) => void
   clearUsageRecords: () => void
 
-  // Queries
+  // Queries (kept for backward compat; prefer `stats` in selectors)
   getStats: () => UsageStats
   getNodeCostUsd: (nodeId: string) => number
   getNodeLastCostUsd: (nodeId: string) => number | undefined
 }
 
+const initialRecords = loadRecords()
+
 export const useAIUsageStore = create<AIUsageStoreState>((set, get) => ({
-  usageRecords: loadRecords(),
+  usageRecords: initialRecords,
+  stats: computeUsageStats(initialRecords),
 
   addUsageRecord: (record) => {
     set((state) => {
       const newRecords = [...state.usageRecords, record]
       // Persist to localStorage (fire-and-forget)
       saveRecords(newRecords)
-      return { usageRecords: newRecords }
+      return { usageRecords: newRecords, stats: computeUsageStats(newRecords) }
     })
   },
 
@@ -69,11 +73,11 @@ export const useAIUsageStore = create<AIUsageStoreState>((set, get) => ({
         localStorage.removeItem(STORAGE_KEY)
       }
     } catch {}
-    set({ usageRecords: [] })
+    set({ usageRecords: [], stats: computeUsageStats([]) })
   },
 
   getStats: () => {
-    return computeUsageStats(get().usageRecords)
+    return get().stats
   },
 
   getNodeCostUsd: (nodeId: string) => {
