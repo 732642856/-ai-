@@ -131,21 +131,57 @@ export interface AiProviderOverrides {
 /**
  * 合并服务端 .env 配置与请求传入的局部覆盖。
  * 覆盖项优先级高于 .env。
+ * 当 .env 未配置（如纯 Local Override 模式）时，用 overrides 作为基础配置。
  */
 export function mergeProviderConfig(
   overrides?: AiProviderOverrides,
 ): AiProviderConfig {
-  const env = getAiProviderConfig()
-  if (!overrides) return env
+  let env: Partial<AiProviderConfig> = {}
+  let envOk = false
+
+  try {
+    env = getAiProviderConfig()
+    envOk = true
+  } catch {
+    // .env 未配置，依赖 overrides 提供必填项
+  }
+
+  if (!envOk && !overrides) {
+    throw new Error(
+      "No server .env config and no overrides provided. " +
+      "Set AI_BASE_URL / AI_API_KEY in .env.local, or use Local Override mode in SettingsPanel.",
+    )
+  }
+
+  const baseUrl =
+    overrides?.baseUrl ?? env.baseUrl ?? ""
+  const apiKey =
+    overrides?.apiKey ?? env.apiKey ?? ""
+  const defaultModel =
+    overrides?.defaultModel ?? env.defaultModel ?? "gpt-5.5"
+  const defaultImageModel =
+    overrides?.imageModel ?? env.defaultImageModel ?? "gpt-image-2"
+  const videoModel =
+    overrides?.videoModel ?? env.videoModel
+  const timeoutMs =
+    overrides?.timeoutMs ?? env.timeoutMs ?? 120000
+
+  if (!baseUrl || !apiKey || !defaultModel) {
+    throw new Error(
+      "Missing required config. " +
+      "Provide AI_BASE_URL / AI_API_KEY / AI_DEFAULT_MODEL in .env.local, " +
+      "or fill them in SettingsPanel > Local Override mode.",
+    )
+  }
 
   return {
-    type: env.type,
-    baseUrl: (overrides.baseUrl ?? env.baseUrl).replace(/\/+$/, ""),
-    apiKey: overrides.apiKey ?? env.apiKey,
-    defaultModel: overrides.defaultModel ?? env.defaultModel,
-    defaultImageModel: overrides.imageModel ?? env.defaultImageModel,
-    videoModel: overrides.videoModel ?? env.videoModel,
-    timeoutMs: overrides.timeoutMs ?? env.timeoutMs,
+    type: "openai-compatible",
+    baseUrl: baseUrl.replace(/\/+$/, ""),
+    apiKey,
+    defaultModel,
+    defaultImageModel,
+    videoModel,
+    timeoutMs,
   }
 }
 
