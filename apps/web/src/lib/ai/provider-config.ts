@@ -120,6 +120,8 @@ export interface AiProviderOverrides {
   apiKey?: string
   /** 覆盖默认文本模型（可选） */
   defaultModel?: string
+  /** 覆盖图片生成模型（可选） */
+  imageModel?: string
   /** 覆盖视频分析模型（可选） */
   videoModel?: string
   /** 覆盖请求超时（可选，单位 ms） */
@@ -141,7 +143,7 @@ export function mergeProviderConfig(
     baseUrl: (overrides.baseUrl ?? env.baseUrl).replace(/\/+$/, ""),
     apiKey: overrides.apiKey ?? env.apiKey,
     defaultModel: overrides.defaultModel ?? env.defaultModel,
-    defaultImageModel: env.defaultImageModel, // 图片模型暂不支持覆盖
+    defaultImageModel: overrides.imageModel ?? env.defaultImageModel,
     videoModel: overrides.videoModel ?? env.videoModel,
     timeoutMs: overrides.timeoutMs ?? env.timeoutMs,
   }
@@ -158,6 +160,7 @@ export function hasLocalOverrides(
     overrides.baseUrl ||
     overrides.apiKey ||
     overrides.defaultModel ||
+    overrides.imageModel ||
     overrides.videoModel,
   )
 }

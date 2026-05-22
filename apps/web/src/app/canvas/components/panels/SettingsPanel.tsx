@@ -46,6 +46,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   // ── P2-5B: Provider override state ──────────────────
   const [showApiKey, setShowApiKey] = useState(false)
   const [defaultModel, setDefaultModel] = useState("")
+  const [imageModel, setImageModel] = useState("")
   const [videoModel, setVideoModel] = useState("")
   const [timeoutMs, setTimeoutMs] = useState("120000")
   const [useLocalOverride, setUseLocalOverride] = useState(false)
@@ -76,6 +77,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
       if (overrides) {
         setUseLocalOverride(true)
         if (overrides.defaultModel) setDefaultModel(overrides.defaultModel)
+        if (overrides.imageModel) setImageModel(overrides.imageModel)
         if (overrides.videoModel) setVideoModel(overrides.videoModel)
         if (overrides.timeoutMs) setTimeoutMs(String(overrides.timeoutMs))
       }
@@ -94,6 +96,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
           // Pre-fill from server if no local override
           if (!useLocalOverride) {
             if (data.defaultModel) setDefaultModel(data.defaultModel)
+            if (data.defaultImageModel) setImageModel(data.defaultImageModel)
             if (data.videoModel) setVideoModel(data.videoModel)
             if (data.timeoutMs) setTimeoutMs(String(data.timeoutMs))
           }
@@ -114,6 +117,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
             baseUrl: apiBaseUrl || undefined,
             apiKey: apiKey || undefined,
             defaultModel: defaultModel || undefined,
+            imageModel: imageModel || undefined,
             videoModel: videoModel || undefined,
             timeoutMs: timeoutMs ? Number(timeoutMs) : undefined,
           }
@@ -144,6 +148,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
         baseUrl: apiBaseUrl || undefined,
         apiKey: apiKey || undefined,
         defaultModel: defaultModel || undefined,
+        imageModel: imageModel || undefined,
         videoModel: videoModel || undefined,
         timeoutMs: timeoutMs ? Number(timeoutMs) : undefined,
       })
@@ -177,6 +182,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
       // Reset to server config
       if (serverConfig) {
         setDefaultModel(serverConfig.defaultModel)
+        setImageModel(serverConfig.defaultImageModel || "")
         setVideoModel(serverConfig.videoModel || "")
         setTimeoutMs(String(serverConfig.timeoutMs))
       }
@@ -328,6 +334,21 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                 value={defaultModel}
                 onChange={(e: ChangeEvent<HTMLInputElement>) => setDefaultModel(e.target.value)}
                 placeholder={serverConfig?.defaultModel || "gpt-5.5"}
+                className={inputClass}
+                style={{ borderColor: T.border }}
+                onFocus={(e) => (e.target.style.borderColor = T.accent)}
+                onBlur={(e) => (e.target.style.borderColor = T.border)}
+              />
+            </div>
+
+            {/* Image Model (optional) */}
+            <div>
+              <label style={labelStyle}>图片生成模型（可选）</label>
+              <input
+                type="text"
+                value={imageModel}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setImageModel(e.target.value)}
+                placeholder={serverConfig?.defaultImageModel || "gpt-image-2"}
                 className={inputClass}
                 style={{ borderColor: T.border }}
                 onFocus={(e) => (e.target.style.borderColor = T.accent)}
