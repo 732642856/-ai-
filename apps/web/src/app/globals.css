@@ -33,9 +33,9 @@ body {
 
 .startrails-flow {
   background:
-    radial-gradient(circle at 18% 12%, rgba(148, 163, 184, 0.10), transparent 28%),
-    radial-gradient(circle at 82% 20%, rgba(100, 116, 139, 0.08), transparent 30%),
-    linear-gradient(180deg, #09090b 0%, #0f172a 54%, #09090b 100%);
+    radial-gradient(circle at 18% 12%, rgba(148, 163, 184, 0.04), transparent 28%),
+    radial-gradient(circle at 82% 20%, rgba(100, 116, 139, 0.03), transparent 30%),
+    linear-gradient(180deg, #09090b 0%, #0c0e14 54%, #09090b 100%);
 }
 
 .startrails-flow .react-flow__attribution {
@@ -50,9 +50,9 @@ body {
 .startrails-flow .react-flow__handle {
   width: 10px;
   height: 10px;
-  border: 1.5px solid rgba(148, 163, 184, 0.6);
+  border: 1.5px solid rgba(148, 163, 184, 0.4);
   background: #94a3b8;
-  box-shadow: 0 0 14px rgba(148, 163, 184, 0.6);
+  box-shadow: 0 0 6px rgba(148, 163, 184, 0.25);
   opacity: 0;
   transition: opacity 0.2s ease, transform 0.2s ease;
   z-index: 10;
@@ -69,8 +69,8 @@ body {
 }
 
 .startrails-flow .react-flow__edge-path {
-  stroke: rgba(148, 163, 184, 0.45);
-  stroke-width: 1.4;
+  stroke: rgba(148, 163, 184, 0.25);
+  stroke-width: 1.2;
 }
 
 .startrails-flow-controls {

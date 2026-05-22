@@ -3,90 +3,26 @@
 // ============================================================================
 import { create } from 'zustand'
 import { addEdge, type Connection, type Edge, type Node, type Viewport } from '@xyflow/react'
+import type {
+  CanvasNodeKind,
+  ChatMode,
+  RightPanelMode,
+  ContextMenuState,
+  FloatingToolbarState,
+  AssetFolder,
+  AssetType,
+  AssetItem,
+  AssetLibraryState,
+} from '../components/canvas/types'
 
-export type CanvasNodeKind =
-  | "text"
-  | "prompt"
-  | "image"
-  | "storyboard"
-  | "reference"
-  | "group"
-  | "script"
-  | "image-generation"
-  | "video-generation"
-  | "audio"
-  | "subtitle"
-  | "composition"
-  | "video-result"
-  | "previs"
-  | "uploaded-image"
-  | "uploaded-video"
-  | "uploaded-audio"
-  | "uploaded-file"
-  | "image-result"
-  | "text-result"
-export type ChatMode = "ASK" | "EXECUTE" | "STORYBOARD" | "ORGANIZE" | "IMAGE_PROMPT"
-export type RightPanelMode = "chat" | "storyboard" | "previs" | "models" | "queue" | "asset" | "profile"
+// Re-export types for backward compatibility
+export type { CanvasNodeKind, ChatMode, RightPanelMode, ContextMenuState, FloatingToolbarState, AssetFolder, AssetType, AssetItem, AssetLibraryState }
 
-export type ContextMenuState =
-  | null
-  | {
-      type: "canvas"
-      screenX: number
-      screenY: number
-      canvasX: number
-      canvasY: number
-    }
-  | {
-      type: "node"
-      nodeId: string
-      nodeType: string
-      screenX: number
-      screenY: number
-    }
-
-export type FloatingToolbarState =
-  | null
-  | {
-      type: "image-hover"
-      nodeId: string
-      position: { x: number; y: number; above: boolean }
-    }
-  | {
-      type: "text-format"
-      nodeId: string
-      position: { x: number; y: number; above: boolean }
-    }
-
-export type AssetFolder = "Character" | "Scene" | "Item" | "Style" | "Sound Effect" | "Others"
-export type AssetType = "image" | "video" | "audio" | "text" | "prompt" | "character" | "scene" | "style" | "other"
-
-export type AssetItem = {
-  id: string
-  type: AssetType
-  name: string
-  src?: string
-  thumbnail?: string
-  folder: AssetFolder
-  favorite?: boolean
-  tags?: string[]
-  createdAt: number
-  metadata?: Record<string, unknown>
-}
-
-export type AssetLibraryState = {
-  isOpen: boolean
-  scope: "personal" | "team"
-  query: string
-  selectedFolder?: AssetFolder
-  assets: AssetItem[]
-}
-
-// Default viewport settings - FIX the 188% zoom issue
+// Default viewport settings
 export const DEFAULT_VIEWPORT: Viewport = {
   x: 0,
   y: 0,
-  zoom: 0.85, // Default to 85% instead of 188%
+  zoom: 0.85,
 }
 
 export const VIEWPORT_CONSTRAINTS = {
@@ -102,26 +38,9 @@ interface CanvasStore {
   fitViewOnce: boolean
   setFitViewOnce: (value: boolean) => void
 
-  // Nodes & Edges
-  nodes: Node[]
-  edges: Edge[]
-  setNodes: (nodes: Node[] | ((nodes: Node[]) => Node[])) => void
-  setEdges: (edges: Edge[] | ((edges: Edge[]) => Edge[])) => void
-  onNodesChange: (changes: any) => void
-  onEdgesChange: (changes: any) => void
-  onConnect: (connection: Connection) => void
-
   // Selection
   selectedNodeId: string | null
   setSelectedNodeId: (id: string | null) => void
-
-  // Right panel
-  rightPanelMode: RightPanelMode
-  setRightPanelMode: (mode: RightPanelMode) => void
-
-  // Chat
-  chatMode: ChatMode
-  setChatMode: (mode: ChatMode) => void
 
   // Context Menu
   contextMenu: ContextMenuState
@@ -155,78 +74,30 @@ interface CanvasStore {
   cropImageNodeId: string | null
   setCropImageNodeId: (id: string | null) => void
 
-  // Empty state hint (auto-dismiss)
+  // Empty state hint
   showCanvasHint: boolean
   dismissCanvasHint: () => void
+
+  // Canvas persistence
+  isCanvasRestored: boolean
+  setIsCanvasRestored: (value: boolean) => void
+  clearPersistedCanvas: () => void
+
+  // AI auto-run safety
+  allowAIAutoRun: boolean
+  setAllowAIAutoRun: (value: boolean) => void
 }
 
-export const useCanvasStore = create<CanvasStore>((set, get) => ({
+export const useCanvasStore = create<CanvasStore>((set) => ({
   // Viewport
   viewport: DEFAULT_VIEWPORT,
   setViewport: (viewport) => set({ viewport }),
   fitViewOnce: true,
   setFitViewOnce: (value) => set({ fitViewOnce: value }),
 
-  // Nodes & Edges
-  nodes: [],
-  edges: [],
-  setNodes: (nodes) => set({ nodes: typeof nodes === 'function' ? nodes(get().nodes) : nodes }),
-  setEdges: (edges) => set({ edges: typeof edges === 'function' ? edges(get().edges) : edges }),
-  onNodesChange: (changes) => {
-    set((state) => ({
-      nodes: state.nodes.map((node) => {
-        const change = changes.find((c: any) => c.id === node.id)
-        if (!change) return node
-        if (change.type === 'position' && change.position) {
-          return { ...node, position: change.position }
-        }
-        if (change.type === 'dimensions' && change.dimensions) {
-          return { ...node, width: change.dimensions.width, height: change.dimensions.height }
-        }
-        if (change.type === 'remove') {
-          return null as any
-        }
-        return node
-      }).filter(Boolean),
-    }))
-  },
-  onEdgesChange: (changes) => {
-    set((state) => ({
-      edges: state.edges.map((edge) => {
-        const change = changes.find((c: any) => c.id === edge.id)
-        if (!change) return edge
-        if (change.type === 'remove') {
-          return null as any
-        }
-        return edge
-      }).filter(Boolean),
-    }))
-  },
-  onConnect: (connection) => {
-    set((state) => ({
-      edges: addEdge(
-        {
-          ...connection,
-          type: 'creative',
-          animated: false,
-          style: { stroke: 'rgba(148, 163, 184, 0.45)', strokeWidth: 2 },
-        },
-        state.edges
-      ),
-    }))
-  },
-
   // Selection
   selectedNodeId: null,
   setSelectedNodeId: (id) => set({ selectedNodeId: id }),
-
-  // Right panel
-  rightPanelMode: 'chat',
-  setRightPanelMode: (mode) => set({ rightPanelMode: mode }),
-
-  // Chat
-  chatMode: 'ASK',
-  setChatMode: (mode) => set({ chatMode: mode }),
 
   // Context Menu
   contextMenu: null,
@@ -296,4 +167,35 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   // Empty state hint
   showCanvasHint: true,
   dismissCanvasHint: () => set({ showCanvasHint: false }),
+
+  // Canvas persistence
+  isCanvasRestored: false,
+  setIsCanvasRestored: (value) => set({ isCanvasRestored: value }),
+  clearPersistedCanvas: () => {
+    try {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("startrails_canvas")
+      }
+    } catch {
+      // ignore
+    }
+  },
+
+  // AI auto-run safety (default: require manual confirmation)
+  allowAIAutoRun: (() => {
+    try {
+      if (typeof window !== "undefined") {
+        return localStorage.getItem("startrails_ai_auto_run") === "true"
+      }
+    } catch {}
+    return false
+  })(),
+  setAllowAIAutoRun: (value) => {
+    try {
+      if (typeof window !== "undefined") {
+        localStorage.setItem("startrails_ai_auto_run", String(value))
+      }
+    } catch {}
+    set({ allowAIAutoRun: value })
+  },
 }))

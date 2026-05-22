@@ -26,7 +26,96 @@ export type CanvasNodeKind =
   | "uploaded-file"
   | "image-result"
   | "text-result"
+  | "ai-generated-image"
+  | "video-sample-frames"
+  | "video-analyze"
 
+// ============================================================================
+// Node Run Status (P1-3 六态模型)
+// ============================================================================
+export type NodeRunStatus =
+  | "idle"
+  | "pending"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+
+export type NodeRunSource =
+  | "manual"
+  | "ai"
+  | "workflow"
+  | "retry"
+  | "system"
+
+export interface NodeRunMeta {
+  /**
+   * 节点当前运行状态（六态模型）
+   */
+  runStatus: NodeRunStatus
+
+  /**
+   * 0 - 100，主要给 ComfyUI / 视频生成 / 长任务用
+   */
+  progress?: number
+
+  /**
+   * 给用户看的状态说明
+   * 例如：排队中、提交任务中、轮询结果中、下载输出中
+   */
+  message?: string
+
+  /**
+   * 失败原因
+   */
+  error?: string
+
+  /**
+   * 最近一次开始运行时间 (ISO 8601)
+   */
+  lastRunAt?: string
+
+  /**
+   * 最近一次结束时间，成功/失败/取消都可以记录 (ISO 8601)
+   */
+  lastFinishedAt?: string
+
+  /**
+   * 当前运行 ID，可用于 usage metering / history / task 关联
+   */
+  runId?: string
+
+  /**
+   * 当前运行对应的 history id
+   * P1-5 节点生成历史会用到
+   */
+  currentHistoryId?: string
+
+  /**
+   * 外部任务 ID
+   * 例如：ComfyUI prompt_id、ModelScope task_id、APIMart task_id
+   */
+  externalTaskId?: string
+
+  /**
+   * 外部原始状态
+   * 例如 SUCCEED / FAILED / queued / running
+   */
+  rawStatus?: string
+
+  /**
+   * 触发来源
+   */
+  source?: NodeRunSource
+
+  /**
+   * pending 状态的原因
+   * 例如：AI 请求自动运行，需要用户确认
+   */
+  pendingReason?: string
+}
+
+// @deprecated 旧五态模型，保留仅用于兼容读取，新代码请使用 NodeRunStatus
 export type WorkflowNodeStatus = "draft" | "ready" | "running" | "done" | "error"
 
 export type CanvasNodeData = {
@@ -34,7 +123,16 @@ export type CanvasNodeData = {
   title?: string
   nodeKind?: CanvasNodeKind
   workflowRole?: string
+
+  // ---- 新：统一运行状态 ----
+  runMeta?: NodeRunMeta
+
+  // ---- 旧：兼容字段，禁止新写入 ----
   status?: WorkflowNodeStatus
+  errorMessage?: string
+  pendingExecution?: boolean  // AI suggested run_node, waiting for user confirmation
+
+  // ---- 业务字段 ----
   summary?: string
   prompt?: string
   content?: string
@@ -45,7 +143,6 @@ export type CanvasNodeData = {
   duration?: string
   model?: string
   resultUrl?: string
-  errorMessage?: string
   imageUrl?: string
   assetUrl?: string
   fileName?: string
@@ -66,6 +163,13 @@ export type CanvasNodeData = {
   sourcePromptId?: string
   sourceGenerationJobId?: string
   generationOutput?: any
+  // --- Video metadata (V1-3，全部可选) ---
+  videoDurationMs?: number
+  videoWidth?: number
+  videoHeight?: number
+  videoFps?: number
+  videoFrameCount?: number
+  thumbnailUrl?: string
 }
 
 // ============================================================================
@@ -177,9 +281,12 @@ export type ChatMessage = {
 }
 
 // ============================================================================
-// Action Types
+// Canvas Operation Types (internal UI operations)
+// NOTE: These are internal canvas UI operations (context menus, toolbar, etc.),
+// NOT the same as AI-generated chat CanvasAction (see hooks/useChatSSE.ts).
+// The AI chat system uses a different structure: { action, nodeType, nodeId, ... }
 // ============================================================================
-export type CanvasActionType =
+export type CanvasOperationType =
   | "create_node"
   | "update_node"
   | "delete_node"
@@ -193,6 +300,8 @@ export type CanvasActionType =
   | "ask_clarification"
   | "no_action"
   | "select_node"
+  | "focus_node"
+  | "run_node"
   | "apply_asset_workflow"
   | "generate_image"
   | "open_panel"
@@ -202,10 +311,16 @@ export type CanvasActionType =
   | "save_canvas"
   | "create_workflow_template"
 
-export type CanvasAction = {
-  type: CanvasActionType
+export type CanvasOperation = {
+  type: CanvasOperationType
   params?: Record<string, any>
 }
+
+// Keep old names as aliases for backward compatibility
+/** @deprecated Use CanvasOperationType instead. The AI chat system uses a separate CanvasAction type in hooks/useChatSSE.ts */
+export type CanvasActionType = CanvasOperationType
+/** @deprecated Use CanvasOperation instead. The AI chat system uses a separate CanvasAction type in hooks/useChatSSE.ts */
+export type CanvasAction = CanvasOperation
 
 // ============================================================================
 // Storyboard Types (from @creative-canvas/canvas)
@@ -281,143 +396,164 @@ export const nodeToneStyles: Record<CanvasNodeKind, {
   background: string
 }> = {
   text: {
-    eyebrow: "text-violet-200",
-    body: "text-violet-100/75",
-    meta: "text-violet-200/60",
-    border: "1px solid rgba(196, 181, 253, 0.35)",
-    background: "rgba(124, 58, 237, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   prompt: {
-    eyebrow: "text-purple-200",
-    body: "text-purple-100/75",
-    meta: "text-purple-200/60",
-    border: "1px solid rgba(216, 180, 254, 0.35)",
-    background: "rgba(168, 85, 247, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   image: {
-    eyebrow: "text-fuchsia-200",
-    body: "text-fuchsia-100/75",
-    meta: "text-fuchsia-200/60",
-    border: "1px solid rgba(232, 121, 249, 0.35)",
-    background: "rgba(192, 38, 211, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   storyboard: {
-    eyebrow: "text-violet-200",
-    body: "text-violet-100/75",
-    meta: "text-violet-200/60",
-    border: "1px solid rgba(150, 149, 236, 0.4)",
-    background: "rgba(109, 40, 217, 0.18)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   reference: {
-    eyebrow: "text-indigo-200",
-    body: "text-indigo-100/75",
-    meta: "text-indigo-200/60",
-    border: "1px solid rgba(129, 140, 248, 0.35)",
-    background: "rgba(79, 70, 229, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   group: {
-    eyebrow: "text-violet-200",
-    body: "text-violet-100/75",
-    meta: "text-violet-200/60",
-    border: "1px dashed rgba(216, 180, 254, 0.45)",
-    background: "rgba(30, 27, 75, 0.42)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px dashed rgba(148, 163, 184, 0.25)",
+    background: "rgba(100, 116, 139, 0.06)",
   },
   previs: {
-    eyebrow: "text-indigo-200",
-    body: "text-indigo-100/75",
-    meta: "text-indigo-200/60",
-    border: "1px solid rgba(129, 140, 248, 0.35)",
-    background: "rgba(67, 56, 202, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   "uploaded-image": {
-    eyebrow: "text-violet-200",
-    body: "text-violet-100/75",
-    meta: "text-violet-200/60",
-    border: "1px solid rgba(150, 149, 236, 0.35)",
-    background: "rgba(109, 40, 217, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   "uploaded-video": {
-    eyebrow: "text-indigo-200",
-    body: "text-indigo-100/75",
-    meta: "text-indigo-200/60",
-    border: "1px solid rgba(129, 140, 248, 0.35)",
-    background: "rgba(79, 70, 229, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   "uploaded-audio": {
-    eyebrow: "text-purple-200",
-    body: "text-purple-100/75",
-    meta: "text-purple-200/60",
-    border: "1px solid rgba(216, 180, 254, 0.35)",
-    background: "rgba(126, 34, 206, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   "uploaded-file": {
-    eyebrow: "text-indigo-200",
-    body: "text-indigo-100/75",
-    meta: "text-indigo-200/60",
-    border: "1px solid rgba(129, 140, 248, 0.35)",
-    background: "rgba(67, 56, 202, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   "image-result": {
-    eyebrow: "text-fuchsia-200",
-    body: "text-fuchsia-100/75",
-    meta: "text-fuchsia-200/60",
-    border: "1px solid rgba(232, 121, 249, 0.35)",
-    background: "rgba(192, 38, 211, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   "text-result": {
-    eyebrow: "text-purple-200",
-    body: "text-purple-100/75",
-    meta: "text-purple-200/60",
-    border: "1px solid rgba(216, 180, 254, 0.35)",
-    background: "rgba(126, 34, 206, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   script: {
-    eyebrow: "text-cyan-200",
-    body: "text-cyan-100/75",
-    meta: "text-cyan-200/60",
-    border: "1px solid rgba(103, 232, 249, 0.35)",
-    background: "rgba(8, 145, 178, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   "image-generation": {
-    eyebrow: "text-pink-200",
-    body: "text-pink-100/75",
-    meta: "text-pink-200/60",
-    border: "1px solid rgba(244, 114, 182, 0.35)",
-    background: "rgba(190, 24, 93, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   "video-generation": {
-    eyebrow: "text-sky-200",
-    body: "text-sky-100/75",
-    meta: "text-sky-200/60",
-    border: "1px solid rgba(56, 189, 248, 0.35)",
-    background: "rgba(2, 132, 199, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   audio: {
-    eyebrow: "text-emerald-200",
-    body: "text-emerald-100/75",
-    meta: "text-emerald-200/60",
-    border: "1px solid rgba(52, 211, 153, 0.35)",
-    background: "rgba(5, 150, 105, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   subtitle: {
-    eyebrow: "text-amber-200",
-    body: "text-amber-100/75",
-    meta: "text-amber-200/60",
-    border: "1px solid rgba(251, 191, 36, 0.35)",
-    background: "rgba(217, 119, 6, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   composition: {
-    eyebrow: "text-violet-200",
-    body: "text-violet-100/75",
-    meta: "text-violet-200/60",
-    border: "1px solid rgba(167, 139, 250, 0.4)",
-    background: "rgba(91, 33, 182, 0.2)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   "video-result": {
-    eyebrow: "text-blue-200",
-    body: "text-blue-100/75",
-    meta: "text-blue-200/60",
-    border: "1px solid rgba(96, 165, 250, 0.4)",
-    background: "rgba(37, 99, 235, 0.18)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
+  },
+  "ai-generated-image": {
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
+  },
+  "video-sample-frames": {
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
+  },
+  "video-analyze": {
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
 }

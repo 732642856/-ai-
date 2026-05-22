@@ -13,12 +13,17 @@ import {
   ThumbsUp,
   ThumbsDown,
   ChevronDown,
+  ImageIcon,
+  PlusCircle,
+  Wand2,
 } from "lucide-react"
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 import { useChatAttachments, type ChatAttachment } from "../../hooks/useChatAttachments"
 import { ChatInput } from "./ChatInput"
 import type { AiModel } from "./ChatInput"
-import { useChatSSE } from "../../hooks/useChatSSE"
+import { useChatSSE, parseCanvasActions, stripCanvasActions } from "../../hooks/useChatSSE"
+import type { ChatCanvasAction, ApplyActionsReport, ApplyActionResult } from "../../features/canvas/actions/chatActions"
+import { getActionLabel, getStatusIcon, formatActionsSummary } from "../../features/canvas/actions/chatActions"
 import { generateId } from "../../utils/generateId"
 import type { Node } from "@xyflow/react"
 
@@ -89,12 +94,23 @@ function getMentionedNodes(input: string, nodes: Node[]): CanvasNodeContextSnaps
     .map(toCanvasNodeContext)
 }
 
+interface GeneratedImage {
+  imageUrl: string
+  prompt: string
+  model: string
+  revisedPrompt?: string
+}
+
 interface Message {
   id: string
   role: "user" | "assistant"
   content: string
   attachments?: ChatAttachment[]
   thinkingTime?: number // 思考时间（秒）
+  generatedImage?: GeneratedImage // AI 生成的图片
+  actions?: ChatCanvasAction[] // AI 返回的画布操作
+  actionsApplied?: boolean // 是否已应用到画布
+  actionsReport?: ApplyActionsReport // 执行报告
 }
 
 interface ChatPanelProps {
@@ -104,6 +120,7 @@ interface ChatPanelProps {
   selectedNode?: Node | null
   canvasNodes?: Node[] // 画布上所有节点，用于AI感知
   onAddImageToCanvas: (attachment: ChatAttachment) => void
+  onApplyChatActions?: (actions: ChatCanvasAction[]) => ApplyActionsReport // 返回执行报告
   showHistoryFromOutside?: boolean
   onHistoryPanelClosed?: () => void
 }
@@ -115,13 +132,14 @@ export function ChatPanel({
   selectedNode,
   canvasNodes = [],
   onAddImageToCanvas,
+  onApplyChatActions,
   showHistoryFromOutside,
   onHistoryPanelClosed,
 }: ChatPanelProps) {
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<Message[]>([])
   const [conversationTitle, setConversationTitle] = useState("Greeting")
-  const [selectedModel, setSelectedModel] = useState<string>("gpt-4o")
+  const [selectedModel, setSelectedModel] = useState<string>("gpt-5.5")
   const [showHistory, setShowHistory] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const thinkingStartRef = useRef<number | null>(null)
@@ -130,22 +148,18 @@ export function ChatPanel({
   const nodeSummary = useMemo(() => {
     if (!canvasNodes || canvasNodes.length === 0) return null
     const imageNodes = canvasNodes.filter((n) => n.type === "image")
-    const textNodes = canvasNodes.filter((n) => n.type === "text")
-    const promptNodes = canvasNodes.filter((n) => n.type === "prompt")
+    const contentNodes = canvasNodes.filter((n) => n.type === "content")
     const parts: string[] = []
     imageNodes.forEach((n) => {
       const title = n.data?.title || n.data?.fileName || "图片"
       parts.push(`[图片] ${title}`)
     })
-    textNodes.forEach((n) => {
+    contentNodes.forEach((n) => {
       const data = n.data as Record<string, any> | undefined
-      const content = data?.text || ""
+      const nodeKind = data?.nodeKind || "text"
+      const content = data?.content || data?.prompt || ""
       const preview = content.length > 30 ? content.slice(0, 30) + "..." : content
-      parts.push(`[文本] ${preview || "文本内容"}`)
-    })
-    promptNodes.forEach((n) => {
-      const data = n.data as Record<string, any> | undefined
-      parts.push(`[提示词] ${data?.prompt || ""}`)
+      parts.push(`[${nodeKind === "prompt" ? "提示词" : "文本"}] ${preview || "内容"}`)
     })
     return parts
   }, [canvasNodes])
@@ -183,22 +197,65 @@ export function ChatPanel({
         return prev
       })
     },
-    onComplete: () => {
+    onImageGenerated: (data) => {
+      // Add the generated image to the latest assistant message
+      setMessages((prev) => {
+        const lastIdx = prev.length - 1
+        if (lastIdx >= 0 && prev[lastIdx].role === "assistant") {
+          const updated = [...prev]
+          updated[lastIdx] = {
+            ...updated[lastIdx],
+            generatedImage: {
+              imageUrl: data.imageUrl,
+              prompt: data.prompt,
+              model: data.model,
+              revisedPrompt: data.revisedPrompt,
+            },
+          }
+          return updated
+        }
+        return prev
+      })
+    },
+    onComplete: (fullContent) => {
       if (thinkingStartRef.current) {
         const elapsed = Math.round((Date.now() - thinkingStartRef.current) / 1000)
         setMessages((prev) => {
           const lastIdx = prev.length - 1
           if (lastIdx >= 0 && prev[lastIdx].role === "assistant") {
+            const actions = parseCanvasActions(fullContent)
             const updated = [...prev]
             updated[lastIdx] = {
               ...updated[lastIdx],
               thinkingTime: elapsed,
+              // Store parsed actions and strip the JSON block from visible content
+              ...(actions && actions.length > 0
+                ? { actions, content: stripCanvasActions(updated[lastIdx].content) }
+                : {}),
             }
             return updated
           }
           return prev
         })
         thinkingStartRef.current = null
+      } else {
+        // no thinking time tracked, still parse actions
+        const actions = parseCanvasActions(fullContent)
+        if (actions && actions.length > 0) {
+          setMessages((prev) => {
+            const lastIdx = prev.length - 1
+            if (lastIdx >= 0 && prev[lastIdx].role === "assistant") {
+              const updated = [...prev]
+              updated[lastIdx] = {
+                ...updated[lastIdx],
+                actions,
+                content: stripCanvasActions(updated[lastIdx].content),
+              }
+              return updated
+            }
+            return prev
+          })
+        }
       }
       if (DEBUG_AI) {
         console.log("[DEBUG_AI] Response complete")
@@ -227,7 +284,7 @@ export function ChatPanel({
   }, [messages, isStreaming, scrollToBottom])
 
   // 发送消息
-  const handleSend = useCallback(async (model: string, mode?: string) => {
+  const handleSend = useCallback(async (model: string) => {
     if (!input.trim() && attachmentsState.attachments.length === 0) return
 
     const userMessage: Message = {
@@ -258,7 +315,6 @@ export function ChatPanel({
         const mentionedNodes = getMentionedNodes(userMessage.content, canvasNodes)
 
         await sendMessage(userMessage.content, {
-          mode,
           selectedNodeId,
           selectedNode: selectedNode ? toCanvasNodeContext(selectedNode) : undefined,
           nodes: canvasContext,
@@ -305,6 +361,23 @@ export function ChatPanel({
     navigator.clipboard.writeText(content)
   }, [])
 
+  // Hydration fix: only render Portal after client mount
+  const [isClient, setIsClient] = useState(false)
+  useEffect(() => { setIsClient(true) }, [])
+
+  // 应用 AI actions 到画布，接收执行报告
+  const handleApplyActions = useCallback(
+    (msgId: string, actions: ChatCanvasAction[]) => {
+      if (!onApplyChatActions) return
+      const report = onApplyChatActions(actions)
+      // 标记为已应用，并保存报告
+      setMessages((prev) =>
+        prev.map((m) => (m.id === msgId ? { ...m, actionsApplied: true, actionsReport: report } : m))
+      )
+    },
+    [onApplyChatActions]
+  )
+
   // 将附件添加到画布
   const handleAddToCanvas = useCallback(
     (attachment: ChatAttachment) => {
@@ -315,6 +388,7 @@ export function ChatPanel({
   )
 
   if (!isOpen) return null
+  if (!isClient) return null // hydration fix: don't render Portal during SSR
   if (typeof document === "undefined") return null
 
   return createPortal(
@@ -554,33 +628,136 @@ export function ChatPanel({
                         </span>
                       </div>
                     )}
+
+                    {/* Generated Image Display */}
+                    {msg.generatedImage && (
+                      <div className="mt-3 flex flex-col gap-2">
+                        <div
+                          className="relative overflow-hidden rounded-xl border"
+                          style={{ borderColor: DESIGN_TOKENS.border }}
+                        >
+                          <img
+                            src={msg.generatedImage.imageUrl}
+                            alt={msg.generatedImage.prompt}
+                            className="w-full object-contain"
+                            style={{ maxHeight: "280px" }}
+                          />
+                        </div>
+                        <button
+                          onClick={() => {
+                            const img = msg.generatedImage!
+                            onAddImageToCanvas({
+                              id: generateId(),
+                              type: "image",
+                              name: `AI生成-${img.model}`,
+                              src: img.imageUrl,
+                              size: 0,
+                              mimeType: "image/png",
+                              width: 1024,
+                              height: 1024,
+                            })
+                          }}
+                          className="flex items-center gap-2 self-start rounded-lg px-3 py-1.5 text-xs transition-colors"
+                          style={{
+                            backgroundColor: "rgba(100,116,139,0.15)",
+                            color: DESIGN_TOKENS.accent,
+                            border: `1px solid ${DESIGN_TOKENS.borderAccent}`,
+                          }}
+                        >
+                          <PlusCircle size={14} strokeWidth={1.5} />
+                          添加到画布
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {/* 消息操作按钮 */}
                   {msg.role === "assistant" && msg.content && (
-                    <div className="flex items-center gap-1 px-1">
-                      <button
-                        onClick={() => handleCopyMessage(msg.content)}
-                        className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-white/5"
-                        style={{ color: DESIGN_TOKENS.textMuted }}
-                        title="复制"
-                      >
-                        <Copy size={12} strokeWidth={1.5} />
-                      </button>
-                      <button
-                        className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-white/5"
-                        style={{ color: DESIGN_TOKENS.textMuted }}
-                        title="赞"
-                      >
-                        <ThumbsUp size={12} strokeWidth={1.5} />
-                      </button>
-                      <button
-                        className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-white/5"
-                        style={{ color: DESIGN_TOKENS.textMuted }}
-                        title="踩"
-                      >
-                        <ThumbsDown size={12} strokeWidth={1.5} />
-                      </button>
+                    <div className="flex flex-col gap-1.5 px-1">
+                      {/* 应用到画布按钮 - 仅当 AI 返回了 actions 时显示 */}
+                      {msg.actions && msg.actions.length > 0 && onApplyChatActions && (
+                        <div className="flex flex-col gap-1">
+                          <button
+                            onClick={() => handleApplyActions(msg.id, msg.actions!)}
+                            disabled={msg.actionsApplied}
+                            className="flex items-center gap-2 self-start rounded-lg px-3 py-1.5 text-xs font-medium transition-all"
+                            style={{
+                              backgroundColor: msg.actionsApplied
+                                ? "rgba(100,116,139,0.1)"
+                                : DESIGN_TOKENS.accentSoft,
+                              color: msg.actionsApplied
+                                ? DESIGN_TOKENS.textMuted
+                                : DESIGN_TOKENS.accent,
+                              border: `1px solid ${msg.actionsApplied ? DESIGN_TOKENS.border : DESIGN_TOKENS.borderAccent}`,
+                              cursor: msg.actionsApplied ? "default" : "pointer",
+                            }}
+                            title={
+                              msg.actionsApplied
+                                ? "已应用到画布"
+                                : `应用 ${msg.actions.length} 个操作到画布`
+                            }
+                          >
+                            <Wand2 size={13} strokeWidth={1.7} />
+                            {msg.actionsApplied
+                              ? `✓ 已应用（${msg.actions.length} 个操作）`
+                              : `应用到画布（${msg.actions.length} 个操作）`}
+                          </button>
+
+                          {/* 执行报告摘要 */}
+                          {msg.actionsApplied && msg.actionsReport && (
+                            <div
+                              className="rounded-lg border px-3 py-2 text-[11px]"
+                              style={{
+                                borderColor: DESIGN_TOKENS.border,
+                                backgroundColor: "rgba(255,255,255,0.03)",
+                              }}
+                            >
+                              <p className="font-medium" style={{ color: DESIGN_TOKENS.textSecondary }}>
+                                {formatActionsSummary(msg.actionsReport)}
+                              </p>
+                              {msg.actionsReport.results.filter(r => r.status !== "applied").length > 0 && (
+                                <div className="mt-1.5 flex flex-col gap-0.5">
+                                  {msg.actionsReport.results
+                                    .filter(r => r.status !== "applied")
+                                    .map((r) => (
+                                      <div key={r.index} className="flex items-center gap-1.5" style={{ color: DESIGN_TOKENS.textMuted }}>
+                                        <span>{getStatusIcon(r.status)}</span>
+                                        <span>{getActionLabel(r.action)}</span>
+                                        {r.reason && <span>— {r.reason}</span>}
+                                      </div>
+                                    ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* 操作工具栏 */}
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handleCopyMessage(msg.content)}
+                          className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-white/5"
+                          style={{ color: DESIGN_TOKENS.textMuted }}
+                          title="复制"
+                        >
+                          <Copy size={12} strokeWidth={1.5} />
+                        </button>
+                        <button
+                          className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-white/5"
+                          style={{ color: DESIGN_TOKENS.textMuted }}
+                          title="赞"
+                        >
+                          <ThumbsUp size={12} strokeWidth={1.5} />
+                        </button>
+                        <button
+                          className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-white/5"
+                          style={{ color: DESIGN_TOKENS.textMuted }}
+                          title="踩"
+                        >
+                          <ThumbsDown size={12} strokeWidth={1.5} />
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>

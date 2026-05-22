@@ -4,24 +4,33 @@
 // Supports: text models (OpenAI-compatible), image models, video models
 // ============================================================================
 import { NextRequest, NextResponse } from "next/server"
+import { mergeProviderConfig } from "@/lib/ai/provider-config"
+import type { AiProviderOverrides } from "@/lib/ai/provider-config"
 
 // ============================================================================
-// CONFIGURATION - read from environment
+// CONFIGURATION - read from environment (server-side only)
 // ============================================================================
 const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK === "true"
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "https://api.openai.com/v1"
-const API_KEY = process.env.OPENAI_API_KEY || ""
+// P2-5B: Lazy config with optional overrides
+function getConfig(overrides?: AiProviderOverrides) {
+  return mergeProviderConfig(overrides)
+}
 
 // ============================================================================
 // MODEL ENDPOINT MAPPING
 // Different model types use different API endpoints
 // ============================================================================
-const getEndpointForModel = (model: string): { endpoint: string; bodyTransformer: (body: any) => any } => {
+// 判断是否为图像生成模型
+const isImageModel = (model: string): boolean => {
+  return ["banana-pro", "bananapro", "mj-v7", "gpt-image-2"].includes(model)
+}
+
+const getEndpointForModel = (model: string, baseUrl: string): { endpoint: string; bodyTransformer: (body: any) => any } => {
   // 文本对话模型 → /v1/chat/completions
-  if (["gpt-4o", "claude-3.5-sonnet", "gemini-pro", "glm-4", "gpt-5.5", "gpt-4o-audio-preview"].includes(model)) {
+  if (["gpt-4o", "claude-3.5-sonnet", "gemini-pro", "glm-4", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-4o-audio-preview"].includes(model)) {
     return {
-      endpoint: `${API_BASE_URL}/chat/completions`,
+      endpoint: `${baseUrl}/chat/completions`,
       bodyTransformer: (body) => ({
         model: model,
         messages: body.messages,
@@ -31,11 +40,11 @@ const getEndpointForModel = (model: string): { endpoint: string; bodyTransformer
   }
 
   // 图像生成模型 → /v1/images/generations
-  if (["banana-pro", "mj-v7", "gpt-image-2"].includes(model)) {
+  if (isImageModel(model)) {
     return {
-      endpoint: `${API_BASE_URL}/images/generations`,
+      endpoint: `${baseUrl}/images/generations`,
       bodyTransformer: (body) => ({
-        model: model === "gpt-image-2" ? "dall-e-3" : model,
+        model: model,
         prompt: body.messages?.[body.messages.length - 1]?.content || "",
         n: 1,
         size: "1024x1024",
@@ -46,7 +55,7 @@ const getEndpointForModel = (model: string): { endpoint: string; bodyTransformer
   // 视频生成模型 → 各自独立 API（需用户自行配置）
   if (["seedance-2.0", "kling-o3", "wan-2.6", "vidu"].includes(model)) {
     return {
-      endpoint: `${API_BASE_URL}/chat/completions`, // fallback to chat
+      endpoint: `${baseUrl}/chat/completions`, // fallback to chat
       bodyTransformer: (body) => ({
         model: model,
         messages: body.messages,
@@ -57,7 +66,7 @@ const getEndpointForModel = (model: string): { endpoint: string; bodyTransformer
 
   // 默认 → chat/completions
   return {
-    endpoint: `${API_BASE_URL}/chat/completions`,
+    endpoint: `${baseUrl}/chat/completions`,
     bodyTransformer: (body) => ({
       model: model,
       messages: body.messages,
@@ -133,6 +142,107 @@ function summarizeNode(node: CanvasNodeContext): string {
   return pieces.filter(Boolean).join(" | ")
 }
 
+// ============================================================================
+// CANVAS ACTION TYPES — import from canonical source (client path maps to same)
+// ============================================================================
+// NOTE: Route files can't import from client-side hooks directly, so we
+// keep an inlined subset. The canonical source is:
+//   apps/web/src/app/canvas/features/canvas/actions/chatActions.ts
+// Keep these in sync with that file.
+// ============================================================================
+export type CanvasActionType =
+  | "create_node"
+  | "update_node"
+  | "connect_nodes"
+  | "select_node"
+  | "focus_node"
+  | "run_node"
+  | "delete_node"
+
+export interface CanvasAction {
+  action: CanvasActionType
+  // create_node
+  nodeType?: "content" | "image" | "workflow"
+  nodeKind?: string
+  title?: string
+  content?: string
+  prompt?: string
+  position?: { x: number; y: number }
+  data?: Record<string, unknown>
+  // update_node
+  nodeId?: string
+  updates?: Record<string, unknown>
+  // connect_nodes
+  sourceId?: string
+  targetId?: string
+  // select_node / focus_node / run_node / delete_node
+  id?: string
+  description?: string
+}
+
+const CANVAS_ACTION_SCHEMA = `
+你除了可以用自然语言回答，还可以在回答中附带画布操作指令（JSON）。
+当用户要求创建节点、修改节点、连接节点、选中节点等操作时，在回答末尾附加一个 JSON 代码块：
+
+\`\`\`canvas-actions
+{
+  "actions": [
+    {
+      "action": "create_node",
+      "nodeType": "content" | "image" | "workflow",
+      "nodeKind": "text" | "prompt" | "script" | "storyboard" | "image-generation" | "video-generation" | "audio" | "subtitle" | "composition" | "video-result",
+      "title": "节点标题",
+      "content": "文本内容（content节点）",
+      "prompt": "提示词内容（prompt/workflow节点）",
+      "position": { "x": 400, "y": 300 },
+      "description": "告诉用户做了什么"
+    },
+    {
+      "action": "update_node",
+      "nodeId": "节点ID（必填，来自画布上下文）",
+      "updates": { "title": "新标题", "content": "新内容" },
+      "description": "告诉用户做了什么"
+    },
+    {
+      "action": "connect_nodes",
+      "sourceId": "源节点ID",
+      "targetId": "目标节点ID",
+      "description": "告诉用户做了什么"
+    },
+    {
+      "action": "select_node",
+      "nodeId": "节点ID",
+      "description": "告诉用户做了什么"
+    },
+    {
+      "action": "focus_node",
+      "nodeId": "节点ID",
+      "description": "告诉用户做了什么"
+    },
+    {
+      "action": "run_node",
+      "nodeId": "节点ID",
+      "description": "告诉用户已建议运行哪个节点"
+    },
+    {
+      "action": "delete_node",
+      "nodeId": "节点ID",
+      "description": "告诉用户删除了什么节点"
+    }
+  ]
+}
+\`\`\`
+
+注意：
+- actions 是数组，可以包含多个操作，它们会按顺序执行
+- 纯问答类回复不需要附加 actions，只在用户明确要求画布操作时才添加
+- nodeId 必须来自"画布节点摘要"中的真实 id，不能自行捏造
+- create_node 不需要 nodeId，系统会自动生成
+- position 是画布坐标（不是屏幕坐标），可省略让系统自动居中
+- run_node 建议运行节点（默认不会自动执行，需用户确认）
+- delete_node 仅当用户明确要求删除节点时使用
+`
+
 function buildSystemPrompt(context?: {
   nodes?: CanvasNodeContext[]
   selectedNode?: CanvasNodeContext
@@ -149,7 +259,9 @@ function buildSystemPrompt(context?: {
 4. 组织文生视频 / 图生视频 / 音频 / 字幕 / 合成工作流
 5. 在画布上理解并串联创作节点
 
-请用中文简洁、专业的语言回答。若用户正在讨论画布，请优先基于下方画布上下文回答，不要假装没看见节点。`
+请用中文简洁、专业的语言回答。若用户正在讨论画布，请优先基于下方画布上下文回答，不要假装没看见节点。
+
+${CANVAS_ACTION_SCHEMA}`
 
   const selectedNode = context?.selectedNode || (context?.selectedNodeId ? context.nodes?.find(n => n.id === context.selectedNodeId) : undefined)
   if (selectedNode) {
@@ -224,7 +336,7 @@ async function* streamFromRealAPI(
   apiBaseUrl: string,
   apiKey: string
 ): AsyncGenerator<string> {
-  const { endpoint, bodyTransformer } = getEndpointForModel(model)
+  const { endpoint, bodyTransformer } = getEndpointForModel(model, apiBaseUrl)
   
   const body = bodyTransformer({
     messages,
@@ -296,6 +408,11 @@ async function* streamFromRealAPI(
               yield content[i]
             }
           }
+
+          // Forward usage info (OpenAI sends this in the final chunk)
+          if (parsed.usage) {
+            yield `\n[USAGE]${JSON.stringify(parsed.usage)}[/USAGE]\n`
+          }
         } catch (e) {
           // Ignore parse errors for incomplete JSON
         }
@@ -307,10 +424,154 @@ async function* streamFromRealAPI(
 // ============================================================================
 // API ROUTE HANDLER
 // ============================================================================
+// ============================================================================
+// IMAGE GENERATION - Non-streaming handler for image models
+// ============================================================================
+async function handleImageGeneration(
+  message: string,
+  model: string,
+  context: any,
+  encoder: TextEncoder,
+  controller: ReadableStreamDefaultController,
+  config: ReturnType<typeof getConfig>,
+) {
+  // P2-5B: config passed from caller (supports overrides)
+
+  // Send "generating" status
+  controller.enqueue(
+    encoder.encode(`data: ${JSON.stringify({ content: "🎨 正在生成图片...", type: "status" })}\n\n`)
+  )
+
+  // Build the prompt from user message, optionally enhanced by AI
+  let finalPrompt = message
+
+  // If the message is in Chinese or too short, use a text model to enhance it first
+  const needsEnhancement = message.length < 20 || /[\u4e00-\u9fa5]/.test(message)
+
+  if (needsEnhancement && !USE_MOCK) {
+    try {
+      const enhanceMessages = [
+        {
+          role: "system",
+          content: "You are an expert image prompt engineer. Convert the user's request into a detailed, high-quality English image generation prompt. Output ONLY the prompt text, nothing else. Be specific about: subject, composition, lighting, style, mood, color palette, and technical quality terms (e.g. 8K, cinematic lighting, photorealistic). Keep it under 200 words."
+        },
+        { role: "user", content: message }
+      ]
+
+      const enhanceResponse = await fetch(`${config.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${config.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: config.defaultModel,
+          messages: enhanceMessages,
+          stream: false,
+        }),
+      })
+
+      if (enhanceResponse.ok) {
+        const enhanceData = await enhanceResponse.json()
+        const enhancedPrompt = enhanceData.choices?.[0]?.message?.content?.trim()
+        if (enhancedPrompt) {
+          finalPrompt = enhancedPrompt
+          // Send the enhanced prompt to the user
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ content: `\n📝 增强提示词：${finalPrompt.slice(0, 100)}...\n\n`, type: "text" })}\n\n`)
+          )
+        }
+      }
+    } catch (e) {
+      // Enhancement failed, use original prompt
+      console.warn("[ImageGen] Prompt enhancement failed, using original:", e)
+    }
+  }
+
+  // Call image generation API
+  const { endpoint, bodyTransformer } = getEndpointForModel(model, config.baseUrl)
+  const imageBody = bodyTransformer({
+    messages: [{ role: "user", content: finalPrompt }],
+    model,
+  })
+
+  if (USE_MOCK) {
+    // Mock: simulate a delay and return a placeholder
+    await new Promise(resolve => setTimeout(resolve, 2000))
+    controller.enqueue(
+      encoder.encode(`data: ${JSON.stringify({
+        type: "image_generated",
+        imageUrl: "https://placehold.co/1024x1024/1a1a2e/e0e0e0?text=AI+Generated+Image",
+        prompt: finalPrompt,
+        model,
+        revisedPrompt: "Mock generated image",
+      })}\n\n`)
+    )
+    controller.enqueue(
+      encoder.encode(`data: ${JSON.stringify({ content: "✅ 图片生成完成（Mock 模式）", type: "status" })}\n\n`)
+    )
+    return
+  }
+
+  const imageResponse = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${config.apiKey}`,
+    },
+    body: JSON.stringify(imageBody),
+  })
+
+  if (!imageResponse.ok) {
+    const errorText = await imageResponse.text()
+    throw new Error(`图像生成失败 (${imageResponse.status}): ${errorText.slice(0, 500)}`)
+  }
+
+  const imageData = await imageResponse.json()
+
+  // Extract image URL from various response formats
+  const imageUrl =
+    imageData.data?.[0]?.url ||
+    imageData.data?.[0]?.b64_json?.startsWith("data:") ? imageData.data[0].b64_json :
+    imageData.data?.[0]?.b64_json ? `data:image/png;base64,${imageData.data[0].b64_json}` :
+    imageData.output?.url ||
+    imageData.url ||
+    null
+
+  if (!imageUrl) {
+    throw new Error("图像生成 API 未返回图片 URL")
+  }
+
+  // Send the structured image event
+  controller.enqueue(
+    encoder.encode(`data: ${JSON.stringify({
+      type: "image_generated",
+      imageUrl,
+      prompt: finalPrompt,
+      model,
+      revisedPrompt: imageData.data?.[0]?.revised_prompt || finalPrompt,
+    })}\n\n`)
+  )
+
+  controller.enqueue(
+    encoder.encode(`data: ${JSON.stringify({ content: "✅ 图片生成完成！点击图片可添加到画布。", type: "status" })}\n\n`)
+  )
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { message, model = "gpt-4o", context } = body
+    const { message, model: reqModel, context, _providerOverrides } = body
+
+    // P2-5B: 支持前端传入局部覆盖
+    const overrides: AiProviderOverrides | undefined =
+      _providerOverrides && typeof _providerOverrides === "object"
+        ? (_providerOverrides as AiProviderOverrides)
+        : undefined
+
+    const config = getConfig(overrides)
+    // Use config default if frontend passes old hardcoded default
+    const model = (typeof reqModel === "string" && reqModel !== "gpt-5.5" ? reqModel : config.defaultModel)
 
     if (!message || typeof message !== "string") {
       return NextResponse.json(
@@ -325,18 +586,24 @@ export async function POST(request: NextRequest) {
     const needsCanvasContext = !isCasualMessage(message) && (hasCanvasPayload || wantsCanvasContext(message))
     
     // Build messages
-    const systemPrompt = buildSystemPrompt(needsCanvasContext ? context : undefined)
+    const systemPrompt = context?.systemOverride || buildSystemPrompt(needsCanvasContext ? context : undefined)
     const messages = [
       { role: "system", content: systemPrompt },
       { role: "user", content: message },
     ]
+
+    // Check if this is an image generation model
+    const imageMode = isImageModel(model)
 
     // Create SSE response
     const encoder = new TextEncoder()
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          if (USE_MOCK) {
+          if (imageMode) {
+            // Handle image generation separately (non-streaming API)
+            await handleImageGeneration(message, model, context, encoder, controller, config)
+          } else if (USE_MOCK) {
             // Use mock response for testing
             for await (const char of generateMockResponse(message)) {
               controller.enqueue(
@@ -344,15 +611,8 @@ export async function POST(request: NextRequest) {
               )
             }
           } else {
-            // Call the actual AI API
-            const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "https://api.openai.com/v1"
-            const apiKey = process.env.OPENAI_API_KEY || ""
-
-            if (!apiKey) {
-              throw new Error("OPENAI_API_KEY is not configured. Please set it in .env.local or settings.")
-            }
-
-            for await (const char of streamFromRealAPI(messages, model, apiBaseUrl, apiKey)) {
+            // Call the actual AI API (text models, streaming) — uses config from outer scope
+            for await (const char of streamFromRealAPI(messages, model, config.baseUrl, config.apiKey)) {
               controller.enqueue(
                 encoder.encode(`data: ${JSON.stringify({ content: char })}\n\n`)
               )

@@ -36,14 +36,14 @@ export const DESIGN_TOKENS = {
   radiusButton: "12px",
 
   // 阴影
-  shadowPanel: "0 24px 80px rgba(0, 0, 0, 0.45)",
-  shadowMenu: "0 16px 48px rgba(0, 0, 0, 0.5)",
-  shadowNode: "0 8px 32px rgba(0, 0, 0, 0.35)",
+  shadowPanel: "0 16px 48px rgba(0, 0, 0, 0.35)",
+  shadowMenu: "0 8px 32px rgba(0, 0, 0, 0.4)",
+  shadowNode: "0 4px 16px rgba(0, 0, 0, 0.25)",
 
-  // 节点颜色 - 灰色系
+  // 节点颜色 - 低饱和度灰色系
   nodeHandle: "#94a3b8",
-  nodeHandleGlow: "rgba(148, 163, 184, 0.6)",
-  nodeEdge: "rgba(148, 163, 184, 0.45)",
+  nodeHandleGlow: "rgba(148, 163, 184, 0.3)",
+  nodeEdge: "rgba(148, 163, 184, 0.25)",
 
   // Z-index 层级
   zIndex: {

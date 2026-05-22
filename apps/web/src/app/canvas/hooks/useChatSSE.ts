@@ -5,10 +5,64 @@
 
 import { useCallback, useRef, useState } from "react"
 
+// ============================================================================
+// CANVAS ACTION TYPES — import from canonical source
+// ============================================================================
+export {
+  type ChatCanvasAction,
+  type ChatCanvasActionType,
+  type CreateNodeAction,
+  type UpdateNodeAction,
+  type ConnectNodesAction,
+  type SelectNodeAction,
+  type FocusNodeAction,
+  type RunNodeAction,
+  type DeleteNodeAction,
+  type ApplyActionResult,
+  type ApplyActionStatus,
+  type ApplyActionsReport,
+  extractActionNodeId,
+} from "../features/canvas/actions/chatActions"
+
+import type { ChatCanvasAction } from "../features/canvas/actions/chatActions"
+
+// Backward-compat aliases (deprecated — prefer ChatCanvasAction)
+/** @deprecated Use ChatCanvasAction from features/canvas/actions/chatActions */
+export type CanvasActionType = ChatCanvasAction["action"]
+/** @deprecated Use ChatCanvasAction from features/canvas/actions/chatActions */
+export type CanvasAction = ChatCanvasAction
+
+/**
+ * Parse ```canvas-actions ... ``` blocks from the AI's full response.
+ * Returns the actions array, or null if not found / invalid.
+ */
+export function parseCanvasActions(content: string): ChatCanvasAction[] | null {
+  const match = content.match(/```canvas-actions\s*([\s\S]*?)```/)
+  if (!match) return null
+  try {
+    const parsed = JSON.parse(match[1].trim())
+    if (Array.isArray(parsed?.actions)) {
+      return parsed.actions as ChatCanvasAction[]
+    }
+  } catch {
+    // ignore JSON parse errors
+  }
+  return null
+}
+
+/**
+ * Strip the ```canvas-actions ... ``` block from a message, returning clean text.
+ */
+export function stripCanvasActions(content: string): string {
+  return content.replace(/```canvas-actions[\s\S]*?```/g, "").trim()
+}
+
 interface UseChatSSEOptions {
   onMessage?: (content: string) => void
   onComplete?: (fullContent: string) => void
   onError?: (error: Error) => void
+  onImageGenerated?: (data: { imageUrl: string; prompt: string; model: string; revisedPrompt?: string }) => void
+  onActions?: (actions: ChatCanvasAction[]) => void
 }
 
 interface UseChatSSEReturn {
@@ -51,7 +105,7 @@ export function useChatSSE(options: UseChatSSEOptions = {}): UseChatSSEReturn {
           },
           body: JSON.stringify({
             message,
-            model: context?.model ?? "gpt-4o",
+            model: context?.model ?? "gpt-5.5",
             context: { ...context },
           }),
           signal: abortController.signal,
@@ -95,6 +149,16 @@ export function useChatSSE(options: UseChatSSEOptions = {}): UseChatSSEReturn {
                   options.onMessage?.(parsed.content)
                 }
 
+                // Handle image generation events
+                if (parsed.type === "image_generated" && parsed.imageUrl) {
+                  options.onImageGenerated?.({
+                    imageUrl: parsed.imageUrl,
+                    prompt: parsed.prompt || "",
+                    model: parsed.model || "",
+                    revisedPrompt: parsed.revisedPrompt,
+                  })
+                }
+
                 if (parsed.error) {
                   throw new Error(parsed.error)
                 }
@@ -108,6 +172,11 @@ export function useChatSSE(options: UseChatSSEOptions = {}): UseChatSSEReturn {
 
         setIsStreaming(false)
         options.onComplete?.(fullContent)
+        // Parse and fire canvas actions if present
+        const actions = parseCanvasActions(fullContent)
+        if (actions && actions.length > 0) {
+          options.onActions?.(actions)
+        }
         return fullContent
       } catch (error: any) {
         if (error.name === "AbortError") {

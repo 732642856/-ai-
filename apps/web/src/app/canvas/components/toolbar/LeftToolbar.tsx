@@ -1,22 +1,18 @@
 /**
- * LeftToolbar - 左侧胶囊工具栏，TapNow 风格
+ * LeftToolbar - 左侧胶囊工具栏（精简版 6 按钮）
  */
 
-import { FolderOpen, Image, Sparkles, FileText, MessageCircle, History, Film, PanelsTopLeft, Video, Clapperboard } from "lucide-react"
+import { FolderOpen, Image, FileText, MessageCircle, Film } from "lucide-react"
 import { DESIGN_TOKENS } from "../../styles/designSystem"
 
 interface LeftToolbarProps {
   onOpenAssetLibrary: () => void
   onCreateNode: () => void
   onUploadImage: () => void
-  onAddPrompt: () => void
   onAddText: () => void
-  onAddWorkflowNode?: (nodeKind: "storyboard" | "image-generation" | "video-generation" | "composition") => void
   onCreateVideoWorkflow?: () => void
   onToggleChat: () => void
   isChatOpen: boolean
-  onToggleHistory: () => void
-  showHistory: boolean
   onOpenUserMenu: () => void
 }
 
@@ -24,24 +20,16 @@ export function LeftToolbar({
   onOpenAssetLibrary,
   onCreateNode,
   onUploadImage,
-  onAddPrompt,
   onAddText,
-  onAddWorkflowNode,
   onCreateVideoWorkflow,
   onToggleChat,
   isChatOpen,
-  onToggleHistory,
-  showHistory,
   onOpenUserMenu,
 }: LeftToolbarProps) {
   const tools = [
-    { icon: Film, label: "前期流程", onClick: onCreateVideoWorkflow || onCreateNode },
     { icon: Image, label: "参考图", onClick: onUploadImage },
-    { icon: Sparkles, label: "创意Prompt", onClick: onAddPrompt },
     { icon: FileText, label: "创意文本", onClick: onAddText },
-    { icon: PanelsTopLeft, label: "分镜草稿", onClick: () => onAddWorkflowNode?.("storyboard") },
-    { icon: Video, label: "关键画面", onClick: () => onAddWorkflowNode?.("image-generation") },
-    { icon: Clapperboard, label: "交接包", onClick: () => onAddWorkflowNode?.("composition") },
+    { icon: Film, label: "前期流程", onClick: onCreateVideoWorkflow || onCreateNode },
     { icon: FolderOpen, label: "素材库", onClick: onOpenAssetLibrary },
   ]
 
@@ -55,14 +43,14 @@ export function LeftToolbar({
         backdropFilter: "blur(20px)",
       }}
     >
-      {/* 星语头像 - 新建节点 */}
+      {/* 星语头像 - 新建 Prompt 节点 */}
       <button
         onClick={onCreateNode}
         className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full transition-all hover:scale-105"
-        title="新建节点"
+        title="新建 Prompt"
       >
         <img
-          src="/星语.JPG"
+          src="/avatar.png"
           alt="星语"
           className="h-full w-full object-cover"
         />
@@ -106,19 +94,6 @@ export function LeftToolbar({
         title={isChatOpen ? "关闭聊天" : "打开聊天"}
       >
         <MessageCircle size={18} strokeWidth={1.5} />
-      </button>
-
-      {/* 历史记录按钮 */}
-      <button
-        onClick={onToggleHistory}
-        className="flex h-9 w-9 items-center justify-center rounded-full transition-all hover:bg-white/10"
-        style={{
-          color: showHistory ? DESIGN_TOKENS.accent : DESIGN_TOKENS.textMuted,
-          backgroundColor: showHistory ? "rgba(100,116,139,0.15)" : "transparent",
-        }}
-        title="历史记录"
-      >
-        <History size={18} strokeWidth={1.5} />
       </button>
 
       {/* 分隔线 */}

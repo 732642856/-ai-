@@ -38,6 +38,8 @@ import {
   Minimize2,
   MessageCircle,
   Download,
+  Sparkles,
+  Loader2,
   type LucideIcon,
 } from "lucide-react"
 
@@ -60,6 +62,7 @@ import type {
 // ============================================================================
 import { useCanvasStore } from "./stores/canvasStore"
 import { useCanvasDropUpload } from "./hooks/useCanvasDropUpload"
+import { useHistoryDrop } from "./hooks/useHistoryDrop"
 import type { ChatAttachment } from "./hooks/useChatAttachments"
 
 // ============================================================================
@@ -74,12 +77,19 @@ import { ImageHoverToolbar } from "./components/toolbar/ImageHoverToolbar"
 import { LeftToolbar } from "./components/toolbar/LeftToolbar"
 import { ChatPanel } from "./components/chat/ChatPanel"
 import { SettingsPanel } from "./components/panels/SettingsPanel"
+import { NodeHistoryPanel } from "./components/history/NodeHistoryPanel"
+import { WorkflowRunPanel } from "./components/workflow/WorkflowRunPanel"
 import ImageNode, { registerImageHoverHandlers, unregisterImageHoverHandlers } from "./components/nodes/ImageNode"
-import PromptNode from "./components/nodes/PromptNode"
-import TextNode from "./components/nodes/TextNode"
+import ContentNode from "./components/nodes/ContentNode"
 import WorkflowNode from "./components/nodes/WorkflowNode"
 import { generateId } from "./utils/generateId"
 import { quickLayout } from "./utils/dagre-layout"
+import { useWorkflowRunner } from "./hooks/useWorkflowRunner"
+import { buildExecutionPlan } from "./utils/execution-plan"
+import { useCanvasPersistence } from "./hooks/useCanvasPersistence"
+import { createIdleRunMeta, createPendingRunMeta } from "./utils/nodeRunMeta"
+import type { ChatCanvasAction, ApplyActionsReport, ApplyActionResult } from "./features/canvas/actions/chatActions"
+import type { WorkflowRunEvent } from "./types/workflow-run"
 
 // ============================================================================
 // DEBUG SWITCHES
@@ -105,11 +115,10 @@ const IMAGE_NODE_SIZE = {
   maxHeight: 180,
 }
 const NODE_DEFAULT_SIZE = {
-  prompt: { width: 320, height: 176 },
-  text: { width: 320, height: 160 },
+  content: { width: 320, height: 176 },
   image: { width: 220, height: 172 },
   workflow: { width: 280, height: 170 },
-} satisfies Record<"prompt" | "text" | "image" | "workflow", { width: number; height: number }>
+} satisfies Record<"content" | "image" | "workflow", { width: number; height: number }>
 const ZOOM_CONSTRAINTS = {
   minZoom: 0.25,
   maxZoom: 2,
@@ -146,8 +155,8 @@ const CreativeEdge = memo(({
         style={{
           ...style,
           stroke: DESIGN_TOKENS.nodeEdge,
-          strokeWidth: 2,
-          filter: animated ? "drop-shadow(0 0 6px rgba(148, 163, 184, 0.5))" : undefined,
+          strokeWidth: 1.5,
+          filter: animated ? "drop-shadow(0 0 3px rgba(148, 163, 184, 0.3))" : undefined,
         }}
       />
       {animated && (
@@ -165,8 +174,7 @@ CreativeEdge.displayName = "CreativeEdge"
 // ============================================================================
 const nodeTypes = {
   image: ImageNode,
-  prompt: PromptNode,
-  text: TextNode,
+  content: ContentNode,
   workflow: WorkflowNode,
 }
 
@@ -181,6 +189,15 @@ export default function StarCanvas() {
       <StarCanvasInner />
     </ReactFlowProvider>
   )
+}
+
+// ============================================================================
+// HELPERS (used across the component)
+// ============================================================================
+// Extracts readable text from a canvas node for export/package generation
+function getNodeText(node: Node<CanvasNodeData>): string {
+  const data = (node.data || {}) as Record<string, unknown>
+  return [data.title, data.summary, data.content, data.prompt].filter(Boolean).join("\n")
 }
 
 // ============================================================================
@@ -201,8 +218,6 @@ function StarCanvasInner() {
     setFitViewOnce,
     selectedNodeId,
     setSelectedNodeId,
-    rightPanelMode,
-    setRightPanelMode,
     contextMenu,
     setContextMenu,
     closeContextMenu,
@@ -225,6 +240,10 @@ function StarCanvasInner() {
     setCropImageNodeId,
     showCanvasHint,
     dismissCanvasHint,
+    isCanvasRestored,
+    setIsCanvasRestored,
+    clearPersistedCanvas,
+    allowAIAutoRun,
   } = useCanvasStore()
 
   // ========================================================================
@@ -232,6 +251,9 @@ function StarCanvasInner() {
   // ========================================================================
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<CanvasNodeData>>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
+  // Cache nodes in a ref so callbacks don't need nodes in deps (avoids re-registering)
+  const nodesRef = useRef(nodes)
+  nodesRef.current = nodes
 
   // ========================================================================
   // LOCAL STATE
@@ -242,15 +264,90 @@ function StarCanvasInner() {
   const [showGrid, setShowGrid] = useState(true)
   const [showHelp, setShowHelp] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [showNodeHistory, setShowNodeHistory] = useState(false)
+  const [historyNodeId, setHistoryNodeId] = useState<string | null>(null)
+
+  // P2-3A: WorkflowRunPanel state
+  const [showRunPanel, setShowRunPanel] = useState(false)
+  const [runEvents, setRunEvents] = useState<WorkflowRunEvent[]>([])
 
   // ========================================================================
-  // SETTINGS PANEL EVENT LISTENER
+  // WORKFLOW RUNNER
+  // ========================================================================
+  const workflowRunner = useWorkflowRunner({
+    onRunEvent: useCallback((event: WorkflowRunEvent) => {
+      // 新 run 开始时清空旧事件
+      if (event.type === "run-started") {
+        setRunEvents([])
+        setShowRunPanel(true)
+      }
+      setRunEvents((prev) => [...prev, event])
+    }, []),
+  })
+  const hasWorkflowNodes = nodes.some(
+    (n) => n.type === "workflow" || (n.type === "content" && n.data.nodeKind === "text")
+  )
+
+  // ========================================================================
+  // CANVAS PERSISTENCE — auto-save & restore
+  // ========================================================================
+  const persistence = useCanvasPersistence({
+    isRestored: isCanvasRestored,
+    onRestored: () => setIsCanvasRestored(true),
+    nodes,
+    edges,
+    setNodes,
+    setEdges,
+    setFitViewOnce,
+  })
+
+  // ========================================================================
+  // SETTINGS & RUN-NODE EVENT LISTENERS
   // ========================================================================
   useEffect(() => {
     const handleOpenSettings = () => setShowSettings(true)
+    const handleRunNode = (e: Event) => {
+      const nodeId = (e as CustomEvent<{ nodeId: string }>).detail?.nodeId
+      if (nodeId) {
+        workflowRunner.runNode(nodeId)
+      }
+    }
+    const handleSettingsUpdated = (e: Event) => {
+      const detail = (e as CustomEvent<{ allowAIAutoRun?: boolean }>).detail
+      if (detail?.allowAIAutoRun !== undefined) {
+        useCanvasStore.getState().setAllowAIAutoRun(detail.allowAIAutoRun)
+      }
+    }
+    const handleClearPending = (e: Event) => {
+      const nodeId = (e as CustomEvent<{ nodeId: string }>).detail?.nodeId
+      if (nodeId) {
+        setNodes((nds) =>
+          nds.map((n) =>
+            n.id === nodeId
+              ? {
+                  ...n,
+                  data: {
+                    ...n.data,
+                    runMeta: createIdleRunMeta(),
+                    pendingExecution: false,  // 兼容旧字段，逐步废弃
+                  },
+                }
+              : n
+          )
+        )
+      }
+    }
     window.addEventListener("startrails-open-settings", handleOpenSettings)
-    return () => window.removeEventListener("startrails-open-settings", handleOpenSettings)
-  }, [])
+    window.addEventListener("startrails-run-node", handleRunNode)
+    window.addEventListener("startrails-settings-updated", handleSettingsUpdated)
+    window.addEventListener("startrails-clear-pending", handleClearPending)
+    return () => {
+      window.removeEventListener("startrails-open-settings", handleOpenSettings)
+      window.removeEventListener("startrails-run-node", handleRunNode)
+      window.removeEventListener("startrails-settings-updated", handleSettingsUpdated)
+      window.removeEventListener("startrails-clear-pending", handleClearPending)
+    }
+  }, [workflowRunner, setNodes])
 
   // ========================================================================
   // DRAG & DROP UPLOAD
@@ -264,6 +361,19 @@ function StarCanvasInner() {
     handleDrop,
     clearError,
   } = useCanvasDropUpload(setNodes, dismissCanvasHint)
+
+  // ── 历史产物拖回画布 (P2-4) ──
+  // onNodeCreated: 节点创建后自动选中（Zustand store）
+  const { handleHistoryDrop } = useHistoryDrop(setNodes, (nodeId) => setSelectedNodeId(nodeId))
+
+  // 组合 drop handler：先检查历史 payload，未命中回退到文件拖放
+  const combinedHandleDrop = useCallback(
+    (e: React.DragEvent) => {
+      if (handleHistoryDrop(e)) return
+      handleDrop(e)
+    },
+    [handleHistoryDrop, handleDrop],
+  )
 
   // ========================================================================
   // GET SELECTED NODE
@@ -391,7 +501,7 @@ function StarCanvasInner() {
       setContextMenu({
         type: "node",
         nodeId: node.id,
-        nodeType: node.type || "prompt",
+        nodeType: node.type || "content",
         screenX: event.clientX,
         screenY: event.clientY,
       })
@@ -406,8 +516,7 @@ function StarCanvasInner() {
     (nodeId: string, event: MouseEvent) => {
       const bounds = reactFlowWrapper.current?.getBoundingClientRect()
       if (!bounds) return
-
-      const node = nodes.find((n) => n.id === nodeId)
+      const node = nodesRef.current.find((n) => n.id === nodeId)
       if (!node) return
 
       const nodeX = node.position.x * viewport.zoom + viewport.x + bounds.left
@@ -430,25 +539,40 @@ function StarCanvasInner() {
         },
       })
     },
-    [nodes, viewport, setFloatingToolbar]
+    [viewport, setFloatingToolbar]
   )
 
   const handleImageNodeMouseLeave = useCallback(() => {
     closeFloatingToolbar()
   }, [closeFloatingToolbar])
 
-  useEffect(() => {
-    const imageNodes = nodes.filter((node) => node.type === "image")
-    imageNodes.forEach((node) => {
-      registerImageHoverHandlers(node.id, {
-        onMouseEnter: handleImageNodeMouseEnter,
-        onMouseLeave: handleImageNodeMouseLeave,
-      })
-    })
+  // Track which image node ids are currently registered (stable across renders)
+  const registeredNodeIds = useRef<Set<string>>(new Set())
 
-    return () => {
-      imageNodes.forEach((node) => unregisterImageHoverHandlers(node.id))
+  useEffect(() => {
+    const currentImageNodes = nodes.filter((node) => node.type === "image")
+    const currentIds = new Set(currentImageNodes.map((n) => n.id))
+    const prevIds = registeredNodeIds.current
+
+    // Unregister nodes that no longer exist
+    for (const id of prevIds) {
+      if (!currentIds.has(id)) {
+        unregisterImageHoverHandlers(id)
+      }
     }
+
+    // Register new nodes
+    for (const node of currentImageNodes) {
+      if (!prevIds.has(node.id)) {
+        registerImageHoverHandlers(node.id, {
+          onMouseEnter: handleImageNodeMouseEnter,
+          onMouseLeave: handleImageNodeMouseLeave,
+        })
+      }
+    }
+
+    // Update tracked set
+    registeredNodeIds.current = currentIds
   }, [nodes, handleImageNodeMouseEnter, handleImageNodeMouseLeave])
 
   // ========================================================================
@@ -560,6 +684,7 @@ function StarCanvasInner() {
           nodeKind: data.nodeKind,
           workflowRole: data.workflowRole,
           status: data.status,
+          runMeta: data.runMeta ?? undefined,
           summary: data.summary,
           prompt: data.prompt,
           content: data.content,
@@ -577,11 +702,6 @@ function StarCanvasInner() {
         },
       }
     })
-
-    const getText = (node: Node<CanvasNodeData>) => {
-      const data = node.data || {}
-      return [data.title, data.summary, data.content, data.prompt].filter(Boolean).join("\n")
-    }
 
     const shots = plainNodes
       .filter((node) => ["storyboard", "image-generation", "video-generation", "image-result"].includes(String(node.data.nodeKind || "")))
@@ -606,11 +726,11 @@ function StarCanvasInner() {
 
     const audioIntent = nodes
       .filter((node) => node.data?.nodeKind === "audio" || node.data?.nodeKind === "uploaded-audio")
-      .map((node) => ({ id: node.id, title: node.data.title || "声音意图", note: getText(node) }))
+      .map((node) => ({ id: node.id, title: node.data.title || "声音意图", note: getNodeText(node) }))
 
     const handoffNotes = nodes
       .filter((node) => ["composition", "video-result", "subtitle", "script", "text"].includes(String(node.data?.nodeKind || "")))
-      .map((node) => ({ id: node.id, title: node.data.title || "交接说明", note: getText(node) }))
+      .map((node) => ({ id: node.id, title: node.data.title || "交接说明", note: getNodeText(node) }))
 
     return {
       schema: "startrails-project-package/v1",
@@ -665,11 +785,13 @@ function StarCanvasInner() {
   // ADD NODE
   // ========================================================================
   const getWorkflowDefaults = (nodeKind: CanvasNodeKind): CanvasNodeData => {
+    const idleMeta = createIdleRunMeta()
     const defaults: Partial<Record<CanvasNodeKind, CanvasNodeData>> = {
       script: {
         title: "创意梳理",
         workflowRole: "AI 编剧",
-        status: "draft",
+        status: "draft", // 兼容旧代码读取
+        runMeta: idleMeta,
         summary: "把一句话灵感整理成主题、人物、情绪、类型感和可拍的故事目标。",
         model: "GPT-5.5",
         inputs: [{ label: "创意目标" }],
@@ -679,6 +801,7 @@ function StarCanvasInner() {
         title: "分镜草稿",
         workflowRole: "Storyboard",
         status: "ready",
+        runMeta: idleMeta,
         summary: "按创意拆出镜头草稿，先确定画面重点、景别、构图和调度意图。",
         inputs: [{ label: "前期文本" }],
         outputs: [{ label: "镜头草稿", type: "storyboard" }],
@@ -687,6 +810,7 @@ function StarCanvasInner() {
         title: "关键画面设计",
         workflowRole: "Text to Image",
         status: "ready",
+        runMeta: idleMeta,
         summary: "根据分镜提示词生成角色、场景、首帧或风格板图片。",
         model: "Banana Pro",
         inputs: [{ label: "分镜提示词" }],
@@ -696,16 +820,38 @@ function StarCanvasInner() {
         title: "动效预演",
         workflowRole: "Image to Video",
         status: "draft",
+        runMeta: idleMeta,
         summary: "只做前期预演：用关键帧验证动作、机位和氛围，不负责最终节奏精剪。",
         model: "Seedance 2.0",
         duration: "5s",
         inputs: [{ label: "关键画面" }, { label: "运动提示" }],
         outputs: [{ label: "预演片段", type: "video" }],
       },
+      "video-sample-frames": {
+        title: "视频抽帧",
+        workflowRole: "Frame Extractor",
+        status: "draft",
+        runMeta: idleMeta,
+        summary: "从上游视频均匀抽取关键帧，供下游分析或参考。",
+        inputs: [{ label: "视频输入", type: "video" }],
+        outputs: [{ label: "抽帧结果", type: "image" }],
+        generationOutput: null,
+      },
+      "video-analyze": {
+        title: "视频分析",
+        workflowRole: "Video Analyzer",
+        status: "draft",
+        runMeta: idleMeta,
+        summary: "分析上游帧画面，生成视频内容摘要。",
+        inputs: [{ label: "帧画面输入", type: "image" }],
+        outputs: [{ label: "分析结果", type: "text" }],
+        generationOutput: null,
+      },
       audio: {
         title: "声音意图",
         workflowRole: "Audio Brief",
         status: "draft",
+        runMeta: idleMeta,
         summary: "记录旁白、环境声、音乐情绪和声音参考，供后期继续制作。",
         inputs: [{ label: "脚本/情绪" }],
         outputs: [{ label: "声音说明", type: "audio" }],
@@ -714,6 +860,7 @@ function StarCanvasInner() {
         title: "对白/旁白草稿",
         workflowRole: "Dialogue Draft",
         status: "draft",
+        runMeta: idleMeta,
         summary: "沉淀对白、旁白和字幕意图，后期再做时间轴校准。",
         inputs: [{ label: "前期文本" }],
         outputs: [{ label: "文案草稿", type: "subtitle" }],
@@ -722,6 +869,7 @@ function StarCanvasInner() {
         title: "前期项目包",
         workflowRole: "Handoff JSON",
         status: "draft",
+        runMeta: idleMeta,
         summary: "汇总创意、分镜、关键画面、参考素材和声音意图，整理为 startrails-project.json。",
         inputs: [{ label: "镜头草稿" }, { label: "关键画面" }, { label: "声音说明" }],
         outputs: [{ label: "startrails-project.json", type: "file" }],
@@ -730,6 +878,7 @@ function StarCanvasInner() {
         title: "交给后期",
         workflowRole: "Post Handoff",
         status: "draft",
+        runMeta: idleMeta,
         summary: "把前期项目包交给星轨画布（后期），继续做节奏、字幕、声音和成片精修。",
         inputs: [{ label: "前期项目包" }],
         outputs: [{ label: "后期任务", type: "video" }],
@@ -746,8 +895,8 @@ function StarCanvasInner() {
   }
 
   const handleAddNode = useCallback(
-    (type: "prompt" | "text" | "image" | "workflow", positionOverride?: { x: number; y: number }, nodeKind?: CanvasNodeKind) => {
-      const position = positionOverride || getCenteredFlowPosition(type === "workflow" ? NODE_DEFAULT_SIZE.workflow : NODE_DEFAULT_SIZE[type])
+    (type: "content" | "image" | "workflow", positionOverride?: { x: number; y: number }, nodeKind?: CanvasNodeKind) => {
+      const position = positionOverride || getCenteredFlowPosition(type === "workflow" ? NODE_DEFAULT_SIZE.workflow : type === "image" ? NODE_DEFAULT_SIZE.image : NODE_DEFAULT_SIZE.content)
       const resolvedNodeKind = nodeKind || getNodeKindFromType(type)
 
       const newNode: Node<CanvasNodeData> = {
@@ -756,9 +905,12 @@ function StarCanvasInner() {
         position,
         data: type === "workflow"
           ? getWorkflowDefaults(resolvedNodeKind)
+          : type === "image"
+          ? { title: "Image", nodeKind: "uploaded-image" as CanvasNodeKind, createdAt: Date.now() }
           : {
-              title: type === "prompt" ? "New Prompt" : type === "text" ? "New Text" : "Image",
-              prompt: "",
+              title: resolvedNodeKind === "text" ? "创意文本" : "新建 Prompt",
+              prompt: resolvedNodeKind === "prompt" ? "在这里输入你的想法..." : "",
+              content: resolvedNodeKind === "text" ? "在这里输入文本内容..." : "",
               nodeKind: resolvedNodeKind,
               createdAt: Date.now(),
             },
@@ -781,7 +933,7 @@ function StarCanvasInner() {
       { kind: "script", x: 320, y: 40 },
       { kind: "storyboard", x: 640, y: 40 },
       { kind: "image-generation", x: 960, y: 40 },
-      { kind: "image-result", x: 1280, y: 40, overrides: { title: "关键画面结果", status: "draft", workflowRole: "Image Output", summary: "这里承接生成后的角色、场景、首帧或风格板图片。" } },
+      { kind: "image-result", x: 1280, y: 40, overrides: { title: "关键画面结果", runMeta: createIdleRunMeta(), workflowRole: "Image Output", summary: "这里承接生成后的角色、场景、首帧或风格板图片。" } },
       { kind: "video-generation", x: 1600, y: 40 },
       { kind: "audio", x: 960, y: 280 },
       { kind: "subtitle", x: 1280, y: 280 },
@@ -790,7 +942,7 @@ function StarCanvasInner() {
     ]
 
     const newNodes: Node<CanvasNodeData>[] = template.map((item) => {
-      const type = item.kind === "text" ? "text" : "workflow"
+      const type = item.kind === "text" ? "content" : "workflow"
       return {
         id: generateId(),
         type,
@@ -799,7 +951,7 @@ function StarCanvasInner() {
           ...(type === "workflow" ? getWorkflowDefaults(item.kind) : {
             title: "前期目标",
             nodeKind: "text" as CanvasNodeKind,
-            status: "draft" as const,
+            runMeta: createIdleRunMeta(),
             content: "输入主题、类型、人物、情绪、画面风格和交付目标。",
             prompt: "输入主题、类型、人物、情绪、画面风格和交付目标。",
             createdAt: Date.now(),
@@ -830,8 +982,7 @@ function StarCanvasInner() {
 
   const getNodeKindFromType = (type?: string): CanvasNodeKind => {
     if (type === "image") return "uploaded-image"
-    if (type === "prompt") return "prompt"
-    if (type === "text") return "text"
+    if (type === "content") return "prompt"
     return "script"
   }
 
@@ -849,7 +1000,7 @@ function StarCanvasInner() {
 
   const duplicateNode = useCallback(
     (nodeId: string) => {
-      const node = nodes.find((n) => n.id === nodeId)
+      const node = nodesRef.current.find((n) => n.id === nodeId)
       if (!node) return
 
       const newNode: Node<CanvasNodeData> = {
@@ -869,7 +1020,7 @@ function StarCanvasInner() {
 
   const copyNode = useCallback(
     (nodeId: string) => {
-      const node = nodes.find((n) => n.id === nodeId)
+      const node = nodesRef.current.find((n) => n.id === nodeId)
       if (!node) return
       setClipboardNode(node)
     },
@@ -878,7 +1029,7 @@ function StarCanvasInner() {
 
   const cutNode = useCallback(
     (nodeId: string) => {
-      const node = nodes.find((n) => n.id === nodeId)
+      const node = nodesRef.current.find((n) => n.id === nodeId)
       if (!node) return
       setClipboardNode(node)
       deleteNode(nodeId)
@@ -909,18 +1060,245 @@ function StarCanvasInner() {
   }, [clipboardNode, reactFlowInstance, setNodes, setClipboardNode])
 
   // ========================================================================
+  // APPLY CHAT ACTIONS - AI 画布操作执行器（返回结构化报告）
+  // ========================================================================
+  const applyChatActions = useCallback(
+    (actions: ChatCanvasAction[]): ApplyActionsReport => {
+      const results: ApplyActionResult[] = []
+      const aliasMap: Record<string, string> = {}
+
+      for (let i = 0; i < actions.length; i++) {
+        const act = actions[i]
+
+        if (DEBUG_NODE) {
+          console.log("[DEBUG_NODE] Applying chat action:", act)
+        }
+
+        try {
+          switch (act.action) {
+            case "create_node": {
+              const type = act.nodeType ?? "content"
+              const kind = (act.nodeKind ?? (type === "workflow" ? "script" : type === "image" ? "uploaded-image" : "text")) as CanvasNodeKind
+              const position = act.position ?? getCenteredFlowPosition(
+                type === "workflow" ? NODE_DEFAULT_SIZE.workflow : type === "image" ? NODE_DEFAULT_SIZE.image : NODE_DEFAULT_SIZE.content
+              )
+              const nodeId = generateId()
+              const newNode: Node<CanvasNodeData> = {
+                id: nodeId,
+                type,
+                position,
+                data: type === "workflow"
+                  ? {
+                      ...getWorkflowDefaults(kind),
+                      ...(act.title ? { title: act.title } : {}),
+                      ...(act.prompt ? { prompt: act.prompt } : {}),
+                      ...(act.data ?? {}),
+                    }
+                  : type === "image"
+                  ? { title: act.title ?? "Image", nodeKind: kind, createdAt: Date.now(), ...(act.data ?? {}) }
+                  : {
+                      title: act.title ?? (kind === "text" ? "创意文本" : "新建 Prompt"),
+                      prompt: act.prompt ?? (kind === "prompt" ? "在这里输入你的想法..." : ""),
+                      content: act.content ?? (kind === "text" ? "在这里输入文本内容..." : ""),
+                      nodeKind: kind,
+                      createdAt: Date.now(),
+                      ...(act.data ?? {}),
+                    },
+              }
+              setNodes((nds) => [...nds, newNode])
+              dismissCanvasHint()
+              if (act.title) aliasMap[act.title] = nodeId
+              results.push({ index: i, action: "create_node", status: "applied", nodeId, reason: act.description })
+              break
+            }
+
+            case "update_node": {
+              if (!act.nodeId) {
+                results.push({ index: i, action: "update_node", status: "skipped", reason: "缺少 nodeId" })
+                break
+              }
+              const found = nodesRef.current.find((n) => n.id === act.nodeId)
+              if (!found) {
+                results.push({ index: i, action: "update_node", status: "skipped", reason: `节点 ${act.nodeId} 不存在` })
+                break
+              }
+              setNodes((nds) =>
+                nds.map((n) =>
+                  n.id === act.nodeId
+                    ? { ...n, data: { ...n.data, ...(act.updates ?? {}) } }
+                    : n
+                )
+              )
+              results.push({ index: i, action: "update_node", status: "applied", nodeId: act.nodeId, reason: act.description })
+              break
+            }
+
+            case "connect_nodes": {
+              if (!act.sourceId || !act.targetId) {
+                results.push({ index: i, action: "connect_nodes", status: "skipped", reason: "缺少 sourceId 或 targetId" })
+                break
+              }
+              const src = nodesRef.current.find((n) => n.id === act.sourceId)
+              const tgt = nodesRef.current.find((n) => n.id === act.targetId)
+              if (!src || !tgt) {
+                results.push({
+                  index: i, action: "connect_nodes", status: "skipped",
+                  reason: `${!src ? "源节点" : "目标节点"}不存在`
+                })
+                break
+              }
+              const edgeId = generateId()
+              setEdges((eds) => [
+                ...eds,
+                {
+                  id: edgeId,
+                  source: act.sourceId!,
+                  target: act.targetId!,
+                  type: "creative",
+                  animated: false,
+                  style: { stroke: DESIGN_TOKENS.nodeEdge, strokeWidth: 2 },
+                },
+              ])
+              results.push({ index: i, action: "connect_nodes", status: "applied", edgeId, reason: act.description })
+              break
+            }
+
+            case "delete_node": {
+              const did = act.nodeId ?? act.id
+              if (!did) {
+                results.push({ index: i, action: "delete_node", status: "skipped", reason: "缺少 nodeId" })
+                break
+              }
+              const exists = nodesRef.current.find((n) => n.id === did)
+              if (!exists) {
+                results.push({ index: i, action: "delete_node", status: "skipped", reason: `节点 ${did} 不存在` })
+                break
+              }
+              setNodes((nds) => nds.filter((n) => n.id !== did))
+              setEdges((eds) => eds.filter((e) => e.source !== did && e.target !== did))
+              if (selectedNodeId === did) setSelectedNodeId(null)
+              results.push({ index: i, action: "delete_node", status: "applied", nodeId: did, reason: act.description })
+              break
+            }
+
+            case "select_node": {
+              const sid = act.nodeId ?? act.id
+              if (sid) setSelectedNodeId(sid)
+              results.push({ index: i, action: "select_node", status: "applied", nodeId: sid, reason: act.description })
+              break
+            }
+
+            case "focus_node": {
+              const fid = act.nodeId ?? act.id
+              if (!fid) {
+                results.push({ index: i, action: "focus_node", status: "skipped", reason: "缺少 nodeId" })
+                break
+              }
+              const target = nodesRef.current.find((n) => n.id === fid)
+              if (!target || !reactFlowInstance) {
+                results.push({ index: i, action: "focus_node", status: "skipped", reason: target ? "画布未就绪" : `节点 ${fid} 不存在` })
+                break
+              }
+              reactFlowInstance.setCenter(
+                target.position.x + (target.measured?.width ?? 280) / 2,
+                target.position.y + (target.measured?.height ?? 200) / 2,
+                { duration: 600, zoom: 1.1 }
+              )
+              setSelectedNodeId(fid)
+              results.push({ index: i, action: "focus_node", status: "applied", nodeId: fid, reason: act.description })
+              break
+            }
+
+            case "run_node": {
+              const rid = act.nodeId ?? act.id
+              if (!rid) {
+                results.push({ index: i, action: "run_node", status: "skipped", reason: "缺少 nodeId" })
+                break
+              }
+              const runTarget = nodesRef.current.find((n) => n.id === rid)
+              if (!runTarget) {
+                results.push({ index: i, action: "run_node", status: "skipped", reason: `节点 ${rid} 不存在` })
+                break
+              }
+              // Safety: only auto-run if user explicitly allowed it
+              if (!allowAIAutoRun) {
+                // Mark node as pending confirmation via runMeta
+                setNodes((nds) =>
+                  nds.map((n) =>
+                    n.id === rid
+                      ? {
+                            ...n,
+                            data: {
+                              ...n.data,
+                              runMeta: createPendingRunMeta({
+                                reason: "AI 请求运行此节点，需用户确认。",
+                                source: "ai",
+                              }),
+                              pendingExecution: true, // 兼容旧字段
+                            },
+                          }
+                      : n
+                  )
+                )
+                setSelectedNodeId(rid)
+                results.push({
+                  index: i, action: "run_node", status: "pending_confirmation",
+                  nodeId: rid, reason: "AI 建议运行此节点，需用户确认",
+                })
+                break
+              }
+              setSelectedNodeId(rid)
+              setTimeout(() => {
+                workflowRunner.runNode(rid)
+              }, 150)
+              results.push({ index: i, action: "run_node", status: "applied", nodeId: rid, reason: act.description })
+              break
+            }
+
+            default:
+              results.push({ index: i, action: (act as any).action ?? "unknown", status: "skipped", reason: "未知 action 类型" })
+              console.warn("[applyChatActions] Unknown action:", act)
+          }
+        } catch (err: any) {
+          results.push({
+            index: i, action: act.action, status: "failed",
+            error: err?.message ?? String(err),
+            reason: `执行异常: ${err?.message ?? String(err)}`,
+          })
+        }
+      }
+
+      const report: ApplyActionsReport = {
+        total: actions.length,
+        applied: results.filter((r) => r.status === "applied").length,
+        skipped: results.filter((r) => r.status === "skipped").length,
+        failed: results.filter((r) => r.status === "failed").length,
+        pendingConfirmation: results.filter((r) => r.status === "pending_confirmation").length,
+        results,
+        aliasMap,
+      }
+
+      return report
+    },
+    [getCenteredFlowPosition, setNodes, setEdges, setSelectedNodeId, reactFlowInstance, dismissCanvasHint, selectedNodeId, allowAIAutoRun]
+  )
+
+  // ========================================================================
   // ADD IMAGE FROM CHAT ATTACHMENT
   // ========================================================================
   const handleAddImageFromChat = useCallback(
     (attachment: ChatAttachment) => {
       const isImage = attachment.type === "image"
-      const nodeKind = attachment.type === "video"
-        ? "uploaded-video"
-        : attachment.type === "audio"
-          ? "uploaded-audio"
-          : attachment.type === "file"
-            ? "uploaded-file"
-            : "uploaded-image"
+      const isAiGenerated = !attachment.file // AI-generated images don't have a File object
+      const nodeKind = isAiGenerated
+        ? "ai-generated-image"
+        : attachment.type === "video"
+          ? "uploaded-video"
+          : attachment.type === "audio"
+            ? "uploaded-audio"
+            : attachment.type === "file"
+              ? "uploaded-file"
+              : "uploaded-image"
 
       let width = attachment.width || 200
       let height = attachment.height || 150
@@ -1007,7 +1385,7 @@ function StarCanvasInner() {
   // ========================================================================
   const handleSaveToAssetLibrary = useCallback(
     (nodeId: string) => {
-      const node = nodes.find((n) => n.id === nodeId)
+      const node = nodesRef.current.find((n) => n.id === nodeId)
       if (!node) return
 
       const asset: AssetItem = {
@@ -1022,6 +1400,68 @@ function StarCanvasInner() {
       addAsset(asset)
     },
     [nodes, addAsset]
+  )
+
+  // ========================================================================
+  // AI VARIANT FOR IMAGE NODE
+  // ========================================================================
+  const handleAIVariant = useCallback(
+    async (nodeId: string) => {
+      const node = nodesRef.current.find((n) => n.id === nodeId)
+      if (!node) return
+
+      const title = node.data.title || node.data.fileName || "图片"
+      const promptText = `Generate a variation of this image: ${title}`
+
+      try {
+        const res = await fetch("/api/ai/generate-image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: promptText,
+            model: "gpt-image-2",
+          }),
+        })
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}))
+          throw new Error(errData.error || `API error: ${res.status}`)
+        }
+
+        const result = await res.json()
+        if (!result.imageUrl) throw new Error("No image data returned")
+
+        const imageUrl = result.imageUrl
+
+        const newNode = {
+          id: generateId(),
+          type: "image" as const,
+          position: { x: node.position.x + 320, y: node.position.y + 20 },
+          data: {
+            title: `变体: ${title}`,
+            imageUrl,
+            nodeKind: "ai-generated-image" as const,
+            sourcePromptId: nodeId,
+            displayWidth: node.data.displayWidth || 280,
+            displayHeight: node.data.displayHeight || 200,
+            createdAt: Date.now(),
+          },
+        }
+
+        setNodes((nds) => [...nds, newNode])
+        setEdges((eds) => [...eds, {
+          id: `edge-${nodeId}-${newNode.id}`,
+          source: nodeId,
+          target: newNode.id,
+          type: "creative",
+          animated: true,
+          style: { stroke: DESIGN_TOKENS.nodeEdge, strokeWidth: 2 },
+        }])
+      } catch (err) {
+        console.error("AI variant failed:", err)
+      }
+    },
+    [setNodes, setEdges]
   )
 
   // ========================================================================
@@ -1053,6 +1493,18 @@ function StarCanvasInner() {
         duplicateNode(selectedNodeId)
       }
 
+      if ((e.metaKey || e.ctrlKey) && e.key === "r" && selectedNodeId) {
+        e.preventDefault()
+        const plan = buildExecutionPlan({
+          mode: "single",
+          rootNodeIds: [selectedNodeId],
+          nodes: nodesRef.current,
+          edges,
+          canvasId: "current",
+        })
+        workflowRunner.runExecutionPlan(plan)
+      }
+
       if (e.key === "Escape") {
         closeContextMenu()
         closeFloatingToolbar()
@@ -1072,6 +1524,8 @@ function StarCanvasInner() {
     closeContextMenu,
     closeFloatingToolbar,
     setSelectedNodeId,
+    edges,
+    workflowRunner,
   ])
 
   // ========================================================================
@@ -1080,14 +1534,14 @@ function StarCanvasInner() {
   return (
       <div className="relative h-screen w-screen overflow-hidden startrails-flow">
       <div className="fixed left-20 top-3 z-20 flex items-center gap-2">
-        <div className="pointer-events-none rounded-2xl border border-cyan-300/20 bg-zinc-950/70 px-4 py-2 text-xs text-cyan-100 shadow-lg shadow-cyan-950/20 backdrop-blur-xl">
-          <div className="font-semibold">星轨画布（前期）</div>
-          <div className="mt-0.5 text-[11px] text-zinc-400">创意构思 / 分镜草稿 / 视觉设计 / 项目包交接</div>
+        <div className="pointer-events-none rounded-2xl border px-4 py-2 text-xs shadow-lg backdrop-blur-xl" style={{ borderColor: DESIGN_TOKENS.border, backgroundColor: "rgba(18,18,24,0.7)", color: DESIGN_TOKENS.textSecondary }}>
+          <div className="font-semibold" style={{ color: DESIGN_TOKENS.text }}>星轨画布（前期）</div>
+          <div className="mt-0.5 text-[11px]" style={{ color: DESIGN_TOKENS.textMuted }}>创意构思 / 分镜草稿 / 视觉设计 / 项目包交接</div>
         </div>
         <button
           type="button"
           onClick={handleExportProjectPackage}
-          className="flex items-center gap-1.5 rounded-2xl border border-cyan-300/20 bg-cyan-400/10 px-3 py-2 text-xs font-medium text-cyan-100 shadow-lg shadow-cyan-950/20 backdrop-blur-xl transition hover:bg-cyan-300/15"
+          className="flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-medium backdrop-blur-xl transition hover:bg-white/10" style={{ borderColor: DESIGN_TOKENS.border, backgroundColor: DESIGN_TOKENS.accentSoft, color: DESIGN_TOKENS.textSecondary }}
           title="导出 startrails-project.json，交给星轨画布（后期）继续制作"
         >
           <Download size={14} strokeWidth={1.7} />
@@ -1112,7 +1566,7 @@ function StarCanvasInner() {
         onDragEnter={handleDragEnter}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
+        onDrop={combinedHandleDrop}
       >
         <ReactFlow
           nodes={nodes}
@@ -1180,11 +1634,6 @@ function StarCanvasInner() {
       {/* Empty Canvas Guide */}
       {nodes.length === 0 && (
         <EmptyCanvasGuide
-          onQuickStart={(draft) => {
-            setChatOpen(true)
-          }}
-          onOpenChat={() => setChatOpen(true)}
-          onOpenAssetLibrary={openAssetLibrary}
           onUploadImage={handleUploadClick}
           onCreateVideoWorkflow={handleCreateVideoWorkflow}
         />
@@ -1193,19 +1642,12 @@ function StarCanvasInner() {
       {/* Left Toolbar */}
       <LeftToolbar
         onOpenAssetLibrary={openAssetLibrary}
-        onCreateNode={() => handleAddNode("prompt")}
+        onCreateNode={() => handleAddNode("content")}
         onUploadImage={handleUploadClick}
-        onAddPrompt={() => handleAddNode("prompt")}
-        onAddText={() => handleAddNode("text")}
-        onAddWorkflowNode={(nodeKind) => handleAddNode("workflow", undefined, nodeKind)}
+        onAddText={() => handleAddNode("content", undefined, "text" as CanvasNodeKind)}
         onCreateVideoWorkflow={handleCreateVideoWorkflow}
         onToggleChat={() => setChatOpen((prev) => !prev)}
         isChatOpen={chatOpen}
-        onToggleHistory={() => {
-          setShowHistory((prev) => !prev)
-          setChatOpen(true) // 打开 ChatPanel 以显示历史
-        }}
-        showHistory={showHistory}
         onOpenUserMenu={() => setShowUserMenu((prev) => !prev)}
       />
 
@@ -1379,24 +1821,20 @@ function StarCanvasInner() {
           <ZoomOut size={14} strokeWidth={1.5} />
         </button>
         {/* 缩放滑块条 */}
-        <div className="relative mx-1 h-1 w-20 rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.1)" }}>
-          <div
-            className="absolute left-0 top-0 h-full rounded-full"
-            style={{
-              width: `${Math.min(100, Math.max(0, (viewport.zoom - 0.25) / (2 - 0.25) * 100))}%`,
-              backgroundColor: DESIGN_TOKENS.textMuted,
-            }}
-          />
-          <div
-            className="absolute top-1/2 h-3 w-3 -translate-y-1/2 rounded-full border"
-            style={{
-              left: `${Math.min(100, Math.max(0, (viewport.zoom - 0.25) / (2 - 0.25) * 100))}%`,
-              transform: "translate(-50%, -50%)",
-              backgroundColor: "#fff",
-              borderColor: DESIGN_TOKENS.border,
-            }}
-          />
-        </div>
+                {/* 缩放滑块 - 真实可拖拽的 range input */}
+        <input
+          type="range"
+          min={ZOOM_CONSTRAINTS.minZoom}
+          max={ZOOM_CONSTRAINTS.maxZoom}
+          step={0.01}
+          value={viewport.zoom}
+          onChange={(e) => reactFlowInstance?.zoomTo(parseFloat(e.target.value), { duration: 100 })}
+          className="mx-1 h-1 w-20 cursor-pointer rounded-full"
+          style={{
+            background: `linear-gradient(to right, ${DESIGN_TOKENS.textMuted} ${((viewport.zoom - ZOOM_CONSTRAINTS.minZoom) / (ZOOM_CONSTRAINTS.maxZoom - ZOOM_CONSTRAINTS.minZoom)) * 100}%, rgba(255,255,255,0.1) ${((viewport.zoom - ZOOM_CONSTRAINTS.minZoom) / (ZOOM_CONSTRAINTS.maxZoom - ZOOM_CONSTRAINTS.minZoom)) * 100}%)`,
+            accentColor: DESIGN_TOKENS.textMuted,
+          }}
+        />
         <span
           className="min-w-[36px] text-center text-xs tabular-nums"
           style={{ color: DESIGN_TOKENS.textMuted }}
@@ -1436,6 +1874,35 @@ function StarCanvasInner() {
         >
           <HelpCircle size={14} strokeWidth={1.5} />
         </button>
+        {/* 执行工作流按钮 */}
+        {hasWorkflowNodes && (
+          <>
+            <div
+              className="mx-1 h-3 w-px"
+              style={{ backgroundColor: DESIGN_TOKENS.border }}
+            />
+            <button
+              onClick={() => workflowRunner.state.isRunning ? workflowRunner.stopWorkflow() : workflowRunner.runWorkflow()}
+              className="flex h-7 items-center gap-1 rounded-full px-2.5 text-xs transition-colors hover:bg-white/10"
+              style={{
+                color: workflowRunner.state.isRunning ? "#f59e0b" : DESIGN_TOKENS.textSecondary,
+              }}
+              title={workflowRunner.state.isRunning ? `停止 (${workflowRunner.state.progress}%)` : "执行工作流"}
+            >
+              {workflowRunner.state.isRunning ? (
+                <>
+                  <Loader2 size={12} className="animate-spin" />
+                  <span className="tabular-nums">{workflowRunner.state.progress}%</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles size={12} />
+                  <span>执行</span>
+                </>
+              )}
+            </button>
+          </>
+        )}
       </div>
 
       {/* Canvas Context Menu */}
@@ -1444,7 +1911,7 @@ function StarCanvasInner() {
           <CanvasContextMenu
             state={contextMenu}
             onClose={closeContextMenu}
-            onAddNode={handleAddNode}
+            onAddNode={(type, position, nodeKind) => handleAddNode(type, position, nodeKind as CanvasNodeKind)}
             onUploadImage={handleUploadClick}
             onPaste={pasteNode}
             hasClipboard={!!clipboardNode}
@@ -1498,6 +1965,48 @@ function StarCanvasInner() {
                 setSelectedNodeId(contextMenu.nodeId)
               }
             }}
+            onViewHistory={() => {
+              if (contextMenu?.type === "node") {
+                setHistoryNodeId(contextMenu.nodeId)
+                setShowNodeHistory(true)
+              }
+            }}
+            onRunCurrentNode={() => {
+              if (contextMenu?.type === "node") {
+                const plan = buildExecutionPlan({
+                  mode: "single",
+                  rootNodeIds: [contextMenu.nodeId],
+                  nodes: nodesRef.current,
+                  edges,
+                  canvasId: "current",
+                })
+                workflowRunner.runExecutionPlan(plan)
+              }
+            }}
+            onRunUpstreamAndCurrent={() => {
+              if (contextMenu?.type === "node") {
+                const plan = buildExecutionPlan({
+                  mode: "upstream",
+                  rootNodeIds: [contextMenu.nodeId],
+                  nodes: nodesRef.current,
+                  edges,
+                  canvasId: "current",
+                })
+                workflowRunner.runExecutionPlan(plan)
+              }
+            }}
+            onRunDownstreamChain={() => {
+              if (contextMenu?.type === "node") {
+                const plan = buildExecutionPlan({
+                  mode: "downstream",
+                  rootNodeIds: [contextMenu.nodeId],
+                  nodes: nodesRef.current,
+                  edges,
+                  canvasId: "current",
+                })
+                workflowRunner.runExecutionPlan(plan)
+              }
+            }}
             nodeKind={
               nodes.find((n) =>
                 n.id === (contextMenu?.type === "node" ? contextMenu.nodeId : null)
@@ -1543,6 +2052,12 @@ function StarCanvasInner() {
                 closeFloatingToolbar()
               }
             }}
+            onAIVariant={() => {
+              if (floatingToolbar?.type === "image-hover") {
+                handleAIVariant(floatingToolbar.nodeId)
+                closeFloatingToolbar()
+              }
+            }}
           />,
           document.body
         )}
@@ -1572,7 +2087,7 @@ function StarCanvasInner() {
 
               const newNode: Node<CanvasNodeData> = {
                 id: generateId(),
-                type: asset.type === "image" ? "image" : "text",
+                type: asset.type === "image" ? "image" : "content",
                 position,
                 data: {
                   title: asset.name,
@@ -1595,6 +2110,50 @@ function StarCanvasInner() {
           <SettingsPanel isOpen={showSettings} onClose={() => setShowSettings(false)} />,
           document.body
         )}
+
+      {/* Node History Panel */}
+      {showNodeHistory && typeof document !== "undefined" &&
+        createPortal(
+          <NodeHistoryPanel
+            isOpen={showNodeHistory}
+            onClose={() => {
+              setShowNodeHistory(false)
+              setHistoryNodeId(null)
+            }}
+            nodeId={historyNodeId}
+            nodeTitle={
+              historyNodeId
+                ? nodes.find((n) => n.id === historyNodeId)?.data?.title
+                  ?? nodes.find((n) => n.id === historyNodeId)?.data?.label as string
+                  ?? historyNodeId.slice(0, 8)
+                : undefined
+            }
+            currentHistoryId={
+              historyNodeId
+                ? nodes.find((n) => n.id === historyNodeId)?.data?.runMeta?.currentHistoryId
+                : undefined
+            }
+            onRestorePrompt={(nId, hId) => {
+              workflowRunner.restorePromptFromHistory(nId, hId)
+            }}
+            onRetry={(nId, hId) => {
+              workflowRunner.retryFromHistory(nId, hId)
+            }}
+          />,
+          document.body
+        )}
+
+      {/* P2-3A: Workflow Run Panel */}
+      <WorkflowRunPanel
+        isOpen={showRunPanel}
+        onClose={() => {
+          setShowRunPanel(false)
+          // 面板关闭时保留最后一个 run 的 events 供下次查看
+          // 新 run 开始时 events 会被清空重建
+        }}
+        events={runEvents}
+        isRunning={workflowRunner.state.isRunning}
+      />
 
       {/* Floating Chat Reopen Button */}
       {!chatOpen && (
@@ -1623,6 +2182,7 @@ function StarCanvasInner() {
         selectedNode={selectedNode}
         canvasNodes={nodes}
         onAddImageToCanvas={handleAddImageFromChat}
+        onApplyChatActions={applyChatActions}
         showHistoryFromOutside={showHistory}
         onHistoryPanelClosed={() => setShowHistory(false)}
       />

@@ -9,21 +9,12 @@ import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 import { ChatAttachmentPreview } from "./ChatAttachmentPreview"
 import type { ChatAttachment } from "../../hooks/useChatAttachments"
 
-// 真实 AI 模型列表
+// copse.top 实际支持的 AI 模型列表
 export type AiModel =
-  | "gpt-4o"
-  | "claude-3.5-sonnet"
-  | "gemini-pro"
-  | "glm-4"
-  | "bananapro"
-  | "mj-v7"
-  | "seedance-2.0"
-  | "kling-o3"
-  | "wan-2.6"
-  | "vidu"
-  | "gpt-image-2"
+  | "gpt-5.4"
+  | "gpt-5.4-mini"
   | "gpt-5.5"
-  | "gpt-4o-audio-preview"
+  | "gpt-image-2"
 
 export interface ModelOption {
   value: string
@@ -34,23 +25,10 @@ export interface ModelOption {
 }
 
 const MODEL_OPTIONS: ModelOption[] = [
-  // 文本对话模型
-  { value: "gpt-4o", label: "GPT-4o", provider: "OpenAI", desc: "最强多模态，支持图文", type: "text" },
-  { value: "claude-3.5-sonnet", label: "Claude 3.5", provider: "Anthropic", desc: "长文本理解出色", type: "text" },
-  { value: "gemini-pro", label: "Gemini Pro", provider: "Google", desc: "多模态推理", type: "text" },
-  { value: "glm-4", label: "GLM-4", provider: "智谱", desc: "中文理解优秀", type: "text" },
-  // 图像生成模型
-  { value: "bananapro", label: "Banana Pro", provider: "TapNow", desc: "专业级图像生成", type: "image" },
-  { value: "mj-v7", label: "MJ V7", provider: "Midjourney", desc: "艺术风格图像", type: "image" },
-  { value: "gpt-image-2", label: "GPT-Image-2", provider: "OpenAI", desc: "高质量图像生成", type: "image" },
-  // 视频生成模型
-  { value: "seedance-2.0", label: "Seedance 2.0", provider: "字节", desc: "电影级视频生成", type: "video" },
-  { value: "kling-o3", label: "Kling O3", provider: "快手", desc: "高质量视频生成", type: "video" },
-  { value: "wan-2.6", label: "Wan 2.6", provider: "阿里", desc: "首尾帧视频", type: "video" },
-  { value: "vidu", label: "Vidu", provider: "Vidu", desc: "国产视频生成", type: "video" },
-  // 音频/多模态
-  { value: "gpt-5.5", label: "GPT-5.5", provider: "OpenAI", desc: "最强推理+创作", type: "text" },
-  { value: "gpt-4o-audio-preview", label: "GPT-4o Audio", provider: "OpenAI", desc: "语音+文本多模态", type: "text" },
+  { value: "gpt-5.5", label: "GPT-5.5", provider: "copse.top", desc: "最强推理+创作", type: "text" },
+  { value: "gpt-5.4", label: "GPT-5.4", provider: "copse.top", desc: "高性能多模态", type: "text" },
+  { value: "gpt-5.4-mini", label: "GPT-5.4 Mini", provider: "copse.top", desc: "快速响应", type: "text" },
+  { value: "gpt-image-2", label: "GPT-Image-2", provider: "copse.top", desc: "高质量图像生成", type: "image" },
 ]
 
 interface ChatInputProps {
@@ -80,7 +58,18 @@ function getConfiguredModels(): ModelOption[] {
   if (typeof window === "undefined") return MODEL_OPTIONS
   try {
     const stored = localStorage.getItem("startrails_models")
-    if (stored) return JSON.parse(stored)
+    if (stored) {
+      const storedModels = JSON.parse(stored) as ModelOption[]
+      const merged = [...storedModels]
+
+      for (const defaultModel of MODEL_OPTIONS) {
+        if (!merged.some((model) => model.value === defaultModel.value)) {
+          merged.push(defaultModel)
+        }
+      }
+
+      return merged
+    }
   } catch {}
   return MODEL_OPTIONS
 }
@@ -107,7 +96,6 @@ export function ChatInput({
   const [showNodeMention, setShowNodeMention] = useState(false)
   const [mentionQuery, setMentionQuery] = useState("")
   const [mentionIndex, setMentionIndex] = useState(0)
-  const [chatMode, setChatMode] = useState<"pro" | "ask">("pro")
 
   const currentModel = getConfiguredModels().find((m) => m.value === selectedModel)
   const filteredModels = activeTypeFilter
@@ -153,7 +141,7 @@ export function ChatInput({
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
       if (!isGenerating && (value.trim() || attachments.length > 0)) {
-        onSend(selectedModel, chatMode)
+        onSend(selectedModel)
       }
     }
   }
@@ -291,31 +279,6 @@ export function ChatInput({
             onChange={onAttachmentsChange.handleFileSelect}
             className="hidden"
           />
-
-          {/* Pro/Ask 模式切换 */}
-          <div className="flex items-center rounded-lg border" style={{ borderColor: DESIGN_TOKENS.border }}>
-            <button
-              onClick={() => setChatMode("pro")}
-              className={`px-2 py-1 text-xs transition-colors ${chatMode === "pro" ? "rounded-l-md" : "rounded-l-md"}`}
-              style={{
-                backgroundColor: chatMode === "pro" ? "rgba(100,116,139,0.2)" : "transparent",
-                color: chatMode === "pro" ? DESIGN_TOKENS.text : DESIGN_TOKENS.textMuted,
-              }}
-            >
-              Pro
-            </button>
-            <div className="h-4 w-px" style={{ backgroundColor: DESIGN_TOKENS.border }} />
-            <button
-              onClick={() => setChatMode("ask")}
-              className={`px-2 py-1 text-xs transition-colors ${chatMode === "ask" ? "rounded-r-md" : "rounded-r-md"}`}
-              style={{
-                backgroundColor: chatMode === "ask" ? "rgba(100,116,139,0.2)" : "transparent",
-                color: chatMode === "ask" ? DESIGN_TOKENS.text : DESIGN_TOKENS.textMuted,
-              }}
-            >
-              Ask
-            </button>
-          </div>
 
           {/* 模型选择器 */}
           <div className="relative">
