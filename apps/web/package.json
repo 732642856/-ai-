@@ -11,8 +11,6 @@
   },
   "dependencies": {
     "@creative-canvas/canvas": "workspace:*",
-    "@creative-canvas/providers": "workspace:*",
-    "@creative-canvas/shared": "workspace:*",
     "@xyflow/react": "^12.10.0",
     "dagre": "^0.8.5",
     "lucide-react": "^1.16.0",
