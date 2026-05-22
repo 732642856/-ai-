@@ -24,6 +24,7 @@ import { VIDEO_ANALYSIS_RAW_KIND, VIDEO_ANALYSIS_RAW_VERSION } from "../types/vi
 import type { ExecutionPlan } from "../utils/execution-plan"
 import { generateMockFrameUrls, runMockVideoAnalyze } from "../utils/mock-video-analyzer"
 import type { WorkflowRunEvent } from "../types/workflow-run"
+import { enhancePromptWithCinematicContext } from "@/lib/cinematic/context"
 
 interface RunContext {
   runId: string
@@ -348,7 +349,8 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
     // IMAGE MODEL STEP
     // ------------------------------------------------------------------
     if (isImageModelStep(kind)) {
-      const imagePrompt = upstreamText || currentContent || "A cinematic scene"
+      const baseImagePrompt = upstreamText || currentContent || "A cinematic scene"
+      const imagePrompt = enhancePromptWithCinematicContext(baseImagePrompt, node.id, allNodes, edges)
       const model = "gpt-image-2"
       const provider = "copse"
       const startedAt = new Date().toISOString()
