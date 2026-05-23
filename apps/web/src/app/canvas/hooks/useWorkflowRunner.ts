@@ -154,64 +154,79 @@ async function readSSEStream(
   const decoder = new TextDecoder()
   let result = ""
   let usage: StreamUsage | null = null
+  let buffer = ""
+
+  const processDataLine = (data: string) => {
+    if (!data || data === "[DONE]") return
+
+    let parsed: any
+    try {
+      parsed = JSON.parse(data)
+    } catch {
+      // Ignore malformed complete lines; incomplete lines are preserved by buffer.
+      return
+    }
+
+    if (parsed.done) return
+
+    // Error in stream
+    if (parsed.error) {
+      throw new Error(parsed.error)
+    }
+
+    // Text content
+    if (parsed.content) {
+      // Detect inline [USAGE] markers
+      const usageMatch = parsed.content.match(/\[USAGE\](.+?)\[\/USAGE\]/)
+      if (usageMatch) {
+        try {
+          const raw = JSON.parse(usageMatch[1])
+          usage = {
+            promptTokens: raw.prompt_tokens,
+            completionTokens: raw.completion_tokens,
+            totalTokens: raw.total_tokens,
+          }
+        } catch {}
+        // Strip usage markers from content
+        const cleanContent = parsed.content.replace(/\[USAGE\].+?\[\/USAGE\]/g, "")
+        if (cleanContent.trim()) {
+          result += cleanContent
+          onDelta?.(cleanContent)
+        }
+      } else {
+        result += parsed.content
+        onDelta?.(parsed.content)
+      }
+    }
+
+    // Image generated event
+    if (parsed.type === "image_generated" && parsed.imageUrl) {
+      onImageGenerated?.({
+        imageUrl: parsed.imageUrl,
+        prompt: parsed.prompt || "",
+        model: parsed.model || "",
+      })
+    }
+  }
 
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
-    const chunk = decoder.decode(value, { stream: true })
-    const lines = chunk.split("\n")
+
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split(/\r?\n/)
+    buffer = lines.pop() ?? ""
 
     for (const line of lines) {
-      if (!line.startsWith("data: ")) continue
-      const data = line.slice(6)
-      if (data === "[DONE]") continue
-
-      try {
-        const parsed = JSON.parse(data)
-
-        // Text content
-        if (parsed.content) {
-          // Detect inline [USAGE] markers
-          const usageMatch = parsed.content.match(/\[USAGE\](.+?)\[\/USAGE\]/)
-          if (usageMatch) {
-            try {
-              const raw = JSON.parse(usageMatch[1])
-              usage = {
-                promptTokens: raw.prompt_tokens,
-                completionTokens: raw.completion_tokens,
-                totalTokens: raw.total_tokens,
-              }
-            } catch {}
-            // Strip usage markers from content
-            const cleanContent = parsed.content.replace(/\[USAGE\].+?\[\/USAGE\]/g, "")
-            if (cleanContent.trim()) {
-              result += cleanContent
-              onDelta?.(cleanContent)
-            }
-          } else {
-            result += parsed.content
-            onDelta?.(parsed.content)
-          }
-        }
-
-        // Image generated event
-        if (parsed.type === "image_generated" && parsed.imageUrl) {
-          onImageGenerated?.({
-            imageUrl: parsed.imageUrl,
-            prompt: parsed.prompt || "",
-            model: parsed.model || "",
-          })
-        }
-
-        // Error in stream
-        if (parsed.error) {
-          throw new Error(parsed.error)
-        }
-      } catch (e: any) {
-        if (e.message && !e.message.includes("JSON")) throw e
-        // Silently skip JSON parse errors
-      }
+      if (!line.trim() || !line.startsWith("data: ")) continue
+      processDataLine(line.slice(6))
     }
+  }
+
+  buffer += decoder.decode()
+  const finalLine = buffer.trim()
+  if (finalLine.startsWith("data: ")) {
+    processDataLine(finalLine.slice(6))
   }
 
   return { text: result, usage }
@@ -321,6 +336,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
         (delta) => {
           streamedText += delta
           updateNodeData(node.id, {
+            content: streamedText,
             runMeta: createRunningRunMeta({ runId: runContext?.runId, source: runContext?.source, message: "AI 生成中..." }),
             summary: streamedText.slice(0, 200) + (streamedText.length > 200 ? "..." : ""),
           })
@@ -720,6 +736,17 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
         runMeta: failedRunMeta,
       })
 
+      const latestNodesAfterFailure = getNodes()
+      const failedNodeData = (latestNodesAfterFailure.find((n) => n.id === nodeId)?.data ?? {}) as CanvasNodeData
+      const partialText =
+        typeof err?.partialText === "string" && err.partialText.trim()
+          ? err.partialText.trim()
+          : typeof failedNodeData.content === "string" && failedNodeData.content.trim()
+            ? failedNodeData.content.trim()
+            : typeof failedNodeData.summary === "string" && failedNodeData.summary.trim()
+              ? failedNodeData.summary.trim()
+              : ""
+
       // ── Record failed history ──────────────────────────
       const historyItem = createRunHistoryItem({
         runId,
@@ -727,6 +754,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
         nodeType: node.type ?? "unknown",
         status: "failed",
         input: historyInput,
+        output: partialText ? { text: partialText } : undefined,
         error: err?.message ?? "执行失败",
         message: stepLabel + " 执行失败",
         startedAt,
