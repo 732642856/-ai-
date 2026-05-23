@@ -598,6 +598,14 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
       localModels.imageModel ? Promise.resolve(localModels.imageModel) : getDefaultImageModel(),
     ])
 
+    // ── Inject resolved model info into historyInput.settingsSnapshot ──
+    const activeModel = isImageModelStep(kind) ? resolvedImageModel : resolvedTextModel
+    historyInput.settingsSnapshot = {
+      ...historyInput.settingsSnapshot,
+      model: activeModel,
+      provider: (localModels.textModel || localModels.imageModel) ? "local" : "default",
+    }
+
     setState((prev) => ({
       ...prev,
       isRunning: true,

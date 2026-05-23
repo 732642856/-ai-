@@ -80,6 +80,7 @@ import { SettingsPanel } from "./components/panels/SettingsPanel"
 import { NodeHistoryPanel } from "./components/history/NodeHistoryPanel"
 import { WorkflowRunPanel } from "./components/workflow/WorkflowRunPanel"
 import { PromptPreviewPanel } from "./components/preview/PromptPreviewPanel"
+import { SourceTracePanel } from "./components/preview/SourceTracePanel"
 import ImageNode, { registerImageHoverHandlers, unregisterImageHoverHandlers } from "./components/nodes/ImageNode"
 import ContentNode from "./components/nodes/ContentNode"
 import WorkflowNode from "./components/nodes/WorkflowNode"
@@ -270,6 +271,14 @@ function StarCanvasInner() {
   const [showSettings, setShowSettings] = useState(false)
   const [showNodeHistory, setShowNodeHistory] = useState(false)
   const [historyNodeId, setHistoryNodeId] = useState<string | null>(null)
+
+  // SourceTracePanel state
+  const [showSourceTrace, setShowSourceTrace] = useState(false)
+  const [traceHistoryId, setTraceHistoryId] = useState<string | null>(null)
+  const [traceNodeInfo, setTraceNodeInfo] = useState<{
+    nodeId: string
+    nodeTitle?: string
+  } | null>(null)
 
   // P2-3A: WorkflowRunPanel state
   const [showRunPanel, setShowRunPanel] = useState(false)
@@ -2152,6 +2161,11 @@ function StarCanvasInner() {
             onRetry={(nId, hId) => {
               workflowRunner.retryFromHistory(nId, hId)
             }}
+            onViewTrace={(hId, nId, nTitle) => {
+              setShowSourceTrace(true)
+              setTraceHistoryId(hId)
+              setTraceNodeInfo({ nodeId: nId, nodeTitle: nTitle })
+            }}
           />,
           document.body
         )}
@@ -2174,6 +2188,22 @@ function StarCanvasInner() {
         onClose={closePromptPreview}
         nodeId={promptPreviewNodeId}
       />
+
+      {/* Source Trace Panel (Phase 1-d) */}
+      {showSourceTrace && traceHistoryId && traceNodeInfo && typeof document !== "undefined" &&
+        <SourceTracePanel
+          isOpen={showSourceTrace}
+          onClose={() => {
+            setShowSourceTrace(false)
+            setTraceHistoryId(null)
+            setTraceNodeInfo(null)
+          }}
+          historyId={traceHistoryId}
+          nodeId={traceNodeInfo.nodeId}
+          nodeTitle={traceNodeInfo.nodeTitle}
+          onNavigate={setTraceHistoryId}
+        />
+      }
 
       {/* Floating Chat Reopen Button */}
       {!chatOpen && (

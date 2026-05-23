@@ -33,6 +33,7 @@ import {
   AlertCircle,
   Layers,
   GripHorizontal,
+  Eye,
 } from "lucide-react"
 import { DESIGN_TOKENS } from "../../styles/designSystem"
 import { useNodeRunHistory } from "../../hooks/useNodeRunHistory"
@@ -55,6 +56,7 @@ interface NodeHistoryPanelProps {
   currentHistoryId?: string
   onRestorePrompt?: (nodeId: string, historyId: string) => void
   onRetry?: (nodeId: string, historyId: string) => void
+  onViewTrace?: (historyId: string, nodeId: string, nodeTitle?: string) => void
 }
 
 // ============================================================================
@@ -523,12 +525,14 @@ function HistoryListItem({
   onToggle,
   onRestorePrompt,
   onRetry,
+  onViewTrace,
 }: {
   item: NodeRunHistoryItem
   isExpanded: boolean
   onToggle: () => void
   onRestorePrompt?: () => void
   onRetry?: () => void
+  onViewTrace?: () => void
 }) {
   return (
     <div
@@ -609,6 +613,26 @@ function HistoryListItem({
               <RotateCcw size={13} />
             </button>
           )}
+          {onViewTrace && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onViewTrace() }}
+              title="查看 Run Trace"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 28,
+                height: 28,
+                borderRadius: 6,
+                border: "none",
+                background: DESIGN_TOKENS.accentSoft,
+                color: DESIGN_TOKENS.textSecondary,
+                cursor: "pointer",
+              }}
+            >
+              <Eye size={13} />
+            </button>
+          )}
           {isExpanded ? <ChevronUp size={14} color={DESIGN_TOKENS.textMuted} /> : <ChevronDown size={14} color={DESIGN_TOKENS.textMuted} />}
         </div>
       </div>
@@ -631,6 +655,7 @@ export function NodeHistoryPanel({
   currentHistoryId,
   onRestorePrompt,
   onRetry,
+  onViewTrace,
 }: NodeHistoryPanelProps) {
   const { histories, clearHistory } = useNodeRunHistory(nodeId, currentHistoryId)
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
@@ -775,6 +800,7 @@ export function NodeHistoryPanel({
                   onToggle={() => toggleExpand(item.id)}
                   onRestorePrompt={onRestorePrompt ? () => onRestorePrompt(item.nodeId, item.id) : undefined}
                   onRetry={onRetry ? () => onRetry(item.nodeId, item.id) : undefined}
+                  onViewTrace={onViewTrace ? () => onViewTrace(item.id, item.nodeId, nodeTitle) : undefined}
                 />
               ))}
             </div>
