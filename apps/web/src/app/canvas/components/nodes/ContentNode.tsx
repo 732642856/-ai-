@@ -33,6 +33,7 @@ import { Handle, Position, NodeResizer, type NodeProps, useReactFlow } from "@xy
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 import type { CanvasNodeData, CanvasNodeKind } from "../canvas/types"
 import { NodeRunStatusIndicator } from "./NodeRunStatusIndicator"
+import { useWorkflowRunner } from "../../hooks/useWorkflowRunner"
 
 interface ContentNodeProps extends NodeProps {
   data: CanvasNodeData
@@ -77,6 +78,7 @@ export const ContentNode = memo(function ContentNode({ id, data, selected }: Con
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const aiInputRef = useRef<HTMLTextAreaElement>(null)
   const { setNodes, getNodes, setEdges } = useReactFlow()
+  const { runNode } = useWorkflowRunner()
 
   const isPromptMode = data.nodeKind === "prompt"
   const content = data.content || data.prompt || ""
@@ -220,70 +222,16 @@ export const ContentNode = memo(function ContentNode({ id, data, selected }: Con
           style: { stroke: DESIGN_TOKENS.nodeEdge, strokeWidth: 1.5 },
         }])
       } else {
-        // Text generation / chat
-        const res = await fetch("/api/ai/chat/stream", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            message: aiInput,
-            model: selectedModel,
-            context: {
-              systemOverride: isPromptMode
-                ? "你是一个专业的图像提示词工程师。请根据用户的描述，生成高质量的图像生成提示词（Prompt）。输出简洁、专业的英文提示词。"
-                : "你是一个专业的文案助手。请根据用户的需求，生成高质量的中文文本内容。",
-            },
-          }),
-        })
+        // Text generation: delegate to workflow runner for streaming + history + Source Trace
+        const combinedPrompt = content
+          ? `${content}
 
-        if (!res.ok) throw new Error(`API error: ${res.status}`)
+---
 
-        const reader = res.body?.getReader()
-        if (!reader) throw new Error("No response stream")
+用户追加指令: ${aiInput.trim()}`
+          : aiInput.trim()
 
-        const decoder = new TextDecoder()
-        let generatedText = ""
-
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-
-          const chunk = decoder.decode(value, { stream: true })
-          const lines = chunk.split("\n")
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              const data = line.slice(6)
-              if (data === "[DONE]") continue
-              try {
-                const parsed = JSON.parse(data)
-                const delta = parsed.content || parsed.choices?.[0]?.delta?.content || ""
-                generatedText += delta
-              } catch {
-                // skip
-              }
-            }
-          }
-        }
-
-        if (generatedText.trim()) {
-          // Append to current node content
-          const newContent = editContent
-            ? `${editContent}\n\n${generatedText.trim()}`
-            : generatedText.trim()
-          setEditContent(newContent)
-          setNodes((nds) =>
-            nds.map((node) => {
-              if (node.id !== id) return node
-              return {
-                ...node,
-                data: {
-                  ...node.data,
-                  content: newContent,
-                  prompt: newContent,
-                },
-              }
-            })
-          )
-        }
+        await runNode(id, combinedPrompt)
       }
 
       setAiInput("")
@@ -292,7 +240,7 @@ export const ContentNode = memo(function ContentNode({ id, data, selected }: Con
     } finally {
       setIsGenerating(false)
     }
-  }, [aiInput, selectedModel, id, editContent, isPromptMode, getNodes, setNodes, setEdges])
+  }, [aiInput, selectedModel, id, content, runNode, getNodes, setNodes, setEdges])
 
   // Handle AI input key events
   const handleAiInputKeyDown = (e: React.KeyboardEvent) => {

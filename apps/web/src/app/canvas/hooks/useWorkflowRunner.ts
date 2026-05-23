@@ -70,9 +70,10 @@ function buildHistoryInputFromNode(
   node: Node<CanvasNodeData>,
   allNodes: Node<CanvasNodeData>[],
   edges: Edge[],
+  overridePrompt?: string,
 ): NodeRunHistoryInput {
   const d = node.data as CanvasNodeData
-  const rawPrompt = d.prompt ?? d.content ?? ""
+  const rawPrompt = overridePrompt ?? d.prompt ?? d.content ?? ""
 
   // 上游内容
   const upstreamEdges = edges.filter((e) => e.target === node.id)
@@ -270,6 +271,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
     allNodes: Node<CanvasNodeData>[],
     edges: Edge[],
     runContext?: RunContext,
+    overridePrompt?: string,
   ): Promise<string> => {
     const kind = (node.data.nodeKind || "script") as CanvasNodeKind
     const stepLabel: string = node.data.title || String(kind)
@@ -289,7 +291,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
     }
 
     const upstreamText = upstreamContent.join("\n\n")
-    const currentContent = node.data.content || node.data.prompt || ""
+    const currentContent = overridePrompt ?? (node.data.content || node.data.prompt || "")
 
     // Resolve model names from config (respects .env.local + Local Override)
     const localModels = resolveLocalModelOverrides()
@@ -587,7 +589,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
   // ==========================================================================
   // RUN SINGLE NODE
   // ==========================================================================
-  const runNode = useCallback(async (nodeId: string) => {
+  const runNode = useCallback(async (nodeId: string, overridePrompt?: string) => {
     if (runningNodeIdsRef.current.has(nodeId)) return
 
     runningNodeIdsRef.current.add(nodeId)
@@ -606,7 +608,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
     const source: NodeRunSource = "manual"
 
     // ── Capture history input before execution ──────────
-    const historyInput = buildHistoryInputFromNode(node, allNodes, allEdges)
+    const historyInput = buildHistoryInputFromNode(node, allNodes, allEdges, overridePrompt)
     const startedAt = new Date().toISOString()
 
     // Resolve model names once for this run (used in catch for usage recording)
@@ -654,7 +656,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
     })
 
     try {
-      const outputText = await executeStep(node, allNodes, allEdges, { runId, source })
+      const outputText = await executeStep(node, allNodes, allEdges, { runId, source }, overridePrompt)
 
       // ── Record succeeded history ──────────────────────
       const finishedAt = new Date().toISOString()
