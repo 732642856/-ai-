@@ -27,6 +27,7 @@ import {
   Sparkles,
   Layers,
   XCircle,
+  FileX,
 } from "lucide-react"
 import { DESIGN_TOKENS } from "../../styles/designSystem"
 import { useAiConfig } from "../../hooks/useAiConfig"
@@ -74,7 +75,7 @@ function formatNodeType(kind: string): string {
     video: "Video",
     text: "Text",
     script: "Script",
-    "story-board": "Storyboard",
+    "storyboard": "Storyboard",
     subtitle: "Subtitle",
   }
   return map[kind] ?? kind
@@ -211,10 +212,15 @@ export function PromptPreviewPanel({ isOpen, onClose, nodeId }: PromptPreviewPan
   // Active model: node-level > env config > fallback
   const activeModel: string =
     (runRequest as { model?: string } | null)?.model ?? config?.defaultModel ?? "N/A"
-  const hasWarnings: boolean =
-    ((preview as { warnings?: string[] } | null)?.warnings?.length ?? 0) > 0
+  // [Bug 1 fix] warnings come from RunRequest._meta.sanitizeWarnings
+  const sanitizeWarnings: string[] =
+    (runRequest as { _meta?: { sanitizeWarnings?: string[] } } | null)?._meta?.sanitizeWarnings ?? []
+  const hasWarnings = sanitizeWarnings.length > 0
   const promptLength = displayPrompt.length
   const isLongPrompt = promptLength > 2000
+
+  // Determine why preview is null (for Bug 3 error hint)
+  const nodeExists = nodeId ? nodes.some((n) => n.id === nodeId) : false
 
   if (!isOpen) return null
   if (typeof document === "undefined") return null
@@ -272,7 +278,22 @@ export function PromptPreviewPanel({ isOpen, onClose, nodeId }: PromptPreviewPan
             >
               Prompt Preview
             </span>
-            <Badge color={preview ? "#22c55e" : "#ef4444"} label={preview ? "Ready" : "Error"} />
+            <Badge
+              color={
+                preview
+                  ? "#22c55e"
+                  : isLoading
+                    ? "#fcd34d"
+                    : "#ef4444"
+              }
+              label={
+                preview
+                  ? "Ready"
+                  : isLoading
+                    ? "Loading"
+                    : "Error"
+              }
+            />
           </div>
           <button
             onClick={onClose}
@@ -288,7 +309,7 @@ export function PromptPreviewPanel({ isOpen, onClose, nodeId }: PromptPreviewPan
               color: DESIGN_TOKENS.textSecondary,
               cursor: "pointer",
             }}
-            title="Close"
+            title="Close (Esc)"
           >
             <X size={16} />
           </button>
@@ -324,129 +345,173 @@ export function PromptPreviewPanel({ isOpen, onClose, nodeId }: PromptPreviewPan
             )}
           </Section>
 
-          {/* --- 2. Upstream Nodes --- */}
-          <Section
-            title={`Upstream (${preview?.upstreamNodeIds?.length ?? 0})`}
-            icon={<Layers size={14} />}
-          >
-            {!preview || preview.upstreamNodeIds.length === 0 ? (
-              <div style={{ color: DESIGN_TOKENS.textMuted, fontSize: 12 }}>
-                No upstream nodes
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {preview.upstreamNodeIds.map((upId: string) => {
-                  const upNode = nodes.find((n) => n.id === upId)
-                  const kind = (upNode?.data?.nodeKind ?? "unknown") as string
-                  const title = (upNode?.data?.label ??
-                    upNode?.data?.content ??
-                    upId) as string
-                  return (
-                    <div
-                      key={upId}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        padding: "6px 8px",
-                        borderRadius: 6,
-                        background: DESIGN_TOKENS.card,
-                        border: `1px solid ${DESIGN_TOKENS.border}`,
-                      }}
-                    >
-                      <Badge color={sourceColor(kind)} label={formatNodeType(kind)} />
-                      <span
-                        style={{
-                          fontSize: 12,
-                          color: DESIGN_TOKENS.text,
-                          flex: 1,
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {title}
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </Section>
-
-          {/* --- 3. Final Prompt --- */}
-          <Section title={`Final Prompt (${promptLength} chars)`} icon={<Sparkles size={14} />}>
+          {/* [Bug 3 fix] No-preview error hint */}
+          {!preview && !isLoading && (
             <div
               style={{
-                position: "relative",
-                padding: 10,
-                borderRadius: 6,
-                background: DESIGN_TOKENS.card,
-                border: `1px solid ${DESIGN_TOKENS.border}`,
-                fontSize: 12,
-                lineHeight: 1.6,
-                color: DESIGN_TOKENS.text,
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-                maxHeight: 400,
-                overflowY: "auto",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "48px 24px",
+                gap: 12,
               }}
             >
-              {displayPrompt || (
-                <span style={{ color: DESIGN_TOKENS.textMuted, fontStyle: "italic" }}>
-                  No prompt content
-                </span>
-              )}
+              <FileX size={36} color={DESIGN_TOKENS.textMuted} />
+              <div
+                style={{
+                  fontSize: 13,
+                  fontWeight: 500,
+                  color: DESIGN_TOKENS.textSecondary,
+                  textAlign: "center",
+                }}
+              >
+                Unable to generate preview
+              </div>
+              <div
+                style={{
+                  fontSize: 12,
+                  color: DESIGN_TOKENS.textMuted,
+                  textAlign: "center",
+                  lineHeight: 1.6,
+                  maxWidth: 300,
+                }}
+              >
+                {!nodeExists
+                  ? "The selected node has been deleted or does not exist on the canvas."
+                  : "This node may not contain prompt content, or its data format is not supported."}
+              </div>
             </div>
-            <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end" }}>
-              <CopyButton text={displayPrompt} />
-            </div>
-          </Section>
+          )}
 
-          {/* --- 4. Warnings & Errors --- */}
-          {(hasWarnings || isLongPrompt) && (
-            <Section title="Warnings" icon={<AlertTriangle size={14} />} defaultOpen={true}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {hasWarnings &&
-                  (preview as { warnings?: string[] }).warnings?.map((warn: string, idx: number) => (
-                    <div
-                      key={`warn-${idx}`}
-                      style={{
-                        display: "flex",
-                        alignItems: "flex-start",
-                        gap: 6,
-                        padding: "6px 8px",
-                        borderRadius: 6,
-                        background: "rgba(251,191,36,0.08)",
-                        border: "1px solid rgba(251,191,36,0.2)",
-                        fontSize: 12,
-                        color: "#fcd34d",
-                      }}
-                    >
-                      <AlertTriangle size={12} style={{ flexShrink: 0, marginTop: 2 }} />
-                      {warn}
-                    </div>
-                  ))}
-                {isLongPrompt && (
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "flex-start",
-                      gap: 6,
-                      padding: "6px 8px",
-                      borderRadius: 6,
-                      background: "rgba(251,191,36,0.08)",
-                      border: "1px solid rgba(251,191,36,0.2)",
-                      fontSize: 12,
-                      color: "#fcd34d",
-                    }}
-                  >
-                    <AlertTriangle size={12} style={{ flexShrink: 0, marginTop: 2 }} />
-                    Prompt exceeds {promptLength} characters. Some models may truncate long prompts.
+          {/* Only render the following sections when preview is available */}
+          {preview && (
+            <>
+              {/* --- 2. Upstream Nodes --- */}
+              <Section
+                title={`Upstream (${preview.upstreamNodeIds?.length ?? 0})`}
+                icon={<Layers size={14} />}
+              >
+                {preview.upstreamNodeIds.length === 0 ? (
+                  <div style={{ color: DESIGN_TOKENS.textMuted, fontSize: 12 }}>
+                    No upstream nodes
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {preview.upstreamNodeIds.map((upId: string) => {
+                      const upNode = nodes.find((n) => n.id === upId)
+                      const kind = (upNode?.data?.nodeKind ?? "unknown") as string
+                      const title = (upNode?.data?.label ??
+                        upNode?.data?.content ??
+                        upId) as string
+                      return (
+                        <div
+                          key={upId}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            padding: "6px 8px",
+                            borderRadius: 6,
+                            background: DESIGN_TOKENS.card,
+                            border: `1px solid ${DESIGN_TOKENS.border}`,
+                          }}
+                        >
+                          <Badge color={sourceColor(kind)} label={formatNodeType(kind)} />
+                          <span
+                            style={{
+                              fontSize: 12,
+                              color: DESIGN_TOKENS.text,
+                              flex: 1,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {title}
+                          </span>
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
-              </div>
-            </Section>
+              </Section>
+
+              {/* --- 3. Final Prompt --- */}
+              <Section title={`Final Prompt (${promptLength} chars)`} icon={<Sparkles size={14} />}>
+                <div
+                  style={{
+                    position: "relative",
+                    padding: 10,
+                    borderRadius: 6,
+                    background: DESIGN_TOKENS.card,
+                    border: `1px solid ${DESIGN_TOKENS.border}`,
+                    fontSize: 12,
+                    lineHeight: 1.6,
+                    color: DESIGN_TOKENS.text,
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    maxHeight: 400,
+                    overflowY: "auto",
+                  }}
+                >
+                  {displayPrompt || (
+                    <span style={{ color: DESIGN_TOKENS.textMuted, fontStyle: "italic" }}>
+                      No prompt content
+                    </span>
+                  )}
+                </div>
+                <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end" }}>
+                  <CopyButton text={displayPrompt} />
+                </div>
+              </Section>
+
+              {/* --- 4. Warnings & Errors (Bug 1 fix: read from runRequest._meta) --- */}
+              {(hasWarnings || isLongPrompt) && (
+                <Section title="Warnings" icon={<AlertTriangle size={14} />} defaultOpen={true}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {hasWarnings &&
+                      sanitizeWarnings.map((warn: string, idx: number) => (
+                        <div
+                          key={`warn-${idx}`}
+                          style={{
+                            display: "flex",
+                            alignItems: "flex-start",
+                            gap: 6,
+                            padding: "6px 8px",
+                            borderRadius: 6,
+                            background: "rgba(251,191,36,0.08)",
+                            border: "1px solid rgba(251,191,36,0.2)",
+                            fontSize: 12,
+                            color: "#fcd34d",
+                          }}
+                        >
+                          <AlertTriangle size={12} style={{ flexShrink: 0, marginTop: 2 }} />
+                          {warn}
+                        </div>
+                      ))}
+                    {isLongPrompt && (
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "flex-start",
+                          gap: 6,
+                          padding: "6px 8px",
+                          borderRadius: 6,
+                          background: "rgba(251,191,36,0.08)",
+                          border: "1px solid rgba(251,191,36,0.2)",
+                          fontSize: 12,
+                          color: "#fcd34d",
+                        }}
+                      >
+                        <AlertTriangle size={12} style={{ flexShrink: 0, marginTop: 2 }} />
+                        Prompt exceeds {promptLength} characters. Some models may truncate long prompts.
+                      </div>
+                    )}
+                  </div>
+                </Section>
+              )}
+            </>
           )}
         </div>
       </div>
