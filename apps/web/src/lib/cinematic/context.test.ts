@@ -223,6 +223,9 @@ test("enhancePromptWithCinematicContext: no upstream → returns basePrompt unch
   const base = "A cinematic frame of a hero"
   const result = enhancePromptWithCinematicContext(base, "image-1", nodes, edges)
   assert.strictEqual(result, base)
+  assert.equal(result.includes("undefined"), false)
+  assert.equal(result.includes("null"), false)
+  assert.equal(result.includes("[object Object]"), false)
 })
 
 test("enhancePromptWithCinematicContext: unrelated upstream → returns basePrompt unchanged", () => {
@@ -293,6 +296,9 @@ test("enhancePromptWithCinematicContext: storyboard + previs → merged enhancem
   assert.ok(result.includes(base))
   // With both storyboard and previs, prompt should be substantially longer
   assert.ok(result.length > base.length + 20)
+  assert.equal(result.includes("undefined"), false)
+  assert.equal(result.includes("null"), false)
+  assert.equal(result.includes("[object Object]"), false)
 })
 
 test("enhancePromptWithCinematicContext: malformed storyboard → fallback, no crash", () => {
