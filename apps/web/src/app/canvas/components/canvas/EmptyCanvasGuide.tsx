@@ -9,11 +9,17 @@ import { DESIGN_TOKENS } from "../../styles/designSystem"
 interface EmptyCanvasGuideProps {
   onCreateVideoWorkflow?: () => void
   onUploadImage: () => void
+  /** Whether the right-side chat panel is open */
+  chatOpen?: boolean
+  /** Width of the chat panel in px (default: 400) */
+  chatPanelWidth?: number
 }
 
 export function EmptyCanvasGuide({
   onCreateVideoWorkflow,
   onUploadImage,
+  chatOpen = false,
+  chatPanelWidth = 400,
 }: EmptyCanvasGuideProps) {
   const guides = [
     {
@@ -49,7 +55,10 @@ export function EmptyCanvasGuide({
   ]
 
   return (
-    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+    <div
+      className="absolute top-0 bottom-0 left-0 flex items-center justify-center pointer-events-none"
+      style={{ right: chatOpen ? chatPanelWidth : 0 }}
+    >
       <div className="flex flex-col items-center gap-5 max-w-lg">
         {/* Title */}
         <div className="flex flex-col items-center gap-2">

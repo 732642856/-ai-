@@ -1646,6 +1646,8 @@ function StarCanvasInner() {
         <EmptyCanvasGuide
           onUploadImage={handleUploadClick}
           onCreateVideoWorkflow={handleCreateVideoWorkflow}
+          chatOpen={chatOpen}
+          chatPanelWidth={CHAT_PANEL_WIDTH}
         />
       )}
 
