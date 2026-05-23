@@ -21,6 +21,7 @@ import {
   type ReactFlowInstance,
   type Viewport,
   type EdgeProps,
+  type EdgeMouseHandler,
 } from "@xyflow/react"
 import { memo, type ChangeEvent, type MouseEvent as ReactMouseEvent } from "react"
 
@@ -73,6 +74,7 @@ import { CanvasDropOverlay } from "./components/canvas/CanvasDropOverlay"
 import { AssetLibraryPanel } from "./components/canvas/AssetLibraryPanel"
 import { CanvasContextMenu } from "./components/menus/CanvasContextMenu"
 import { NodeContextMenu } from "./components/menus/NodeContextMenu"
+import { EdgeContextMenu } from "./components/menus/EdgeContextMenu"
 import { ImageHoverToolbar } from "./components/toolbar/ImageHoverToolbar"
 import { LeftToolbar } from "./components/toolbar/LeftToolbar"
 import { ChatPanel } from "./components/chat/ChatPanel"
@@ -515,6 +517,24 @@ function StarCanvasInner() {
         type: "node",
         nodeId: node.id,
         nodeType: node.type || "content",
+        screenX: event.clientX,
+        screenY: event.clientY,
+      })
+    },
+    [setContextMenu]
+  )
+
+  // ========================================================================
+  // CONTEXT MENU - EDGE
+  // ========================================================================
+  const handleEdgeContextMenu: EdgeMouseHandler = useCallback(
+    (event, edge) => {
+      event.preventDefault()
+      event.stopPropagation()
+
+      setContextMenu({
+        type: "edge",
+        edgeId: edge.id,
         screenX: event.clientX,
         screenY: event.clientY,
       })
@@ -1009,6 +1029,13 @@ function StarCanvasInner() {
       setSelectedNodeId(null)
     },
     [setNodes, setEdges, setSelectedNodeId]
+  )
+
+  const deleteEdge = useCallback(
+    (edgeId: string) => {
+      setEdges((eds) => eds.filter((e) => e.id !== edgeId))
+    },
+    [setEdges]
   )
 
   const duplicateNode = useCallback(
@@ -1610,6 +1637,7 @@ function StarCanvasInner() {
           onSelectionChange={onSelectionChange}
           onPaneContextMenu={handlePaneContextMenu}
           onNodeContextMenu={handleNodeContextMenu}
+          onEdgeContextMenu={handleEdgeContextMenu}
           onPaneClick={() => {
             setSelectedNodeId(null)
             closeContextMenu()
@@ -2029,11 +2057,28 @@ function StarCanvasInner() {
                 workflowRunner.runExecutionPlan(plan)
               }
             }}
+            onStopWorkflow={workflowRunner.stopWorkflow}
+            isWorkflowRunning={workflowRunner.state.isRunning}
             nodeKind={
               nodes.find((n) =>
                 n.id === (contextMenu?.type === "node" ? contextMenu.nodeId : null)
               )?.data?.nodeKind
             }
+          />,
+          document.body
+        )}
+
+      {/* Edge Context Menu */}
+      {typeof document !== "undefined" &&
+        createPortal(
+          <EdgeContextMenu
+            state={contextMenu}
+            onClose={closeContextMenu}
+            onDelete={() => {
+              if (contextMenu?.type === "edge") {
+                deleteEdge(contextMenu.edgeId)
+              }
+            }}
           />,
           document.body
         )}

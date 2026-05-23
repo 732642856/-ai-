@@ -238,6 +238,12 @@ export type ContextMenuState =
       screenX: number
       screenY: number
     }
+  | {
+      type: "edge"
+      edgeId: string
+      screenX: number
+      screenY: number
+    }
 
 // ============================================================================
 // Floating Toolbar Types

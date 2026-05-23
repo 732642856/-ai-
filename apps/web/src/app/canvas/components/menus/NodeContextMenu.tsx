@@ -20,6 +20,7 @@ import {
   Play,
   RotateCcw,
   ArrowRight,
+  Square,
 } from "lucide-react"
 import type { ContextMenuState, CanvasNodeKind } from "../canvas/types"
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
@@ -39,6 +40,8 @@ interface NodeContextMenuProps {
   onRunCurrentNode?: () => void
   onRunUpstreamAndCurrent?: () => void
   onRunDownstreamChain?: () => void
+  onStopWorkflow?: () => void
+  isWorkflowRunning?: boolean
   nodeKind?: CanvasNodeKind
 }
 
@@ -107,6 +110,8 @@ export const NodeContextMenu = memo(function NodeContextMenu({
   onRunCurrentNode,
   onRunUpstreamAndCurrent,
   onRunDownstreamChain,
+  onStopWorkflow,
+  isWorkflowRunning,
   nodeKind,
 }: NodeContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
@@ -238,6 +243,18 @@ export const NodeContextMenu = memo(function NodeContextMenu({
             onClose()
           }}
         />
+        {onStopWorkflow && (
+          <MenuItem
+            icon={<Square size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
+            label="停止当前工作流"
+            disabled={!isWorkflowRunning}
+            onClick={() => {
+              if (!isWorkflowRunning) return
+              onStopWorkflow()
+              onClose()
+            }}
+          />
+        )}
       </div>
 
       {/* Clipboard Section */}
