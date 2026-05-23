@@ -25,6 +25,7 @@ import type { ExecutionPlan } from "../utils/execution-plan"
 import { generateMockFrameUrls, runMockVideoAnalyze } from "../utils/mock-video-analyzer"
 import type { WorkflowRunEvent } from "../types/workflow-run"
 import { enhancePromptWithCinematicContext } from "@/lib/cinematic/context"
+import { getDefaultModel, getDefaultImageModel } from "@/lib/ai/client"
 
 interface RunContext {
   runId: string
@@ -266,6 +267,14 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
     const upstreamText = upstreamContent.join("\n\n")
     const currentContent = node.data.content || node.data.prompt || ""
 
+    // Resolve model names from config (respects .env.local + Local Override)
+    const [resolvedTextModel, resolvedImageModel] = await Promise.all([
+      getDefaultModel(),
+      getDefaultImageModel(),
+    ])
+    // 'provider' is only used for usage-tracking labels; not an API credential
+    const provider = "copse"
+
     // ------------------------------------------------------------------
     // TEXT MODEL STEP
     // ------------------------------------------------------------------
@@ -274,8 +283,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
         ? `上游内容:\n${upstreamText}\n\n${currentContent ? `当前内容:\n${currentContent}` : "请生成内容。"}`
         : (currentContent || "请生成内容。")
 
-      const model = "gpt-5.5"
-      const provider = "copse"
+      const model = resolvedTextModel
       const startedAt = new Date().toISOString()
 
       const res = await fetch("/api/ai/chat/stream", {
@@ -351,8 +359,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
     if (isImageModelStep(kind)) {
       const baseImagePrompt = upstreamText || currentContent || "A cinematic scene"
       const imagePrompt = enhancePromptWithCinematicContext(baseImagePrompt, node.id, allNodes, edges)
-      const model = "gpt-image-2"
-      const provider = "copse"
+      const model = resolvedImageModel
       const startedAt = new Date().toISOString()
 
       const res = await fetch("/api/ai/chat/stream", {
@@ -559,6 +566,12 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
     const historyInput = buildHistoryInputFromNode(node, allNodes, allEdges)
     const startedAt = new Date().toISOString()
 
+    // Resolve model names once for this run (used in catch for usage recording)
+    const [resolvedTextModel, resolvedImageModel] = await Promise.all([
+      getDefaultModel(),
+      getDefaultImageModel(),
+    ])
+
     setState((prev) => ({
       ...prev,
       isRunning: true,
@@ -699,7 +712,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
         id: `usage-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         nodeId,
         provider: "copse",
-        model: isImg ? "gpt-image-2" : "gpt-5.5",
+      model: isImg ? resolvedImageModel : resolvedTextModel,
         taskType,
         currency: "USD",
         startedAt,
