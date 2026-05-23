@@ -1648,6 +1648,7 @@ function StarCanvasInner() {
           onCreateVideoWorkflow={handleCreateVideoWorkflow}
           chatOpen={chatOpen}
           chatPanelWidth={CHAT_PANEL_WIDTH}
+          leftToolbarWidth={LEFT_TOOLBAR_SAFE_WIDTH}
         />
       )}
 
