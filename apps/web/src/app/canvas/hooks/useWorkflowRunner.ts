@@ -26,6 +26,7 @@ import { generateMockFrameUrls, runMockVideoAnalyze } from "../utils/mock-video-
 import type { WorkflowRunEvent } from "../types/workflow-run"
 import { enhancePromptWithCinematicContext } from "@/lib/cinematic/context"
 import { getDefaultModel, getDefaultImageModel, getLocalProviderOverrides } from "@/lib/ai/client"
+import { buildRunRequest } from "@/lib/ai/run-request"
 
 interface RunContext {
   runId: string
@@ -288,23 +289,25 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
     // TEXT MODEL STEP
     // ------------------------------------------------------------------
     if (isTextModelStep(kind)) {
-      const userMessage = upstreamText
-        ? `上游内容:\n${upstreamText}\n\n${currentContent ? `当前内容:\n${currentContent}` : "请生成内容。"}`
-        : (currentContent || "请生成内容。")
-
-      const model = resolvedTextModel
       const startedAt = new Date().toISOString()
-
       const providerOverrides = getLocalProviderOverrides()
+
+      const runRequest = buildRunRequest({
+        nodeKind: kind,
+        taskType: "text",
+        prompt: currentContent,
+        upstreamContent: upstreamText || undefined,
+        localDefaultModel: localModels.textModel,
+        envDefaultModel: resolvedTextModel,
+        providerOverrides: providerOverrides ? { ...providerOverrides } as Record<string, unknown> : undefined,
+        systemOverride: getSystemPrompt(kind),
+      })
+
+      const model = runRequest.model
       const res = await fetch("/api/ai/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: userMessage,
-          model,
-          context: { systemOverride: getSystemPrompt(kind) },
-          ...(providerOverrides ? { _providerOverrides: providerOverrides } : {}),
-        }),
+        body: JSON.stringify(runRequest),
       })
 
       if (!res.ok) throw new Error(`API error: ${res.status}`)
@@ -368,20 +371,29 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
     // IMAGE MODEL STEP
     // ------------------------------------------------------------------
     if (isImageModelStep(kind)) {
-      const baseImagePrompt = upstreamText || currentContent || "A cinematic scene"
-      const imagePrompt = enhancePromptWithCinematicContext(baseImagePrompt, node.id, allNodes, edges)
-      const model = resolvedImageModel
       const startedAt = new Date().toISOString()
-
       const providerOverrides = getLocalProviderOverrides()
+
+      // Cinematic enhancement (still needed as async call for upstream node walk)
+      const baseImagePrompt = upstreamText || currentContent || "A cinematic scene"
+      const cinematicPrompt = enhancePromptWithCinematicContext(baseImagePrompt, node.id, allNodes, edges)
+
+      const runRequest = buildRunRequest({
+        nodeKind: kind,
+        taskType: "image",
+        prompt: currentContent,
+        upstreamContent: upstreamText || undefined,
+        localImageModel: localModels.imageModel,
+        envDefaultImageModel: resolvedImageModel,
+        cinematicPrompt,
+        providerOverrides: providerOverrides ? { ...providerOverrides } as Record<string, unknown> : undefined,
+      })
+
+      const model = runRequest.model
       const res = await fetch("/api/ai/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: imagePrompt,
-          model,
-          ...(providerOverrides ? { _providerOverrides: providerOverrides } : {}),
-        }),
+        body: JSON.stringify(runRequest),
       })
 
       if (!res.ok) throw new Error(`API error: ${res.status}`)
@@ -441,7 +453,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
             displayWidth: 280,
             displayHeight: 200,
             runMeta: createSucceededRunMeta({ runId: runContext?.runId, message: "图片已生成" }),
-            summary: `已生成图片 (${imagePrompt.slice(0, 50)}...)`,
+            summary: `已生成图片 (${runRequest.message.slice(0, 50)}...)`,
           })
         } else {
           // Create a new image-result node
