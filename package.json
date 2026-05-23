@@ -4,21 +4,12 @@
   "private": true,
   "packageManager": "pnpm@10.33.0",
   "scripts": {
-    "dev": "turbo dev --filter web --filter api",
-    "dev:full": "turbo dev --filter web --filter api",
-    "dev:preview": "turbo dev --filter web --filter api",
+    "dev": "pnpm --filter web dev",
     "dev:web": "turbo dev --filter web",
-    "dev:api": "turbo dev --filter api",
-    "dev:infra": "node scripts/dev-infra.mjs",
-    "dev:setup": "node scripts/dev-setup.mjs",
-    "health": "node scripts/dev-health.mjs",
-    "infra:up": "docker compose -f infra/docker-compose.yml up -d",
-    "infra:down": "docker compose -f infra/docker-compose.yml down",
-    "db:generate": "pnpm --filter api prisma:generate",
-    "db:migrate": "pnpm --filter api prisma:migrate",
     "build": "turbo build",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
+    "test": "turbo test",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,css}\""
   },
   "devDependencies": {

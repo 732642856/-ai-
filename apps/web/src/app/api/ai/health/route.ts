@@ -45,6 +45,18 @@ async function runHealthCheck(baseUrl: string, apiKey: string, model: string) {
   return { ok: upstream.ok, status: upstream.status, text }
 }
 
+function toSafeConfig(config: ReturnType<typeof mergeProviderConfig>) {
+  return {
+    type: config.type,
+    baseUrl: config.baseUrl,
+    hasApiKey: Boolean(config.apiKey),
+    defaultModel: config.defaultModel,
+    defaultImageModel: config.defaultImageModel,
+    videoModel: config.videoModel,
+    timeoutMs: config.timeoutMs,
+  }
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // GET — 测试 .env 服务端配置
 // ────────────────────────────────────────────────────────────────────────────
@@ -97,7 +109,7 @@ export async function GET() {
       {
         ok: false,
         message,
-        config: getAiProviderConfigSafe(),
+        config: toSafeConfig(config),
       },
       { status: 500 },
     )
@@ -108,7 +120,7 @@ export async function GET() {
 // POST — 测试 Local Override 配置 (P2-5B fix)
 // ────────────────────────────────────────────────────────────────────────────
 export async function POST(request: NextRequest) {
-  let config
+  let config: ReturnType<typeof mergeProviderConfig>
   let overrides: AiProviderOverrides | undefined
 
   // 解析请求体
@@ -142,7 +154,7 @@ export async function POST(request: NextRequest) {
         {
           ok: false,
           message: error.message,
-          config: getAiProviderConfigSafe(),
+          config: toSafeConfig(config),
         },
         { status },
       )
@@ -152,7 +164,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       ok: true,
       message: `Connected to ${config.baseUrl} (model: ${config.defaultModel})${modeLabel}`,
-      config: getAiProviderConfigSafe(),
+      config: toSafeConfig(config),
     })
   } catch (error) {
     const message =
@@ -166,7 +178,7 @@ export async function POST(request: NextRequest) {
       {
         ok: false,
         message,
-        config: getAiProviderConfigSafe(),
+        config: toSafeConfig(config),
       },
       { status: 500 },
     )
