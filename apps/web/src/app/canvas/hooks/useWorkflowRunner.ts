@@ -25,7 +25,7 @@ import type { ExecutionPlan } from "../utils/execution-plan"
 import { generateMockFrameUrls, runMockVideoAnalyze } from "../utils/mock-video-analyzer"
 import type { WorkflowRunEvent } from "../types/workflow-run"
 import { enhancePromptWithCinematicContext } from "@/lib/cinematic/context"
-import { getDefaultModel, getDefaultImageModel } from "@/lib/ai/client"
+import { getDefaultModel, getDefaultImageModel, getLocalProviderOverrides } from "@/lib/ai/client"
 
 interface RunContext {
   runId: string
@@ -216,6 +216,14 @@ async function readSSEStream(
   return { text: result, usage }
 }
 
+function resolveLocalModelOverrides(): { textModel?: string; imageModel?: string } {
+  const overrides = getLocalProviderOverrides()
+  return {
+    textModel: overrides?.defaultModel,
+    imageModel: overrides?.imageModel,
+  }
+}
+
 export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEvent) => void }) {
   const onRunEvent = options?.onRunEvent
   const { getNodes, setNodes, setEdges, getEdges } = useReactFlow()
@@ -268,9 +276,10 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
     const currentContent = node.data.content || node.data.prompt || ""
 
     // Resolve model names from config (respects .env.local + Local Override)
+    const localModels = resolveLocalModelOverrides()
     const [resolvedTextModel, resolvedImageModel] = await Promise.all([
-      getDefaultModel(),
-      getDefaultImageModel(),
+      localModels.textModel ? Promise.resolve(localModels.textModel) : getDefaultModel(),
+      localModels.imageModel ? Promise.resolve(localModels.imageModel) : getDefaultImageModel(),
     ])
     // 'provider' is only used for usage-tracking labels; not an API credential
     const provider = "copse"
@@ -286,6 +295,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
       const model = resolvedTextModel
       const startedAt = new Date().toISOString()
 
+      const providerOverrides = getLocalProviderOverrides()
       const res = await fetch("/api/ai/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -293,6 +303,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
           message: userMessage,
           model,
           context: { systemOverride: getSystemPrompt(kind) },
+          ...(providerOverrides ? { _providerOverrides: providerOverrides } : {}),
         }),
       })
 
@@ -362,12 +373,14 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
       const model = resolvedImageModel
       const startedAt = new Date().toISOString()
 
+      const providerOverrides = getLocalProviderOverrides()
       const res = await fetch("/api/ai/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: imagePrompt,
           model,
+          ...(providerOverrides ? { _providerOverrides: providerOverrides } : {}),
         }),
       })
 
@@ -567,9 +580,10 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
     const startedAt = new Date().toISOString()
 
     // Resolve model names once for this run (used in catch for usage recording)
+    const localModels = resolveLocalModelOverrides()
     const [resolvedTextModel, resolvedImageModel] = await Promise.all([
-      getDefaultModel(),
-      getDefaultImageModel(),
+      localModels.textModel ? Promise.resolve(localModels.textModel) : getDefaultModel(),
+      localModels.imageModel ? Promise.resolve(localModels.imageModel) : getDefaultImageModel(),
     ])
 
     setState((prev) => ({
