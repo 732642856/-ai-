@@ -2,7 +2,7 @@
  * LeftToolbar - 左侧胶囊工具栏（精简版 6 按钮）
  */
 
-import { FolderOpen, Image, FileText, MessageCircle, Film } from "lucide-react"
+import { Library, Image, FileText, MessageCircle, Film } from "lucide-react"
 import { DESIGN_TOKENS } from "../../styles/designSystem"
 
 interface LeftToolbarProps {
@@ -30,7 +30,7 @@ export function LeftToolbar({
     { icon: Image, label: "参考图", onClick: onUploadImage },
     { icon: FileText, label: "创意文本", onClick: onAddText },
     { icon: Film, label: "前期流程", onClick: onCreateVideoWorkflow || onCreateNode },
-    { icon: FolderOpen, label: "素材库", onClick: onOpenAssetLibrary },
+    { icon: Library, label: "素材库", onClick: onOpenAssetLibrary },
   ]
 
   return (
