@@ -32,6 +32,7 @@ import {
 import { Handle, Position, NodeResizer, type NodeProps, useReactFlow } from "@xyflow/react"
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 import type { CanvasNodeData, CanvasNodeKind } from "../canvas/types"
+import { NodeRunStatusIndicator } from "./NodeRunStatusIndicator"
 
 interface ContentNodeProps extends NodeProps {
   data: CanvasNodeData
@@ -401,6 +402,8 @@ export const ContentNode = memo(function ContentNode({ id, data, selected }: Con
           </button>
 
           <div className="flex-1" />
+
+          <NodeRunStatusIndicator data={data} variant="dot" />
 
           {/* Fullscreen */}
           <button

@@ -20,6 +20,7 @@ import {
 import { Handle, Position, type NodeProps, useReactFlow } from "@xyflow/react"
 import { DESIGN_TOKENS } from "../../styles/designSystem"
 import type { CanvasNodeData, CanvasNodeKind } from "../canvas/types"
+import { NodeRunStatusIndicator } from "./NodeRunStatusIndicator"
 
 // Global registry for hover events
 const imageHoverRegistry: Record<string, {
@@ -255,9 +256,12 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: ImageNo
             <Upload size={13} strokeWidth={1.5} />
             <span>上传</span>
           </button>
-          <div className="flex items-center gap-1" style={{ color: DESIGN_TOKENS.textMuted }}>
-            <ImageIcon size={13} strokeWidth={1.5} />
-            <span className="text-[11px]">Image</span>
+          <div className="flex items-center gap-2">
+            <NodeRunStatusIndicator data={data} variant="dot" />
+            <div className="flex items-center gap-1" style={{ color: DESIGN_TOKENS.textMuted }}>
+              <ImageIcon size={13} strokeWidth={1.5} />
+              <span className="text-[11px]">Image</span>
+            </div>
           </div>
         </div>
 

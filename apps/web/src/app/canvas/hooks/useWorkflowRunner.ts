@@ -468,6 +468,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
               displayWidth: 280,
               displayHeight: 200,
               status: "done" as const,
+              runMeta: createSucceededRunMeta({ runId: runContext?.runId, message: "图片已生成" }),
               createdAt: Date.now(),
             },
           }
@@ -484,6 +485,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
 
       updateNodeData(node.id, {
         status: "done",
+        runMeta: createSucceededRunMeta({ runId: runContext?.runId, message: "图片已生成" }),
         summary: `图片已生成`,
       })
 
@@ -708,12 +710,14 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
     } catch (err: any) {
       const finishedAt = new Date().toISOString()
 
+      const failedRunMeta = createFailedRunMeta({
+        error: err.message || "执行失败",
+        runId,
+        message: err.message || "执行失败",
+      })
+
       updateNodeData(nodeId, {
-        runMeta: createFailedRunMeta({
-          error: err.message || "执行失败",
-          runId,
-          message: err.message || "执行失败",
-        }),
+        runMeta: failedRunMeta,
       })
 
       // ── Record failed history ──────────────────────────
@@ -731,13 +735,10 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
       })
       useRunHistoryStore.getState().append(historyItem)
 
-      // Set currentHistoryId on runMeta
-      const currentRunMeta = node.data.runMeta
-      if (currentRunMeta) {
-        updateNodeData(nodeId, {
-          runMeta: { ...currentRunMeta, currentHistoryId: historyItem.id } as NodeRunMeta,
-        })
-      }
+      // Set currentHistoryId without losing failed status/error metadata
+      updateNodeData(nodeId, {
+        runMeta: { ...failedRunMeta, currentHistoryId: historyItem.id } as NodeRunMeta,
+      })
 
       // ── Record failed usage ─────────────────────────────
       const isImg = isImageModelStep(kind)
