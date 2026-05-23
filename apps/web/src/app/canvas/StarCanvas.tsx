@@ -79,6 +79,7 @@ import { ChatPanel } from "./components/chat/ChatPanel"
 import { SettingsPanel } from "./components/panels/SettingsPanel"
 import { NodeHistoryPanel } from "./components/history/NodeHistoryPanel"
 import { WorkflowRunPanel } from "./components/workflow/WorkflowRunPanel"
+import { PromptPreviewPanel } from "./components/preview/PromptPreviewPanel"
 import ImageNode, { registerImageHoverHandlers, unregisterImageHoverHandlers } from "./components/nodes/ImageNode"
 import ContentNode from "./components/nodes/ContentNode"
 import WorkflowNode from "./components/nodes/WorkflowNode"
@@ -244,6 +245,9 @@ function StarCanvasInner() {
     setIsCanvasRestored,
     clearPersistedCanvas,
     allowAIAutoRun,
+    showPromptPreview,
+    promptPreviewNodeId,
+    closePromptPreview,
   } = useCanvasStore()
 
   // ========================================================================
@@ -1505,6 +1509,12 @@ function StarCanvasInner() {
         workflowRunner.runExecutionPlan(plan)
       }
 
+      // Ctrl+Shift+P: open Prompt Preview for selected node
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "p" && selectedNodeId) {
+        e.preventDefault()
+        useCanvasStore.getState().openPromptPreview(selectedNodeId)
+      }
+
       if (e.key === "Escape") {
         closeContextMenu()
         closeFloatingToolbar()
@@ -2153,6 +2163,13 @@ function StarCanvasInner() {
         }}
         events={runEvents}
         isRunning={workflowRunner.state.isRunning}
+      />
+
+      {/* Prompt Preview Panel (Phase 1-c Step 2) */}
+      <PromptPreviewPanel
+        isOpen={showPromptPreview}
+        onClose={closePromptPreview}
+        nodeId={promptPreviewNodeId}
       />
 
       {/* Floating Chat Reopen Button */}

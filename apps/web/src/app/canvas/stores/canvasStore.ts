@@ -83,6 +83,12 @@ interface CanvasStore {
   setIsCanvasRestored: (value: boolean) => void
   clearPersistedCanvas: () => void
 
+  // Prompt Preview panel
+  showPromptPreview: boolean
+  promptPreviewNodeId: string | null
+  openPromptPreview: (nodeId: string) => void
+  closePromptPreview: () => void
+
   // AI auto-run safety
   allowAIAutoRun: boolean
   setAllowAIAutoRun: (value: boolean) => void
@@ -180,6 +186,12 @@ export const useCanvasStore = create<CanvasStore>((set) => ({
       // ignore
     }
   },
+
+  // Prompt Preview panel
+  showPromptPreview: false,
+  promptPreviewNodeId: null,
+  openPromptPreview: (nodeId) => set({ showPromptPreview: true, promptPreviewNodeId: nodeId }),
+  closePromptPreview: () => set({ showPromptPreview: false, promptPreviewNodeId: null }),
 
   // AI auto-run safety (default: require manual confirmation)
   allowAIAutoRun: (() => {
