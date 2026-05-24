@@ -36,6 +36,25 @@ Rules:
 7. Keep under 250 words`
 }
 
+function stripDataUriPrefix(image: string): string {
+  const commaIndex = image.indexOf(",")
+  if (image.startsWith("data:") && commaIndex >= 0) {
+    return image.slice(commaIndex + 1)
+  }
+  return image
+}
+
+function normalizeSourceImages(sourceImage: unknown): string[] {
+  const images = Array.isArray(sourceImage) ? sourceImage : [sourceImage]
+  return images
+    .filter((image): image is string => typeof image === "string" && image.trim().length > 0)
+    .map((image) => {
+      const trimmed = image.trim()
+      if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed
+      return stripDataUriPrefix(trimmed)
+    })
+}
+
 export async function POST(request: NextRequest) {
   let config
   try {
@@ -92,8 +111,13 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Call image generation API
-    // gpt-image-2 supports image-to-image via the "image" parameter (base64)
+    const sourceImages = normalizeSourceImages(sourceImage)
+    const isImageEdit = sourceImages.length > 0
+
+    // Text-to-image: /images/generations
+    // Image-to-image/edit: /images/edits with image as base64/URL string array.
+    // Some compatible providers ignore image on /generations and silently fall back to text-to-image,
+    // so source-image requests must use /edits explicitly.
     const requestBody: Record<string, any> = {
       model,
       prompt: finalPrompt,
@@ -102,13 +126,12 @@ export async function POST(request: NextRequest) {
       response_format: "b64_json",
     }
 
-    if (sourceImage && typeof sourceImage === "string") {
-      // sourceImage is expected to be a data URI: "data:image/png;base64,..."
-      // gpt-image-2 accepts base64 images in the "image" field
-      requestBody["image"] = sourceImage
+    if (isImageEdit) {
+      requestBody.image = sourceImages
     }
 
-    const imageRes = await fetch(`${config.baseUrl}/images/generations`, {
+    const imageEndpoint = isImageEdit ? "/images/edits" : "/images/generations"
+    const imageRes = await fetch(`${config.baseUrl}${imageEndpoint}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
