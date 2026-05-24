@@ -122,22 +122,55 @@ export function useChatSSE(options: UseChatSSEOptions = {}): UseChatSSEReturn {
         const reader = response.body.getReader()
         const decoder = new TextDecoder()
 
+        // Cross-chunk buffer: prevent SSE JSON lines from being split by TCP framing
+        let sseBuffer = ""
         while (true) {
           const { done, value } = await reader.read()
 
           if (done) {
+            // Flush remaining buffer
+            if (sseBuffer.trim()) {
+              const trimmed = sseBuffer.trim()
+              if (trimmed.startsWith("data: ")) {
+                const data = trimmed.slice(6)
+                if (data !== "[DONE]") {
+                  try {
+                    const parsed = JSON.parse(data)
+                    if (parsed.content) {
+                      fullContent += parsed.content
+                      setStreamingContent(fullContent)
+                      options.onMessage?.(parsed.content)
+                    }
+                    if (parsed.type === "image_generated" && parsed.imageUrl) {
+                      options.onImageGenerated?.({
+                        imageUrl: parsed.imageUrl,
+                        prompt: parsed.prompt || "",
+                        model: parsed.model || "",
+                        revisedPrompt: parsed.revisedPrompt,
+                      })
+                    }
+                    if (parsed.error) {
+                      throw new Error(parsed.error)
+                    }
+                  } catch (e) {
+                    console.warn("[SSE] Parse error (final buffer):", e)
+                  }
+                }
+              }
+            }
             break
           }
 
-          const chunk = decoder.decode(value, { stream: true })
-          const lines = chunk.split("\n")
+          sseBuffer += decoder.decode(value, { stream: true })
+          const lines = sseBuffer.split("\n")
+          sseBuffer = lines.pop() || ""
 
           for (const line of lines) {
             if (line.startsWith("data: ")) {
               const data = line.slice(6)
 
               if (data === "[DONE]") {
-                break
+                continue
               }
 
               try {
