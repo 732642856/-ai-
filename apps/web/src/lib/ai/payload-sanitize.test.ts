@@ -18,7 +18,7 @@ import type { RawRunPayload } from "./payload-sanitize.ts"
 // ============================================================================
 
 /** 构造最简有效 payload */
-function validPayload(overrides?: Partial<RawRunPayload>): RawRunPayload {
+function validPayload(overrides?: Partial<RawRunPayload> & Record<string, unknown>): RawRunPayload {
   return {
     message: "Hello world",
     model: "gpt-5.5",
@@ -171,7 +171,7 @@ describe("sanitizeProviderOverrides", () => {
 
   it("returns undefined for all-invalid input", () => {
     assert.equal(sanitizeProviderOverrides({}), undefined)
-    assert.equal(sanitizeProviderOverrides(null), undefined)
+    assert.equal(sanitizeProviderOverrides(null as unknown as Record<string, unknown> | undefined), undefined)
     assert.equal(sanitizeProviderOverrides(undefined), undefined)
   })
 

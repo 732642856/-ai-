@@ -376,3 +376,5 @@ test("full result → formatVideoAnalysisAsMarkdown 包含 summary 和 scenes", 
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`)
 if (failed > 0) process.exit(1)
+
+export {}

@@ -28,8 +28,7 @@ describe("buildRunRequest: text task", () => {
   it("produces valid RunRequest for basic text input", () => {
     const result = buildRunRequest(validInput())
     assert.equal(result.message, "Generate a story")
-    assert.equal(result.taskType, undefined) // taskType is in _meta
-    assert.equal(result._meta.taskType, "text")
+    assert.equal(result._meta.taskType, "text") // taskType lives in _meta, not top-level
     assert.equal(result._meta.nodeKind, "text-generation")
     assert.equal(typeof result.model, "string")
     assert.ok(result.model.length > 0)

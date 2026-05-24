@@ -539,3 +539,5 @@ console.log(`  通过: ${passed}  失败: ${failed}`)
 console.log(`${"═".repeat(40)}\n`)
 
 if (failed > 0) process.exit(1)
+
+export {}
