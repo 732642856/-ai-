@@ -157,7 +157,7 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: ImageNo
         size,
       }
       if (imageUrl) {
-        bodyObj.image = imageUrl
+        bodyObj.sourceImage = imageUrl
       }
 
       const res = await fetch("/api/ai/generate-image", {

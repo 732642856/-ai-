@@ -47,7 +47,8 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { prompt, model: reqModel, size = "1024x1024", sourceImage } = body
+    const { prompt, model: reqModel, size = "1024x1024" } = body
+    const sourceImage = typeof body.sourceImage === "string" ? body.sourceImage : body.image
     const model = (typeof reqModel === "string" ? reqModel : undefined) ?? config.defaultImageModel
 
     if (!prompt || typeof prompt !== "string") {

@@ -275,22 +275,7 @@ export function ChatInput({
             {filteredMentionNodes.map((node, idx) => {
               const title = node.data?.title || node.data?.fileName || node.data?.text?.slice(0, 20) || "未命名节点"
               const typeLabel = node.type === "image" ? "图片" : node.type === "text" ? "文本" : "提示词"
-            
-  // Slash command handler
-  const handleSlashSelect = (command: SlashCommand) => {
-    setShowSlashMenu(false)
-    setSlashQuery("")
-    // Replace the "/" and query with the command id
-    const newValue = value.replace(/\/[^\s]*$/, command.id)
-    onChange(newValue + " ")
-    textareaRef.current?.focus()
-  }
-
-  const handleSlashClose = () => {
-    setShowSlashMenu(false)
-    setSlashQuery("")
-  }
-  return (
+              return (
                 <button
                   key={node.id}
                   onClick={() => insertNodeMention(node)}

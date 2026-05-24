@@ -328,11 +328,11 @@ export function SlashCommandMenu({
   return (
     <div
       ref={listRef}
-      className="absolute bottom-full left-0 z-50 mb-2 max-h-80 w-72 overflow-y-auto rounded-xl border p-1 shadow-2xl"
+      className="absolute bottom-full left-0 z-[80] mb-3 max-h-[260px] w-[min(22rem,calc(100vw-3rem))] overflow-y-auto rounded-xl border p-1 shadow-2xl"
       style={{
-        backgroundColor: DESIGN_TOKENS.surfaceAlt,
-        borderColor: DESIGN_TOKENS.border,
-        boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+        backgroundColor: "rgba(21, 21, 27, 0.98)",
+        borderColor: DESIGN_TOKENS.borderStrong,
+        boxShadow: "0 24px 70px rgba(0,0,0,0.72)",
       }}
       onMouseDown={(e) => e.preventDefault()} // prevent input blur
     >
