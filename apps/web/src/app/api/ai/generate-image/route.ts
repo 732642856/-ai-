@@ -36,23 +36,13 @@ Rules:
 7. Keep under 250 words`
 }
 
-function stripDataUriPrefix(image: string): string {
-  const commaIndex = image.indexOf(",")
-  if (image.startsWith("data:") && commaIndex >= 0) {
-    return image.slice(commaIndex + 1)
-  }
-  return image
-}
-
-function normalizeSourceImages(sourceImage: unknown): string[] {
+function normalizeSourceImages(sourceImage: unknown): { image_url: string }[] {
   const images = Array.isArray(sourceImage) ? sourceImage : [sourceImage]
   return images
     .filter((image): image is string => typeof image === "string" && image.trim().length > 0)
-    .map((image) => {
-      const trimmed = image.trim()
-      if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed
-      return stripDataUriPrefix(trimmed)
-    })
+    .map((image) => ({
+      image_url: image.trim(),
+    }))
 }
 
 export async function POST(request: NextRequest) {
@@ -115,7 +105,7 @@ export async function POST(request: NextRequest) {
     const isImageEdit = sourceImages.length > 0
 
     // Text-to-image: /images/generations
-    // Image-to-image/edit: /images/edits with image as base64/URL string array.
+    // Image-to-image/edit: /images/edits with image as { image_url } object array.
     // Some compatible providers ignore image on /generations and silently fall back to text-to-image,
     // so source-image requests must use /edits explicitly.
     const requestBody: Record<string, any> = {
