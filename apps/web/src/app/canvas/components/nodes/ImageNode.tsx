@@ -150,14 +150,20 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: ImageNo
       const ratio = ASPECT_RATIOS.find(r => r.value === selectedRatio)
       const size = ratio?.size || "1024x1024"
 
+      // Build request body — support image-to-image when imageUrl exists
+      const bodyObj: Record<string, any> = {
+        prompt: aiInput,
+        model: "gpt-image-2",
+        size,
+      }
+      if (imageUrl) {
+        bodyObj.image = imageUrl
+      }
+
       const res = await fetch("/api/ai/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: aiInput,
-          model: "gpt-image-2",
-          size,
-        }),
+        body: JSON.stringify(bodyObj),
       })
 
       if (!res.ok) {
@@ -196,14 +202,14 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: ImageNo
         style: { stroke: DESIGN_TOKENS.nodeEdge, strokeWidth: 1.5 },
       }])
 
-      setAiInput("")
+      // NOTE: intentionally NOT clearing aiInput so user can tweak & retry
+
     } catch (err: any) {
       setAiError(err.message || "生成失败")
     } finally {
       setIsGenerating(false)
     }
-  }, [aiInput, selectedRatio, id, getNodes, setNodes, setEdges])
-
+  }, [aiInput, selectedRatio, id, getNodes, setNodes, setEdges, imageUrl])
   const handleAiInputKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
