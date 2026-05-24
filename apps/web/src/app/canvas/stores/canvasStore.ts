@@ -22,7 +22,7 @@ export type { CanvasNodeKind, ChatMode, RightPanelMode, ContextMenuState, Floati
 export const DEFAULT_VIEWPORT: Viewport = {
   x: 0,
   y: 0,
-  zoom: 0.85,
+  zoom: 0.55,
 }
 
 export const VIEWPORT_CONSTRAINTS = {

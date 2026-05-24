@@ -783,6 +783,7 @@ export function ChatPanel({
           onAddAttachmentToCanvas={handleAddToCanvas}
           placeholder={selectedNodeId ? "根据选中节点提问..." : "描述想法，或框选节点添加上下文..."}
           canvasNodes={canvasNodes}
+          selectedCount={selectedNodeId ? 1 : 0}
         />
       </div>
     </div>,

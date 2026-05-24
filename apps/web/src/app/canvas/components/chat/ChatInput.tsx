@@ -7,6 +7,7 @@ import { useRef, useState, type ChangeEvent, type KeyboardEvent } from "react"
 import { Paperclip, ArrowUp, Square, Mic, ChevronDown, Settings, Sparkles } from "lucide-react"
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 import { ChatAttachmentPreview } from "./ChatAttachmentPreview"
+import { SlashCommandMenu } from "./SlashCommandMenu"
 import type { ChatAttachment } from "../../hooks/useChatAttachments"
 import type { SlashCommand } from "../../types/slash-commands"
 
@@ -52,6 +53,7 @@ interface ChatInputProps {
   placeholder?: string
   disabled?: boolean
   canvasNodes?: any[] // 画布节点列表，用于 @ 引用
+  selectedCount?: number // 选中节点数，用于 slash 命令过滤
 }
 
 // 读取用户配置的模型列表（from localStorage or default）
@@ -89,6 +91,7 @@ export function ChatInput({
   placeholder = "描述想法，或框选节点添加上下文...",
   disabled = false,
   canvasNodes = [],
+  selectedCount = 0,
 }: ChatInputProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -470,6 +473,16 @@ export function ChatInput({
           )}
         </div>
       </div>
+      {/* Slash Command Menu */}
+      {showSlashMenu && (
+        <SlashCommandMenu
+          query={slashQuery}
+          selectedCount={selectedCount}
+          onSelect={handleSlashSelect}
+          onClose={() => setShowSlashMenu(false)}
+          position={slashPosition}
+        />
+      )}
     </div>
   )
 }
