@@ -10,7 +10,6 @@ import {
   Upload,
   Image as ImageIcon,
   ChevronDown,
-  Mic,
   ArrowUp,
   Loader2,
   X,
@@ -56,11 +55,11 @@ const IMAGE_MODELS = [
 
 // Aspect ratio options
 const ASPECT_RATIOS = [
-  { value: "1:1", label: "1:1", size: "1024x1024" },
-  { value: "16:9", label: "16:9", size: "1024x576" },
-  { value: "9:16", label: "9:16", size: "576x1024" },
-  { value: "4:3", label: "4:3", size: "1024x768" },
-  { value: "3:4", label: "3:4", size: "768x1024" },
+  { value: "1:1", label: "1:1", size: "1024x1024", displaySize: "1024" },
+  { value: "16:9", label: "16:9", size: "1024x576", displaySize: "1024×576" },
+  { value: "9:16", label: "9:16", size: "576x1024", displaySize: "576×1024" },
+  { value: "4:3", label: "4:3", size: "1024x768", displaySize: "1024×768" },
+  { value: "3:4", label: "3:4", size: "768x1024", displaySize: "768×1024" },
 ]
 
 export const ImageNode = memo(function ImageNode({ id, data, selected }: ImageNodeProps) {
@@ -335,7 +334,7 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: ImageNo
             </button>
           </div>
 
-          {/* Bottom bar: Model + Ratio + Voice + Speed + Token + Send */}
+          {/* Bottom bar: Model + Ratio + Send */}
           <div className="mt-2 flex items-center justify-between">
             {/* Left: Model + Ratio */}
             <div className="flex items-center gap-2">
@@ -385,7 +384,7 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: ImageNo
                   style={{ color: DESIGN_TOKENS.textSecondary }}
                 >
                   <span className="text-[10px]">{currentRatio.label}</span>
-                  <span className="text-[10px]" style={{ color: DESIGN_TOKENS.textMuted }}>· 2K</span>
+                  <span className="text-[10px]" style={{ color: DESIGN_TOKENS.textMuted }}>· {currentRatio.displaySize}</span>
                   <ChevronDown size={12} strokeWidth={1.5} />
                 </button>
                 {showRatioDropdown && (
@@ -405,7 +404,7 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: ImageNo
                         style={{ color: selectedRatio === ratio.value ? DESIGN_TOKENS.accentHover : DESIGN_TOKENS.textSecondary }}
                       >
                         <span className="font-medium">{ratio.label}</span>
-                        <span className="text-[10px]" style={{ color: DESIGN_TOKENS.textMuted }}>{ratio.size}</span>
+                        <span className="text-[10px]" style={{ color: DESIGN_TOKENS.textMuted }}>{ratio.displaySize}</span>
                       </button>
                     ))}
                   </div>
@@ -413,15 +412,8 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: ImageNo
               </div>
             </div>
 
-            {/* Right: Voice + Speed + Token + Send */}
+            {/* Right: Send */}
             <div className="flex items-center gap-1">
-              <button className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/5" style={{ color: DESIGN_TOKENS.textMuted }} title="语音输入">
-                <Mic size={14} strokeWidth={1.5} />
-              </button>
-              <div className="mx-1 h-3.5 w-px" style={{ backgroundColor: DESIGN_TOKENS.border }} />
-              <span className="text-[11px]" style={{ color: DESIGN_TOKENS.textMuted }}>1x</span>
-              <div className="mx-1 h-3.5 w-px" style={{ backgroundColor: DESIGN_TOKENS.border }} />
-              <span className="text-[11px]" style={{ color: DESIGN_TOKENS.textMuted }}>5</span>
               <button
                 onClick={handleAiGenerate}
                 disabled={isGenerating || !aiInput.trim()}
