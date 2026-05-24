@@ -317,8 +317,12 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: ImageNo
               value={aiInput}
               onChange={(e) => setAiInput(e.target.value)}
               onKeyDown={handleAiInputKeyDown}
+              onPointerDownCapture={(e) => e.stopPropagation()}
+              onMouseDownCapture={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              onDoubleClick={(e) => e.stopPropagation()}
               placeholder="描述任何你想要生成的内容"
-              className="w-full resize-none rounded-xl border bg-transparent px-3 py-2.5 pr-10 text-sm text-white/80 placeholder:text-white/25 focus:outline-none"
+              className="nodrag nopan nowheel w-full resize-none rounded-xl border bg-transparent px-3 py-2.5 pr-10 text-sm text-white/80 placeholder:text-white/25 focus:outline-none"
               style={{
                 borderColor: DESIGN_TOKENS.border,
                 minHeight: "44px",
@@ -327,8 +331,10 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: ImageNo
               rows={1}
             />
             <button
-              className="absolute right-2 top-2"
+              className="nodrag nopan absolute right-2 top-2"
               style={{ color: DESIGN_TOKENS.textMuted }}
+              onPointerDownCapture={(e) => e.stopPropagation()}
+              onMouseDownCapture={(e) => e.stopPropagation()}
             >
               <Maximize2 size={14} strokeWidth={1.5} />
             </button>
