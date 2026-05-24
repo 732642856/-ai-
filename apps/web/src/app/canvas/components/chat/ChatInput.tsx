@@ -8,6 +8,7 @@ import { Paperclip, ArrowUp, Square, Mic, ChevronDown, Settings, Sparkles } from
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 import { ChatAttachmentPreview } from "./ChatAttachmentPreview"
 import type { ChatAttachment } from "../../hooks/useChatAttachments"
+import type { SlashCommand } from "../../types/slash-commands"
 
 // copse.top 实际支持的 AI 模型列表
 export type AiModel =
@@ -94,6 +95,9 @@ export function ChatInput({
   const [showModelDropdown, setShowModelDropdown] = useState(false)
   const [activeTypeFilter, setActiveTypeFilter] = useState<"text" | "image" | "video" | null>(null)
   const [showNodeMention, setShowNodeMention] = useState(false)
+  const [showSlashMenu, setShowSlashMenu] = useState(false)
+  const [slashQuery, setSlashQuery] = useState("")
+  const [slashPosition, setSlashPosition] = useState({ top: 0, left: 0 })
   const [mentionQuery, setMentionQuery] = useState("")
   const [mentionIndex, setMentionIndex] = useState(0)
 
@@ -163,6 +167,30 @@ export function ChatInput({
 
   const handleInputChange = (newValue: string) => {
     onChange(newValue)
+    // Slash command detection
+    const lastSlashIndex = newValue.lastIndexOf("/")
+    if (lastSlashIndex >= 0) {
+      const afterSlash = newValue.slice(lastSlashIndex + 1)
+      // Only trigger if "/" is at start or after whitespace, and query is alphanumeric/Chinese
+      const beforeSlash = lastSlashIndex > 0 ? newValue[lastSlashIndex - 1] : " "
+      if (/\s/.test(beforeSlash) || lastSlashIndex === 0) {
+        if (/^[\w一-鿿]*$/.test(afterSlash) && !afterSlash.includes(" ")) {
+          setSlashQuery(afterSlash)
+          setShowSlashMenu(true)
+          // Calculate position near textarea
+          if (textareaRef.current) {
+            const rect = textareaRef.current.getBoundingClientRect()
+            setSlashPosition({ top: rect.top - 10, left: rect.left + 12 })
+          }
+        } else {
+          setShowSlashMenu(false)
+        }
+      } else {
+        setShowSlashMenu(false)
+      }
+    } else {
+      setShowSlashMenu(false)
+    }
     // 检测 @ 触发引用
     const lastAtIndex = newValue.lastIndexOf("@")
     if (lastAtIndex >= 0) {
@@ -184,6 +212,21 @@ export function ChatInput({
     fileInputRef.current?.click()
   }
 
+
+  // Slash command handler
+  const handleSlashSelect = (command: SlashCommand) => {
+    setShowSlashMenu(false)
+    setSlashQuery("")
+    // Replace the "/" and query with the command id
+    const newValue = value.replace(/\/[^\s]*$/, command.id)
+    onChange(newValue + " ")
+    textareaRef.current?.focus()
+  }
+
+  const handleSlashClose = () => {
+    setShowSlashMenu(false)
+    setSlashQuery("")
+  }
   return (
     <div
       className="flex flex-col rounded-2xl border"
@@ -235,7 +278,22 @@ export function ChatInput({
             {filteredMentionNodes.map((node, idx) => {
               const title = node.data?.title || node.data?.fileName || node.data?.text?.slice(0, 20) || "未命名节点"
               const typeLabel = node.type === "image" ? "图片" : node.type === "text" ? "文本" : "提示词"
-              return (
+            
+  // Slash command handler
+  const handleSlashSelect = (command: SlashCommand) => {
+    setShowSlashMenu(false)
+    setSlashQuery("")
+    // Replace the "/" and query with the command id
+    const newValue = value.replace(/\/[^\s]*$/, command.id)
+    onChange(newValue + " ")
+    textareaRef.current?.focus()
+  }
+
+  const handleSlashClose = () => {
+    setShowSlashMenu(false)
+    setSlashQuery("")
+  }
+  return (
                 <button
                   key={node.id}
                   onClick={() => insertNodeMention(node)}

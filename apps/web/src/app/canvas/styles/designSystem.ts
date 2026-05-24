@@ -11,6 +11,7 @@ export const DESIGN_TOKENS = {
   panelSolid: "#15151b",
   card: "rgba(255, 255, 255, 0.04)",
   cardHover: "rgba(255, 255, 255, 0.07)",
+  surfaceAlt: "rgba(255, 255, 255, 0.06)",
 
   // 边框
   border: "rgba(255, 255, 255, 0.08)",
@@ -19,6 +20,7 @@ export const DESIGN_TOKENS = {
 
   // 文字
   text: "rgba(255, 255, 255, 0.92)",
+  textPrimary: "rgba(255, 255, 255, 0.92)",
   textSecondary: "rgba(255, 255, 255, 0.62)",
   textMuted: "rgba(255, 255, 255, 0.38)",
 
