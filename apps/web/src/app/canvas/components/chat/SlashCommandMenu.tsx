@@ -4,7 +4,6 @@
 "use client"
 
 import { useMemo, useState, useRef, useEffect, type KeyboardEvent } from "react"
-import { createPortal } from "react-dom"
 import {
   Pencil,
   Text,
@@ -234,8 +233,6 @@ interface SlashCommandMenuProps {
   onSelect: (command: SlashCommand) => void
   /** Called when menu should close (Escape, etc.) */
   onClose: () => void
-  /** Position (relative to the ChatInput textarea) */
-  position: { top: number; left: number }
 }
 
 export function SlashCommandMenu({
@@ -243,7 +240,6 @@ export function SlashCommandMenu({
   selectedCount,
   onSelect,
   onClose,
-  position,
 }: SlashCommandMenuProps) {
   const [activeIndex, setActiveIndex] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
@@ -329,13 +325,11 @@ export function SlashCommandMenu({
 
   if (flatCommands.length === 0) return null
 
-  return createPortal(
+  return (
     <div
       ref={listRef}
-      className="fixed z-50 max-h-80 w-72 overflow-y-auto rounded-xl border p-1 shadow-2xl"
+      className="absolute bottom-full left-0 z-50 mb-2 max-h-80 w-72 overflow-y-auto rounded-xl border p-1 shadow-2xl"
       style={{
-        top: position.top,
-        left: position.left,
         backgroundColor: DESIGN_TOKENS.surfaceAlt,
         borderColor: DESIGN_TOKENS.border,
         boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
@@ -394,7 +388,6 @@ export function SlashCommandMenu({
           })}
         </div>
       ))}
-    </div>,
-    document.body
+    </div>
   )
 }

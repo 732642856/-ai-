@@ -100,7 +100,6 @@ export function ChatInput({
   const [showNodeMention, setShowNodeMention] = useState(false)
   const [showSlashMenu, setShowSlashMenu] = useState(false)
   const [slashQuery, setSlashQuery] = useState("")
-  const [slashPosition, setSlashPosition] = useState({ top: 0, left: 0 })
   const [mentionQuery, setMentionQuery] = useState("")
   const [mentionIndex, setMentionIndex] = useState(0)
 
@@ -180,12 +179,6 @@ export function ChatInput({
         if (/^[\w一-鿿]*$/.test(afterSlash) && !afterSlash.includes(" ")) {
           setSlashQuery(afterSlash)
           setShowSlashMenu(true)
-          // Calculate position near textarea
-          if (textareaRef.current) {
-            const rect = textareaRef.current.getBoundingClientRect()
-            // Position menu above the input (max-h ≈ 320px + 20px gap)
-            setSlashPosition({ top: Math.max(8, rect.top - 340), left: rect.left + 12 })
-          }
         } else {
           setShowSlashMenu(false)
         }
@@ -314,6 +307,15 @@ export function ChatInput({
               )
             })}
           </div>
+        )}
+        {/* Slash Command Menu */}
+        {showSlashMenu && (
+          <SlashCommandMenu
+            query={slashQuery}
+            selectedCount={selectedCount}
+            onSelect={handleSlashSelect}
+            onClose={() => setShowSlashMenu(false)}
+          />
         )}
       </div>
 
@@ -474,16 +476,6 @@ export function ChatInput({
           )}
         </div>
       </div>
-      {/* Slash Command Menu */}
-      {showSlashMenu && (
-        <SlashCommandMenu
-          query={slashQuery}
-          selectedCount={selectedCount}
-          onSelect={handleSlashSelect}
-          onClose={() => setShowSlashMenu(false)}
-          position={slashPosition}
-        />
-      )}
     </div>
   )
 }
