@@ -13,3 +13,10 @@ coverage
 .workbuddy/
 
 *.tsbuildinfo
+
+# local backups
+*.bak
+
+# security
+*.pem
+*.key
