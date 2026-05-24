@@ -183,7 +183,8 @@ export function ChatInput({
           // Calculate position near textarea
           if (textareaRef.current) {
             const rect = textareaRef.current.getBoundingClientRect()
-            setSlashPosition({ top: rect.top - 10, left: rect.left + 12 })
+            // Position menu above the input (max-h ≈ 320px + 20px gap)
+            setSlashPosition({ top: Math.max(8, rect.top - 340), left: rect.left + 12 })
           }
         } else {
           setShowSlashMenu(false)
