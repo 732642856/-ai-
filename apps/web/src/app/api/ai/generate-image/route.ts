@@ -1,95 +1,331 @@
 // ============================================================================
-// Image Generation API Route - Supports text-to-image and image-to-image
-// Used by ContentNode AI 生成 and ImageNode AI 生成
+// Image Generation API Route - Non-streaming JSON response
+// Supports text-to-image via /images/generations and image editing via /images/edits
 // ============================================================================
 import { NextRequest, NextResponse } from "next/server"
-import { getAiProviderConfig } from "@/lib/ai/provider-config"
-import { normalizeUpstreamError, normalizeClientError } from "@/lib/ai/errors"
+import { normalizeGenerationError } from "@/lib/ai/normalizeGenerationError"
+import { getImageProviderCapability } from "@/lib/ai/imageProviderCapabilities"
 
-/**
- * Build the prompt enhancement system prompt.
- * When sourceImage is present (image-to-image), the enhancement
- * MUST preserve the reference image's content and only describe
- * how to transform it.
- */
+// ── Config ──────────────────────────────────────────────────────────────────
+const API_BASE_URL = process.env.AI_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL || "https://api.openai.com/v1"
+const API_KEY = process.env.AI_API_KEY || process.env.OPENAI_API_KEY || ""
+const REQUEST_TIMEOUT_MS = Number(process.env.AI_REQUEST_TIMEOUT_MS || 120000)
+const ENHANCE_TIMEOUT_MS = Math.min(REQUEST_TIMEOUT_MS, 30000)
+const IMAGE_RETRY_ATTEMPTS = Math.max(1, Number(process.env.AI_IMAGE_RETRY_ATTEMPTS || 2))
+const RETRYABLE_UPSTREAM_STATUSES = new Set([429, 500, 502, 503, 504])
+
+async function fetchWithTimeout(input: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    })
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function shouldRetryUpstreamStatus(status: number): boolean {
+  return RETRYABLE_UPSTREAM_STATUSES.has(status)
+}
+
+function getRetryDelayMs(attempt: number): number {
+  const baseDelay = 600
+  const exponentialDelay = baseDelay * Math.pow(2, Math.max(0, attempt - 1))
+  const jitter = Math.floor(Math.random() * 250)
+  return Math.min(5_000, exponentialDelay + jitter)
+}
+
+// ── Reference image format mode ─────────────────────────────────────────────
+// G0 finding against copse.top / gpt-image-2:
+// - "image_pure_base64": returns 200; only usable format currently found.
+// - "image_data_url":    upstream returns Cloudflare 502.
+// - "image_url_data_url":fetch fails through upstream.
+// NOTE: A 200 here does not prove the provider truly applies the reference image;
+// visual QA is still required because unsupported fields may be silently ignored.
+// "image_pure_base64": image: ["pureBase64"] — skyengine 方式 C（当前启用）
+// "image_data_url":    image: ["data:image/png;base64,..."]
+// "image_url_data_url":image_url: ["data:image/png;base64,..."] — ModelScope 风格
+// "messages_image_url":messages multimodal payload — OpenAI-compatible fallback
+type ReferenceImageFormat =
+  | "image_pure_base64"
+  | "image_data_url"
+  | "image_url_data_url"
+  | "messages_image_url"
+
+const REFERENCE_IMAGE_FORMAT: ReferenceImageFormat = "image_pure_base64"
+const IMAGE_TO_IMAGE_ENDPOINT = "/images/edits"
+const TEXT_TO_IMAGE_ENDPOINT = "/images/generations"
+
+const SUPPORTED_IMAGE_SIZES = new Set(["1024x1024", "1792x1024", "1024x1792"])
+const SIZE_ALIASES: Record<string, string> = {
+  "1024x576": "1792x1024",
+  "576x1024": "1024x1792",
+  "1024x768": "1792x1024",
+  "768x1024": "1024x1792",
+  "512x512": "1024x1024",
+}
+
+function normalizeImageSize(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) return "1024x1024"
+
+  const size = value.trim()
+  if (SUPPORTED_IMAGE_SIZES.has(size)) return size
+  return SIZE_ALIASES[size] || "1024x1024"
+}
+
+// ── Utility: strip data URI prefix ──────────────────────────────────────────
+function stripDataUriPrefix(value: string): string {
+  const trimmed = value.trim()
+  const match = trimmed.match(/^data:[^;]+;base64,(.*)$/)
+  return match ? match[1] : trimmed
+}
+
+// ── Utility: normalize source images to string[] ────────────────────────────
+function normalizeSourceImages(input: unknown): string[] {
+  if (!input) return []
+
+  const values = Array.isArray(input) ? input : [input]
+
+  return values
+    .map((item) => {
+      if (typeof item === "string") return item
+      if (
+        item &&
+        typeof item === "object" &&
+        "image_url" in item &&
+        typeof (item as { image_url?: unknown }).image_url === "string"
+      ) {
+        return (item as { image_url: string }).image_url
+      }
+      return null
+    })
+    .filter((item): item is string => Boolean(item && item.trim()))
+}
+
+function buildStrictEditPrompt(userPrompt: string): string {
+  return [
+    "Edit the provided source image. Preserve the exact main subject, building identity, architecture, camera angle, composition, framing, perspective, proportions, and surrounding layout.",
+    "Do not replace the scene with another landmark, building, location, object, or composition.",
+    "Only apply this requested change:",
+    userPrompt.trim(),
+  ].join("\n")
+}
+
+function buildMultimodalImageMessage(prompt: string, dataUrl: string) {
+  return [{
+    role: "user",
+    content: [
+      { type: "text", text: prompt },
+      { type: "image_url", image_url: { url: dataUrl } },
+    ],
+  }]
+}
+
+function dataUrlToBlob(dataUrl: string): Blob {
+  const [header, base64] = dataUrl.split(",")
+  const mimeType = header.match(/data:(.*?);base64/)?.[1] || "image/png"
+  const binary = atob(base64 || "")
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return new Blob([bytes], { type: mimeType })
+}
+
+function buildImageEditFormData(params: {
+  model: string
+  prompt: string
+  size: string
+  sourceImageValues: string[]
+}): FormData {
+  const { model, prompt, size, sourceImageValues } = params
+  const form = new FormData()
+  form.append("model", model)
+  form.append("prompt", prompt)
+  form.append("size", size)
+  form.append("n", "1")
+  form.append("response_format", "b64_json")
+
+  sourceImageValues.forEach((sourceImage, index) => {
+    const blob = dataUrlToBlob(sourceImage)
+    const ext = blob.type.includes("jpeg") ? "jpg" : blob.type.includes("webp") ? "webp" : "png"
+    form.append("image", blob, `reference-${index}.${ext}`)
+  })
+
+  return form
+}
+
+function buildImageGenerationPayload(params: {
+  model: string
+  prompt: string
+  size: string
+  sourceImageValues: string[]
+}): Record<string, unknown> {
+  const { model, prompt, size, sourceImageValues } = params
+  const payload: Record<string, unknown> = {
+    model,
+    prompt,
+    n: 1,
+    size,
+    response_format: "b64_json",
+  }
+
+  if (sourceImageValues.length === 0) return payload
+
+  switch (REFERENCE_IMAGE_FORMAT) {
+    case "image_pure_base64":
+      payload.image = sourceImageValues.map(stripDataUriPrefix)
+      break
+    case "image_data_url":
+      payload.image = sourceImageValues
+      break
+    case "image_url_data_url":
+      payload.image_url = sourceImageValues
+      break
+    case "messages_image_url":
+      payload.messages = buildMultimodalImageMessage(prompt, sourceImageValues[0])
+      break
+  }
+
+  return payload
+}
+
+// ── Build system prompt for image prompt enhancement ────────────────────────
 function buildEnhanceSystemPrompt(hasSourceImage: boolean): string {
   if (hasSourceImage) {
-    return `You are an expert image prompt engineer. The user will provide a transformation request for an existing image (e.g., "turn this into a night scene").
-
-Rules:
-1. Translate Chinese to English if needed
-2. The prompt MUST describe how to transform the SOURCE image — do NOT invent a new subject
-3. Focus on lighting, atmosphere, style transfer, and mood changes
-4. Explicitly mention: "modify the uploaded image", "preserve the original composition"
-5. Output ONLY the final prompt text, no explanations
-6. Keep under 200 words`
+    return [
+      "You are an expert image editing prompt engineer.",
+      "The user has uploaded a source image and is asking to edit it, not replace it.",
+      "Your job is to rewrite the user's request into a strict image-editing instruction.",
+      "Preserve the source image's main subject, building identity, architecture, camera angle, composition, framing, perspective, proportions, and surrounding layout unless the user explicitly asks to change them.",
+      "Only modify the requested attributes, such as time of day, lighting, weather, mood, color grading, or style.",
+      "Do NOT invent a different landmark, building, scene, country, object, or composition.",
+      "Do NOT describe a generic scene; describe an edited version of the SAME source image.",
+      "Output ONLY the instruction text, nothing else.",
+      "Keep it under 160 words.",
+    ].join(" ")
   }
-  return `You are an expert image prompt engineer specializing in translating Chinese creative requests into high-quality English image generation prompts.
 
-Rules:
-1. Translate all Chinese content to English
-2. Preserve the exact creative intent — do not change the subject matter
-3. Add specific details: composition, lighting, style, mood, color palette
-4. For character design requests, explicitly request: "orthographic three-view character design sheet, front view + side view + back view, clean white background, consistent character design, detailed line art style, professional concept art"
-5. For scene/environment requests, add: "cinematic lighting, highly detailed, 8K quality, professional photography"
-6. Output ONLY the final prompt text, no explanations
-7. Keep under 250 words`
+  return [
+    "You are an expert image prompt engineer.",
+    "Convert the user's request into a detailed, high-quality English image generation prompt.",
+    "Output ONLY the prompt text, nothing else.",
+    "Be specific about: subject, composition, lighting, style, mood, color palette, and technical quality terms.",
+    "Keep it under 200 words.",
+  ].join(" ")
 }
 
-function normalizeSourceImages(sourceImage: unknown): { image_url: string }[] {
-  const images = Array.isArray(sourceImage) ? sourceImage : [sourceImage]
-  return images
-    .filter((image): image is string => typeof image === "string" && image.trim().length > 0)
-    .map((image) => ({
-      image_url: image.trim(),
-    }))
-}
-
+// ── Main handler ────────────────────────────────────────────────────────────
 export async function POST(request: NextRequest) {
-  let config
-  try {
-    config = getAiProviderConfig()
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "AI provider not configured"
-    return NextResponse.json({ error: message }, { status: 500 })
-  }
-
   try {
     const body = await request.json()
-    const { prompt, model: reqModel, size = "1024x1024" } = body
-    const sourceImage = typeof body.sourceImage === "string" ? body.sourceImage : body.image
-    const model = (typeof reqModel === "string" ? reqModel : undefined) ?? config.defaultImageModel
+    const {
+      prompt,
+      model = "gpt-image-2",
+      size = "1024x1024",
+      sourceImage,
+      requestId,
+    } = body
 
     if (!prompt || typeof prompt !== "string") {
-      return NextResponse.json({ error: "Prompt is required" }, { status: 400 })
+      return NextResponse.json(
+        { ok: false, error: "Prompt is required", requestId, attempts: 0, model },
+        { status: 400 },
+      )
     }
 
-    // Enhance prompt (always — ensures Chinese prompts work well)
-    let finalPrompt = prompt
-    const isChinese = /[\u4e00-\u9fa5]/.test(prompt)
+    if (!API_KEY) {
+      return NextResponse.json(
+        { ok: false, error: "OPENAI_API_KEY is not configured", requestId, attempts: 0, model },
+        { status: 500 },
+      )
+    }
 
-    if (isChinese || prompt.length < 30) {
+    // ── Normalize request fields ───────────────────────────────────────────
+    const normalizedSize = normalizeImageSize(size)
+    if (normalizedSize !== size) {
+      console.info("[generate-image] normalized unsupported size:", size, "=>", normalizedSize)
+    }
+
+    // ── Normalize reference images ─────────────────────────────────────────
+    const sourceImageValues = normalizeSourceImages(sourceImage)
+    const isImageToImage = sourceImageValues.length > 0
+    const capability = getImageProviderCapability(model)
+
+    if (isImageToImage && !capability.supportsImageToImage) {
+      const normalized = normalizeGenerationError({
+        status: 400,
+        provider: capability.provider,
+        error: new Error("UNSUPPORTED_IMAGE_TO_IMAGE"),
+      })
+      console.debug("[generate-image] unsupported image-to-image:", normalized.raw)
+      return NextResponse.json(
+        {
+          ok: false,
+          error: normalized,
+          requestId,
+          attempts: 0,
+          provider: capability.provider,
+          model,
+        },
+        { status: 400 },
+      )
+    }
+
+    const endpoint = isImageToImage ? IMAGE_TO_IMAGE_ENDPOINT : TEXT_TO_IMAGE_ENDPOINT
+    console.info("[generate-image] endpoint:", endpoint)
+    console.info("[generate-image] mode:", isImageToImage ? "image-to-image" : "text-to-image")
+    console.info("[generate-image] source image count:", sourceImageValues.length)
+
+    if (isImageToImage) {
+      const firstPayloadImage =
+        REFERENCE_IMAGE_FORMAT === "image_pure_base64"
+          ? stripDataUriPrefix(sourceImageValues[0])
+          : sourceImageValues[0]
+
+      console.info(
+        "[generate-image] first image starts with data uri:",
+        firstPayloadImage.startsWith("data:")
+      )
+      console.info(
+        "[generate-image] first image base64 prefix:",
+        firstPayloadImage.replace(/^data:[^;]+;base64,/, "").slice(0, 16)
+      )
+    }
+
+    // ── Enhance prompt if needed ───────────────────────────────────────────
+    let finalPrompt = prompt
+    const needsEnhancement = prompt.length < 30 || /[\u4e00-\u9fa5]/.test(prompt)
+
+    if (needsEnhancement) {
       try {
-        const hasSource = !!sourceImage
-        const enhanceRes = await fetch(`${config.baseUrl}/chat/completions`, {
+        const enhanceUserContent = isImageToImage
+          ? `The user uploaded a source image and said: "${prompt}"\n\nRewrite this as a strict image-editing instruction. The output must preserve the same source image subject, building identity, composition, camera angle, framing, and layout. Only the requested change may be applied.`
+          : prompt
+
+        const enhanceRes = await fetchWithTimeout(`${API_BASE_URL}/chat/completions`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${config.apiKey}`,
+            Authorization: `Bearer ${API_KEY}`,
           },
           body: JSON.stringify({
-            model: config.defaultModel,
+            model: "gpt-5.5",
             messages: [
-              {
-                role: "system",
-                content: buildEnhanceSystemPrompt(hasSource),
-              },
-              { role: "user", content: prompt },
+              { role: "system", content: buildEnhanceSystemPrompt(isImageToImage) },
+              { role: "user", content: enhanceUserContent },
             ],
             stream: false,
-            temperature: 0.7,
           }),
-        })
+        }, ENHANCE_TIMEOUT_MS)
 
         if (enhanceRes.ok) {
           const enhanceData = await enhanceRes.json()
@@ -101,66 +337,198 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const sourceImages = normalizeSourceImages(sourceImage)
-    const isImageEdit = sourceImages.length > 0
-
-    // Text-to-image: /images/generations
-    // Image-to-image/edit: /images/edits with image as { image_url } object array.
-    // Some compatible providers ignore image on /generations and silently fall back to text-to-image,
-    // so source-image requests must use /edits explicitly.
-    const requestBody: Record<string, any> = {
-      model,
-      prompt: finalPrompt,
-      n: 1,
-      size,
-      response_format: "b64_json",
+    // ── Build upstream body ────────────────────────────────────────────────
+    if (isImageToImage) {
+      finalPrompt = buildStrictEditPrompt(finalPrompt)
     }
 
-    if (isImageEdit) {
-      requestBody.image = sourceImages
+    const upstreamBody = isImageToImage
+      ? buildImageEditFormData({
+          model,
+          prompt: finalPrompt,
+          size: normalizedSize,
+          sourceImageValues,
+        })
+      : buildImageGenerationPayload({
+          model,
+          prompt: finalPrompt,
+          size: normalizedSize,
+          sourceImageValues,
+        })
+
+    // ── Diagnostic log: upstream request shape ─────────────────────────────
+    console.info("[generate-image] REFERENCE_IMAGE_FORMAT:", isImageToImage ? "multipart_form_image_file" : REFERENCE_IMAGE_FORMAT)
+    console.info("[generate-image] upstream model:", model)
+    console.info("[generate-image] upstream size:", normalizedSize)
+    console.info("[generate-image] upstream prompt length:", finalPrompt.length)
+    if (upstreamBody instanceof FormData) {
+      console.info("[generate-image] upstream form-data image count:", sourceImageValues.length)
+    } else {
+      console.info("[generate-image] upstream has 'image' field:", "image" in upstreamBody)
+      console.info("[generate-image] upstream has 'image_url' field:", "image_url" in upstreamBody)
+      console.info("[generate-image] upstream has 'messages' field:", "messages" in upstreamBody)
+      if ("image" in upstreamBody && Array.isArray(upstreamBody.image)) {
+        const img = upstreamBody.image[0] as string
+        console.info("[generate-image] upstream image[0] starts with data:uri:", img.startsWith("data:"))
+        console.info("[generate-image] upstream image[0] length:", img.length)
+        console.info("[generate-image] upstream image[0] prefix (50 chars):", img.slice(0, 50))
+      }
+      if ("image_url" in upstreamBody && Array.isArray(upstreamBody.image_url)) {
+        const imgUrl = upstreamBody.image_url[0] as string
+        console.info("[generate-image] upstream image_url[0] starts with data:uri:", imgUrl.startsWith("data:"))
+      }
+      if ("messages" in upstreamBody) {
+        console.info("[generate-image] upstream messages payload enabled")
+      }
     }
 
-    const imageEndpoint = isImageEdit ? "/images/edits" : "/images/generations"
-    const imageRes = await fetch(`${config.baseUrl}${imageEndpoint}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${config.apiKey}`,
-      },
-      body: JSON.stringify(requestBody),
-    })
+    // ── Call image generation/edit API ─────────────────────────────────────
+    let imageRes: Response | null = null
+    let lastFailure: { status?: number; body?: string; error?: unknown } | null = null
+    let attemptsUsed = 0
+    const upstreamUrl = `${API_BASE_URL}${endpoint}`
+    const upstreamHeaders: Record<string, string> = upstreamBody instanceof FormData
+      ? { Authorization: `Bearer ${API_KEY}` }
+      : {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${API_KEY}`,
+        }
+    const upstreamBodyPayload = upstreamBody instanceof FormData ? upstreamBody : JSON.stringify(upstreamBody)
 
-    if (!imageRes.ok) {
-      const errorText = await imageRes.text()
-      const error = normalizeUpstreamError(imageRes.status, errorText, config.type)
-      return NextResponse.json({ error: error.message }, { status: imageRes.status })
+    for (let attempt = 1; attempt <= IMAGE_RETRY_ATTEMPTS; attempt += 1) {
+      attemptsUsed = attempt
+      try {
+        console.info("[generate-image]", requestId || "no-request-id", "upstream attempt", attempt, "/", IMAGE_RETRY_ATTEMPTS)
+        imageRes = await fetchWithTimeout(upstreamUrl, {
+          method: "POST",
+          headers: upstreamHeaders,
+          body: upstreamBodyPayload,
+        }, REQUEST_TIMEOUT_MS)
+
+        console.info("[generate-image]", requestId || "no-request-id", "upstream status", imageRes.status)
+        if (imageRes.ok) break
+
+        const errorText = await imageRes.text()
+        lastFailure = { status: imageRes.status, body: errorText }
+        if (!shouldRetryUpstreamStatus(imageRes.status) || attempt >= IMAGE_RETRY_ATTEMPTS) {
+          imageRes = null
+          break
+        }
+      } catch (error) {
+        lastFailure = { error }
+        console.warn("[generate-image]", requestId || "no-request-id", "upstream request failed on attempt", attempt, error)
+        if (attempt >= IMAGE_RETRY_ATTEMPTS) break
+      }
+
+      const delayMs = getRetryDelayMs(attempt)
+      console.info("[generate-image]", requestId || "no-request-id", "retrying upstream request:", attempt + 1, "/", IMAGE_RETRY_ATTEMPTS, "after", delayMs, "ms")
+      await sleep(delayMs)
     }
 
-    const imageData = await imageRes.json()
+    if (!imageRes?.ok) {
+      const normalized = normalizeGenerationError({
+        status: lastFailure?.status,
+        body: lastFailure?.body,
+        provider: capability.provider,
+        error: lastFailure?.error,
+      })
+      console.debug("[generate-image] upstream error raw:", normalized.raw)
+      return NextResponse.json(
+        {
+          ok: false,
+          error: normalized,
+          requestId,
+          attempts: attemptsUsed,
+          provider: capability.provider,
+          model,
+        },
+        { status: normalized.status || lastFailure?.status || 502 }
+      )
+    }
+
+    let imageData: any
+    try {
+      imageData = await imageRes.json()
+    } catch (error) {
+      const normalized = normalizeGenerationError({
+        status: imageRes.status,
+        body: await imageRes.text().catch(() => ""),
+        provider: capability.provider,
+        error,
+      })
+      console.debug("[generate-image] invalid json raw:", normalized.raw)
+      return NextResponse.json(
+        {
+          ok: false,
+          error: normalized,
+          requestId,
+          attempts: attemptsUsed,
+          provider: capability.provider,
+          model,
+        },
+        { status: 502 },
+      )
+    }
+
+    // ── Diagnostic log: upstream response ──────────────────────────────────
+    console.info("[generate-image] upstream response keys:", Object.keys(imageData).join(", "))
+    console.info("[generate-image] upstream data count:", imageData.data?.length ?? 0)
+    const hasB64 = Boolean(imageData.data?.[0]?.b64_json)
+    const hasUrl = Boolean(imageData.data?.[0]?.url)
+    console.info("[generate-image] upstream has b64_json:", hasB64, "has url:", hasUrl)
+    if (imageData.data?.[0]?.revised_prompt) {
+      console.info("[generate-image] upstream revised_prompt:", imageData.data[0].revised_prompt.slice(0, 120))
+    }
+
     const b64Json = imageData.data?.[0]?.b64_json
 
     if (!b64Json) {
       const url = imageData.data?.[0]?.url
       if (url) {
         return NextResponse.json({
+          ok: true,
           imageUrl: url,
           prompt: finalPrompt,
           model,
+          requestId,
+          attempts: attemptsUsed,
+          provider: capability.provider,
           revisedPrompt: imageData.data?.[0]?.revised_prompt || finalPrompt,
+          endpoint,
+          referenceFormat: isImageToImage ? "multipart_form_image_file" : REFERENCE_IMAGE_FORMAT,
         })
       }
-      return NextResponse.json({ error: "No image data returned" }, { status: 500 })
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "No image data returned",
+          requestId,
+          attempts: attemptsUsed,
+          provider: capability.provider,
+          model,
+        },
+        { status: 500 },
+      )
     }
 
     return NextResponse.json({
+      ok: true,
       imageUrl: `data:image/png;base64,${b64Json}`,
       prompt: finalPrompt,
       model,
+      requestId,
+      attempts: attemptsUsed,
+      provider: capability.provider,
       revisedPrompt: imageData.data?.[0]?.revised_prompt || finalPrompt,
+      endpoint,
+      referenceFormat: isImageToImage ? "multipart_form_image_file" : REFERENCE_IMAGE_FORMAT,
     })
-  } catch (error) {
-    console.error("[Generate Image API Error]", error)
-    const normalized = normalizeClientError(error, config.type)
-    return NextResponse.json({ error: normalized.message }, { status: normalized.status ?? 500 })
+  } catch (error: any) {
+    const normalized = normalizeGenerationError({ error, provider: "copse" })
+    console.debug("[generate-image] unexpected error raw:", normalized.raw)
+    return NextResponse.json(
+      { ok: false, error: normalized, attempts: 0, provider: "copse" },
+      { status: normalized.status || 500 },
+    )
   }
 }

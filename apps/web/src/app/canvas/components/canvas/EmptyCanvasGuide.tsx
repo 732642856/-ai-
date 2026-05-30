@@ -3,11 +3,11 @@
  * 清晰展示所有可用功能和使用方式
  */
 
-import { Sparkles, Image, Film, FileText, MessageCircle } from "lucide-react"
+import { Sparkles, Image, FileText, MessageCircle } from "lucide-react"
 import { DESIGN_TOKENS } from "../../styles/designSystem"
 
 interface EmptyCanvasGuideProps {
-  onCreateVideoWorkflow?: () => void
+  onCreateTextNode?: () => void
   onUploadImage: () => void
   /** Whether the right-side chat panel is open */
   chatOpen?: boolean
@@ -18,7 +18,7 @@ interface EmptyCanvasGuideProps {
 }
 
 export function EmptyCanvasGuide({
-  onCreateVideoWorkflow,
+  onCreateTextNode,
   onUploadImage,
   chatOpen = false,
   chatPanelWidth = 400,
@@ -26,33 +26,21 @@ export function EmptyCanvasGuide({
 }: EmptyCanvasGuideProps) {
   const guides = [
     {
-      icon: Sparkles,
-      label: "星语 Prompt",
-      desc: "点击左侧星语头像创建 Prompt 节点，输入描述后可 AI 生图",
+      icon: FileText,
+      label: "写故事 / 剧本",
+      desc: "创建文本节点，直接写内容；后续可一键生成故事、分镜或画面",
       color: "#94a3b8",
     },
     {
       icon: Image,
-      label: "参考图",
-      desc: "上传图片到画布，悬停后可用 AI 生成变体",
-      color: "#94a3b8",
-    },
-    {
-      icon: FileText,
-      label: "创意文本",
-      desc: "创建文本节点，选中后可用 AI 润色内容",
-      color: "#94a3b8",
-    },
-    {
-      icon: Film,
-      label: "前期流程",
-      desc: "一键生成完整的前期工作流：创意梳理 → 分镜 → 画面设计",
+      label: "上传参考图",
+      desc: "把图片放进画布，用作角色、风格、场景或后续生图参考",
       color: "#94a3b8",
     },
     {
       icon: MessageCircle,
-      label: "星轨 AI 对话",
-      desc: "右侧对话框，支持文本对话和 AI 生图，可添加到画布",
+      label: "右侧 AI 对话",
+      desc: "用对话生成文本或图片，需要时再添加到画布",
       color: "#94a3b8",
     },
   ]
@@ -62,7 +50,7 @@ export function EmptyCanvasGuide({
       className="absolute top-0 bottom-0 flex items-center justify-center pointer-events-none"
       style={{ left: leftToolbarWidth, right: chatOpen ? chatPanelWidth : 0 }}
     >
-      <div className="flex flex-col items-center gap-5 max-w-lg">
+        <div className="flex flex-col items-center gap-5 max-w-md">
         {/* Title */}
         <div className="flex flex-col items-center gap-2">
           <div
@@ -80,7 +68,7 @@ export function EmptyCanvasGuide({
             欢迎使用星轨画布
           </h2>
           <p className="text-sm" style={{ color: DESIGN_TOKENS.textMuted }}>
-            从下方选择一个功能开始创作
+            先放一个真正有用的创作素材
           </p>
         </div>
 
@@ -126,15 +114,15 @@ export function EmptyCanvasGuide({
         {/* Quick Actions */}
         <div className="pointer-events-auto flex items-center gap-2">
           <button
-            onClick={() => onCreateVideoWorkflow?.()}
+            onClick={() => onCreateTextNode?.()}
             className="flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-medium transition-all hover:opacity-80"
             style={{
               backgroundColor: DESIGN_TOKENS.accent,
               color: "#fff",
             }}
           >
-            <Film size={14} strokeWidth={1.5} />
-            快速开始：创建前期工作流
+            <Sparkles size={14} strokeWidth={1.5} />
+            开始写故事 / 剧本
           </button>
           <button
             onClick={() => onUploadImage()}

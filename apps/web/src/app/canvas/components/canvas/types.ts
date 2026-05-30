@@ -7,7 +7,7 @@ import type { ReactNode } from 'react'
 // ============================================================================
 // Node Types
 // ============================================================================
-export type AgentNodeType = "text" | "prompt" | "image" | "storyboard" | "reference" | "group"
+export type AgentNodeType = "text" | "prompt" | "image" | "storyboard" | "shot" | "storyboard-grid" | "document" | "reference" | "group"
 export type VideoWorkflowNodeKind =
   | "script"
   | "image-generation"
@@ -16,6 +16,8 @@ export type VideoWorkflowNodeKind =
   | "subtitle"
   | "composition"
   | "video-result"
+export type StoryboardResultQuality = "composed-grid" | "single-shot" | "fallback-shot"
+
 export type CanvasNodeKind =
   | AgentNodeType
   | VideoWorkflowNodeKind
@@ -118,6 +120,66 @@ export interface NodeRunMeta {
 // @deprecated 旧五态模型，保留仅用于兼容读取，新代码请使用 NodeRunStatus
 export type WorkflowNodeStatus = "draft" | "ready" | "running" | "done" | "error"
 
+export type StoryboardShotData = {
+  id: string
+  order: number
+  title: string
+  shotType?: string
+  cameraMovement?: string
+  duration?: string
+  description: string
+  visualPrompt: string
+  negativePrompt?: string
+  dialogue?: string
+  notes?: string
+  sourceStoryboardNodeId?: string
+  generatedImageNodeId?: string
+  generatedImageUrl?: string
+  generatedImageAssetId?: string
+  generationStatus?: "idle" | "queued" | "generating" | "succeeded" | "failed"
+  generationError?: string
+  generationStartedAt?: number
+  generationFinishedAt?: number
+  generationRequestId?: string
+  generationAttempts?: number
+  generationErrorCode?: string
+  generationRetryable?: boolean
+  lastGeneratedAt?: string
+  status?: "draft" | "ready" | "generating" | "done" | "error"
+  errorMessage?: string
+}
+
+export type StoryboardGridData = {
+  id: string
+  title: string
+  sourceStoryboardNodeId?: string
+  shotNodeIds: string[]
+  columns: 1 | 2 | 3
+  maxShots: number
+  shotStates?: Array<{
+    shotNodeId: string
+    order?: number
+    title?: string
+    status: "missing" | "generating" | "ready" | "failed"
+    imageUrl?: string
+    errorMessage?: string
+  }>
+  outputImageUrl?: string
+  outputImageNodeId?: string
+  status?: "draft" | "generating" | "done" | "error"
+  errorMessage?: string
+}
+
+export type StoryboardCompositeSettings = {
+  layout: "auto" | "2x2" | "1x4" | "4x1"
+  showShotNumber: boolean
+  showShotTitle: boolean
+  stylePrompt: string
+  strategy: "auto-compose-or-generate" | "always-generate-composite"
+}
+
+export type StoryboardAssistantStage = "idea" | "story" | "storyboard-text"
+
 export type CanvasNodeData = {
   label?: ReactNode
   title?: string
@@ -158,11 +220,40 @@ export type CanvasNodeData = {
   assetKind?: string
   assetPurpose?: string
   storyboard?: any
+  shot?: StoryboardShotData
+  storyboardGrid?: StoryboardGridData
   previs3d?: any
   generationJob?: any
   sourcePromptId?: string
   sourceGenerationJobId?: string
+  sourceType?: "shot" | "storyboard" | "prompt" | "image" | string
+  sourceStoryboardNodeId?: string
+  sourceShotId?: string
+  sourceShotOrder?: number
+  sourceShotTitle?: string
+  sourcePrompt?: string
+  generatedAt?: string
+  generationId?: string
   generationOutput?: any
+  compositeSettings?: StoryboardCompositeSettings
+  storyboardAssistantStage?: StoryboardAssistantStage
+  autoSizeMode?: "auto" | "fixed-width-height-grows" | "manual"
+  writingMode?: "normal" | "focus"
+  generation?: any
+  generatedShotNodeIds?: string[]
+  generatedStoryboardGridNodeId?: string
+  storyboardOutputImageNodeId?: string
+  storyboardOutputImageUrl?: string
+  storyboardOutputAssetId?: string
+  storyboardResultQuality?: StoryboardResultQuality
+  storyboardWarning?: string
+  storyboardError?: string
+  storyboardErrorPhase?: string
+  storyboardProcessVisible?: boolean
+  role?: string
+  isStoryboardProcessNode?: boolean
+  isStoryboardFinalOutput?: boolean
+  hiddenByStoryboardProcessMode?: boolean
   // --- Video metadata (V1-3，全部可选) ---
   videoDurationMs?: number
   videoWidth?: number
@@ -170,6 +261,19 @@ export type CanvasNodeData = {
   videoFps?: number
   videoFrameCount?: number
   thumbnailUrl?: string
+
+  // --- Image asset persistence (IndexedDB / remote) ---
+  assetId?: string
+  /** @internal Where the image data lives: "indexeddb" | "remote" | "missing" */
+  persistence?: "indexeddb" | "remote" | "missing"
+  /** @internal Source of the image: "upload" | "generated" | "remote" */
+  source?: "upload" | "generated" | "remote"
+  /** @internal Error identifier when image asset is not found on restore */
+  loadError?: string
+
+  // --- Persistence internal marker (deprecated, kept for reading old data) ---
+  /** @deprecated Use `persistence` field instead */
+  _imageStripped?: boolean
 }
 
 // ============================================================================
@@ -423,6 +527,27 @@ export const nodeToneStyles: Record<CanvasNodeKind, {
     background: "rgba(100, 116, 139, 0.1)",
   },
   storyboard: {
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
+  },
+  document: {
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.22)",
+    background: "rgba(100, 116, 139, 0.12)",
+  },
+  shot: {
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
+  },
+  "storyboard-grid": {
     eyebrow: "text-slate-300",
     body: "text-slate-200/75",
     meta: "text-slate-300/60",

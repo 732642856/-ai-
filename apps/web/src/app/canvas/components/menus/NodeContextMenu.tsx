@@ -16,6 +16,9 @@ import {
   Trash2,
   Image,
   FileText,
+  Clapperboard,
+  Grid3X3,
+  Wand2,
   History,
   Play,
   RotateCcw,
@@ -41,8 +44,18 @@ interface NodeContextMenuProps {
   onRunUpstreamAndCurrent?: () => void
   onRunDownstreamChain?: () => void
   onStopWorkflow?: () => void
+  onSplitStoryboard?: () => void
+  onSplitStoryboardWithGrid?: () => void
+  onGenerateShotImage?: () => void
+  onGenerateStoryboardGrid?: () => void
+  onGenerateStoryboardImage?: () => void
+  onCreateStoryboardAssistant?: () => void
+  onCreateInspirationFromDocument?: () => void
+  onCreateStoryboardFromDocument?: () => void
+  onComposeSelectedShots?: () => void
   isWorkflowRunning?: boolean
   nodeKind?: CanvasNodeKind
+  selectedShotCount?: number
 }
 
 interface MenuItemProps {
@@ -111,8 +124,18 @@ export const NodeContextMenu = memo(function NodeContextMenu({
   onRunUpstreamAndCurrent,
   onRunDownstreamChain,
   onStopWorkflow,
+  onSplitStoryboard,
+  onSplitStoryboardWithGrid,
+  onGenerateShotImage,
+  onGenerateStoryboardGrid,
+  onGenerateStoryboardImage,
+  onCreateStoryboardAssistant,
+  onCreateInspirationFromDocument,
+  onCreateStoryboardFromDocument,
+  onComposeSelectedShots,
   isWorkflowRunning,
   nodeKind,
+  selectedShotCount = 1,
 }: NodeContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
 
@@ -144,6 +167,11 @@ export const NodeContextMenu = memo(function NodeContextMenu({
   if (!state || state.type !== "node") return null
 
   const isImageNode = nodeKind?.includes("image") || nodeKind === "image"
+  const isDocumentNode = nodeKind === "document"
+  const isInspirationNode = nodeKind === "script"
+  const isStoryboardSource = nodeKind === "storyboard" || nodeKind === "text" || nodeKind === "prompt"
+  const isShotNode = nodeKind === "shot"
+  const isStoryboardGridNode = nodeKind === "storyboard-grid"
   const position = { x: state.screenX, y: state.screenY }
 
   // Adjust position to prevent menu from going off-screen
@@ -256,6 +284,108 @@ export const NodeContextMenu = memo(function NodeContextMenu({
           />
         )}
       </div>
+
+      {(isDocumentNode || isInspirationNode || isStoryboardSource || isShotNode || isStoryboardGridNode) && (
+        <>
+          <div className="border-b px-3 py-2" style={{ borderColor: DESIGN_TOKENS.border }}>
+            <p className="text-[10px] uppercase tracking-wider" style={{ color: DESIGN_TOKENS.textMuted }}>
+              分镜
+            </p>
+          </div>
+          <div className="py-1">
+            {isDocumentNode && onCreateInspirationFromDocument && (
+              <MenuItem
+                icon={<FileText size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
+                label="作为灵感碎片提炼"
+                onClick={() => {
+                  onCreateInspirationFromDocument()
+                  onClose()
+                }}
+              />
+            )}
+            {isDocumentNode && onCreateStoryboardFromDocument && (
+              <MenuItem
+                icon={<Clapperboard size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
+                label="进入故事分镜"
+                onClick={() => {
+                  onCreateStoryboardFromDocument()
+                  onClose()
+                }}
+              />
+            )}
+            {isInspirationNode && onCreateStoryboardAssistant && (
+              <MenuItem
+                icon={<Clapperboard size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
+                label="用故事种子继续分镜"
+                onClick={() => {
+                  onCreateStoryboardAssistant()
+                  onClose()
+                }}
+              />
+            )}
+            {isStoryboardSource && onSplitStoryboard && (
+              <MenuItem
+                icon={<Clapperboard size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
+                label="拆成镜头"
+                onClick={() => {
+                  onSplitStoryboard()
+                  onClose()
+                }}
+              />
+            )}
+            {isStoryboardSource && onSplitStoryboardWithGrid && (
+              <MenuItem
+                icon={<Grid3X3 size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
+                label="拆成镜头并建合成预览"
+                onClick={() => {
+                  onSplitStoryboardWithGrid()
+                  onClose()
+                }}
+              />
+            )}
+            {(isStoryboardSource || isDocumentNode) && onGenerateStoryboardImage && (
+              <MenuItem
+                icon={<Wand2 size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
+                label="一键生成分镜图"
+                onClick={() => {
+                  onGenerateStoryboardImage()
+                  onClose()
+                }}
+              />
+            )}
+            {isShotNode && onGenerateShotImage && (
+              <MenuItem
+                icon={<Wand2 size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
+                label="生成本镜头图片"
+                onClick={() => {
+                  onGenerateShotImage()
+                  onClose()
+                }}
+              />
+            )}
+            {isShotNode && onComposeSelectedShots && selectedShotCount >= 2 && (
+              <MenuItem
+                icon={<Grid3X3 size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
+                label={`合成选中 ${selectedShotCount} 镜头为网格图`}
+                onClick={() => {
+                  onComposeSelectedShots()
+                  onClose()
+                }}
+              />
+            )}
+            {isStoryboardGridNode && onGenerateStoryboardGrid && (
+              <MenuItem
+                icon={<Image size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
+                label="输出分镜合成图"
+                onClick={() => {
+                  onGenerateStoryboardGrid()
+                  onClose()
+                }}
+              />
+            )}
+          </div>
+        </>
+      )}
 
       {/* Clipboard Section */}
       <div

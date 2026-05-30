@@ -1,198 +1,511 @@
 // ============================================================================
-// Content Node Component - TapNow-inspired Design
-// Top toolbar + editing area + bottom AI input bar
+// Content Node Component - simplified TapNow-inspired text + AI input node
 // ============================================================================
 "use client"
 
-import { memo, useState, useEffect, useRef, useCallback } from "react"
+import { memo, useState, useEffect, useRef, useCallback, useMemo } from "react"
 import {
   Sparkles,
-  Bold,
-  Italic,
-  List,
-  ListOrdered,
-  Link,
-  Heading1,
-  Heading2,
-  Heading3,
-  Type,
-  Quote,
-  Minus,
-  Code,
-  Paperclip,
-  ImagePlus,
-  Maximize2,
   ChevronDown,
-  Mic,
   ArrowUp,
   Loader2,
   X,
-  Palette,
+  Wand2,
+  Maximize2,
+  Minimize2,
+  Grid3X3,
+  MessageSquareText,
+  Image,
 } from "lucide-react"
 import { Handle, Position, NodeResizer, type NodeProps, useReactFlow } from "@xyflow/react"
-import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
-import type { CanvasNodeData, CanvasNodeKind } from "../canvas/types"
+import { DESIGN_TOKENS } from "../../styles/designSystem"
+import type { CanvasNodeData, CanvasNodeKind, NodeRunStatus } from "../canvas/types"
 import { NodeRunStatusIndicator } from "./NodeRunStatusIndicator"
 import { useWorkflowRunner } from "../../hooks/useWorkflowRunner"
+import { generateImageFromPrompt } from "../../utils/imageGeneration"
+import {
+  getSlashCommandsForTarget,
+  parseSlashQuery,
+  removeSlashCommandFromText,
+  type SlashCommand,
+  type SlashQuery,
+} from "@/lib/slashCommands/slashCommands"
+import { runSlashTextCommand } from "@/lib/slashCommands/runSlashTextCommand"
+import { runStoryboardAssistantCommand } from "@/lib/slashCommands/runStoryboardAssistantCommand"
+import {
+  getStoryboardAssistantStage,
+  STORYBOARD_ASSISTANT_LABELS,
+} from "@/lib/storyboard/storyboardTextNode"
+import { InlineSlashCommandMenu } from "../menus/InlineSlashCommandMenu"
 
 interface ContentNodeProps extends NodeProps {
   data: CanvasNodeData
 }
 
-type TextFormat = "bold" | "italic" | "h1" | "h2" | "h3" | "paragraph" | "ul" | "ol" | "link" | "quote" | "hr" | "code"
+type ContentAiMode = "chat" | "image"
 
-// Simple Markdown renderer
-function renderMarkdown(text: string): string {
-  if (!text) return ""
-  return text
-    .replace(/^# (.*$)/gim, '<h1 class="text-lg font-bold text-white mb-2">$1</h1>')
-    .replace(/^## (.*$)/gim, '<h2 class="text-base font-bold text-white mb-1.5">$1</h2>')
-    .replace(/^### (.*$)/gim, '<h3 class="text-sm font-bold text-white mb-1">$1</h3>')
-    .replace(/^> (.*$)/gim, '<blockquote class="border-l-2 border-slate-400/40 pl-3 text-white/60 italic my-2">$1</blockquote>')
-    .replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-white">$1</strong>')
-    .replace(/\*(.*?)\*/g, '<em class="italic text-white/90">$1</em>')
-    .replace(/^- (.*$)/gim, '<li class="ml-4 text-white/80 list-disc">$1</li>')
-    .replace(/^\d+\. (.*$)/gim, '<li class="ml-4 text-white/80 list-decimal">$1</li>')
-    .replace(/^```([\s\S]*?)```$/gim, '<pre class="bg-black/30 rounded-lg p-2 text-xs text-white/70 font-mono my-2 overflow-x-auto"><code>$1</code></pre>')
-    .replace(/`([^`]+)`/g, '<code class="bg-black/30 rounded px-1 text-xs text-white/80 font-mono">$1</code>')
-    .replace(/\n/g, "<br/>")
-}
+const DEFAULT_CHAT_MODEL = "gpt-5.5"
+const DEFAULT_IMAGE_MODEL = "gpt-image-2"
 
-// Model options matching TapNow
 const MODEL_OPTIONS = [
-  { value: "gpt-5.5", label: "GPT-5.5", desc: "最强推理" },
-  { value: "gpt-5.4", label: "GPT-5.4", desc: "高性能" },
-  { value: "gpt-5.4-mini", label: "GPT-5.4 Mini", desc: "快速响应" },
-  { value: "gpt-image-2", label: "GPT-Image-2", desc: "生图" },
+  { value: DEFAULT_CHAT_MODEL, label: "GPT-5.5", desc: "文本生成", mode: "chat" as const },
+  { value: DEFAULT_IMAGE_MODEL, label: "GPT-Image-2", desc: "图片生成", mode: "image" as const },
 ]
 
-export const ContentNode = memo(function ContentNode({ id, data, selected }: ContentNodeProps) {
-  const [isEditing, setIsEditing] = useState(false)
+const AI_MODE_OPTIONS: Array<{
+  value: ContentAiMode
+  label: string
+  desc: string
+  icon: typeof MessageSquareText
+}> = [
+  { value: "chat", label: "对话", desc: "写作、改写、续写", icon: MessageSquareText },
+  { value: "image", label: "生图", desc: "自动使用图片模型", icon: Image },
+]
+
+const IMAGE_SIZE_OPTIONS = [
+  { value: "1792x1024", label: "横图", desc: "1792×1024" },
+  { value: "1024x1024", label: "方图", desc: "1024×1024" },
+  { value: "1024x1792", label: "竖图", desc: "1024×1792" },
+]
+
+const STORYBOARD_RUN_STATUS_LABELS: Record<NodeRunStatus, string> = {
+  idle: "待开始",
+  pending: "准备中",
+  running: "生成中",
+  succeeded: "已完成",
+  failed: "失败",
+  cancelled: "已取消",
+}
+
+export const ContentNode = memo(function ContentNode({ id, data, selected, width, height }: ContentNodeProps) {
   const [editContent, setEditContent] = useState(data.content || data.prompt || "")
   const [aiInput, setAiInput] = useState("")
-  const [selectedModel, setSelectedModel] = useState("gpt-5.5")
+  const [aiMode, setAiMode] = useState<ContentAiMode>("chat")
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_CHAT_MODEL)
+  const [imageSize, setImageSize] = useState("1792x1024")
   const [showModelDropdown, setShowModelDropdown] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
-  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [slashQuery, setSlashQuery] = useState<SlashQuery | null>(null)
+  const [slashActiveIndex, setSlashActiveIndex] = useState(0)
+  const [slashError, setSlashError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const aiInputRef = useRef<HTMLTextAreaElement>(null)
-  const { setNodes, getNodes, setEdges } = useReactFlow()
+  const { setNodes, getNodes, getEdges, setEdges } = useReactFlow()
   const { runNode } = useWorkflowRunner()
 
-  const isPromptMode = data.nodeKind === "prompt"
   const content = data.content || data.prompt || ""
+  const isStoryboardNode = data.nodeKind === "storyboard"
+  const isDocumentNode = data.nodeKind === "document"
+  const isWritingSourceNode = isStoryboardNode || isDocumentNode || data.nodeKind === "text" || data.nodeKind === "prompt"
+  const isFocusWritingMode = data.writingMode === "focus"
+  const storyboardStage = getStoryboardAssistantStage({
+    stage: data.storyboardAssistantStage,
+    content: editContent,
+  })
+  const storyboardLabels = STORYBOARD_ASSISTANT_LABELS[storyboardStage]
+  const hasStoryboardSeedText = editContent.trim().length > 0
+  const storyboardRunMeta = data.runMeta
+  const hasStoryboardProcessNodes = Boolean(data.generatedShotNodeIds?.length || data.generatedStoryboardGridNodeId)
+  const isStoryboardProcessVisible = data.storyboardProcessVisible === true
+  const isStoryboardRunActive = storyboardRunMeta?.runStatus === "pending" || storyboardRunMeta?.runStatus === "running"
+  const hasStandaloneStoryboardOutput = Boolean(data.storyboardOutputImageNodeId)
+  const storyboardResultCaption =
+    data.storyboardResultQuality === "fallback-shot"
+      ? data.storyboardWarning || "合成分镜图暂时失败，已使用镜头图作为临时结果。"
+      : data.storyboardResultQuality === "single-shot"
+        ? "已根据文本生成 1 个镜头。"
+        : data.storyboardResultQuality === "composed-grid"
+          ? "已合成多镜头分镜图。"
+          : undefined
+  const contentNodeBadge = data.nodeKind === "prompt"
+    ? data.storyboardOutputImageUrl || data.storyboardAssistantStage
+      ? "故事分镜"
+      : "写作文本"
+    : isStoryboardNode
+      ? storyboardLabels.badge
+      : isDocumentNode
+        ? "创作文档"
+        : "写作文本"
+  const isStoryboardRunVisible =
+    isWritingSourceNode &&
+    storyboardRunMeta?.message &&
+    storyboardRunMeta.source === "manual" &&
+    ["pending", "running", "succeeded", "failed"].includes(storyboardRunMeta.runStatus)
+  const slashCommands = useMemo(
+    () => getSlashCommandsForTarget("text", slashQuery?.query ?? ""),
+    [slashQuery],
+  )
+  const defaultWritingWidth = isFocusWritingMode ? 920 : isStoryboardNode || isDocumentNode ? 760 : 680
+  const defaultWritingHeight = isFocusWritingMode ? 720 : isStoryboardNode || isDocumentNode ? 620 : 560
+  const nodeWidth = typeof width === "number" ? width : data.displayWidth || defaultWritingWidth
+  const nodeHeight = typeof height === "number" ? height : data.displayHeight || defaultWritingHeight
+  const hasFixedNodeHeight = typeof nodeHeight === "number"
+  const mainTextMaxHeight = hasFixedNodeHeight ? Math.max(260, nodeHeight - 220) : isStoryboardNode ? 960 : 560
 
-  // Sync local state when data changes externally
   useEffect(() => {
-    if (!isEditing) {
-      setEditContent(data.content || data.prompt || "")
-    }
-  }, [data.content, data.prompt, isEditing])
+    setEditContent(data.content || data.prompt || "")
+  }, [data.content, data.prompt])
 
-  // Auto-resize textarea
-  const autoResize = useCallback((el: HTMLTextAreaElement | null) => {
+  const autoResize = useCallback((el: HTMLTextAreaElement | null, maxHeight: number) => {
     if (!el) return
     el.style.height = "auto"
-    el.style.height = el.scrollHeight + "px"
+    const nextHeight = Math.min(el.scrollHeight, maxHeight)
+    el.style.height = `${nextHeight}px`
+    el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden"
   }, [])
 
-  const handleDoubleClick = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    setIsEditing(true)
-  }
+  useEffect(() => {
+    if (hasFixedNodeHeight && textareaRef.current) {
+      textareaRef.current.style.height = "100%"
+      textareaRef.current.style.overflowY = "auto"
+      return
+    }
+    autoResize(textareaRef.current, mainTextMaxHeight)
+  }, [editContent, hasFixedNodeHeight, mainTextMaxHeight, autoResize])
 
-  const handleSave = () => {
+  useEffect(() => {
+    autoResize(aiInputRef.current, 120)
+  }, [aiInput, autoResize])
+
+  const updateContent = useCallback((nextContent: string) => {
+    setEditContent(nextContent)
     setNodes((nds) =>
-      nds.map((node) => {
-        if (node.id !== id) return node
-        return {
-          ...node,
-          data: {
-            ...node.data,
-            content: editContent,
-            prompt: editContent,
-          },
-        }
-      })
+      nds.map((node) =>
+        node.id === id
+          ? {
+              ...node,
+              data: {
+                ...node.data,
+                content: nextContent,
+                prompt: nextContent,
+              },
+            }
+          : node
+      )
     )
-    setIsEditing(false)
-  }
+  }, [id, setNodes])
 
-  // Text formatting
-  const applyFormat = useCallback((format: TextFormat) => {
-    const textarea = textareaRef.current
-    if (!textarea) return
+  const updateSlashQueryFromTextarea = useCallback((value: string, cursor: number) => {
+    const parsed = parseSlashQuery(value, cursor)
+    setSlashQuery(parsed)
+    setSlashActiveIndex(0)
+  }, [])
 
-    const start = textarea.selectionStart
-    const end = textarea.selectionEnd
-    const text = editContent
+  const triggerSplitStoryboard = useCallback((targetNodeId: string) => {
+    window.dispatchEvent(new CustomEvent("starcanvas:split-storyboard", { detail: { nodeId: targetNodeId } }))
+  }, [])
 
-    let prefix = ""
-    let suffix = ""
+  const triggerGenerateStoryboardImage = useCallback((targetNodeId: string) => {
+    setAiMode("image")
+    setSelectedModel(DEFAULT_IMAGE_MODEL)
+    setShowModelDropdown(false)
+    window.dispatchEvent(new CustomEvent("starcanvas:generate-storyboard-image", { detail: { nodeId: targetNodeId } }))
+  }, [])
 
-    switch (format) {
-      case "bold": prefix = "**"; suffix = "**"; break
-      case "italic": prefix = "*"; suffix = "*"; break
-      case "h1": prefix = "# "; break
-      case "h2": prefix = "## "; break
-      case "h3": prefix = "### "; break
-      case "paragraph": prefix = "\n\n"; break
-      case "ul": prefix = "\n- "; break
-      case "ol": prefix = "\n1. "; break
-      case "link": prefix = "["; suffix = "](url)"; break
-      case "quote": prefix = "\n> "; break
-      case "hr": prefix = "\n---\n"; break
-      case "code": prefix = "\n```\n"; suffix = "\n```\n"; break
+  const getStoryboardProcessNodeIndex = useCallback(
+    (node: { id: string; type?: string; data?: CanvasNodeData }) => {
+      if (node.type === "storyboardGrid") return 10_000
+      const explicitIndex = data.generatedShotNodeIds?.indexOf(node.id) ?? -1
+      if (explicitIndex >= 0) return explicitIndex
+      if (typeof node.data?.sourceShotOrder === "number") return Math.max(0, node.data.sourceShotOrder - 1)
+      if (typeof node.data?.shot?.order === "number") return Math.max(0, node.data.shot.order - 1)
+      return 9_000
+    },
+    [data.generatedShotNodeIds],
+  )
+
+  const layoutStoryboardProcessNodes = useCallback(
+    (nextVisible: boolean, processNodeIds: Set<string>) => {
+      const currentNodes = getNodes() as Array<{
+        id: string
+        type?: string
+        position?: { x: number; y: number }
+        data?: CanvasNodeData
+      }>
+      const sourceNode = currentNodes.find((node) => node.id === id)
+      const sourcePosition = sourceNode?.position
+      if (!sourcePosition) return
+
+      const finalOutputNode = currentNodes.find(
+        (node) =>
+          node.data?.sourceStoryboardNodeId === id &&
+          (node.data?.role === "storyboard-final-output" || node.data?.isStoryboardFinalOutput === true),
+      )
+      const finalRight = finalOutputNode?.position
+        ? finalOutputNode.position.x + (finalOutputNode.data?.displayWidth ?? 380)
+        : sourcePosition.x + 800
+      const baseShotX = Math.max(sourcePosition.x + 860, finalRight + 80)
+      const shotWidth = 340
+      const imageX = baseShotX + shotWidth + 72
+      const gridX = imageX + 400
+      const rowGap = 420
+
+      setNodes((nds) =>
+        nds.map((node) => {
+          if (!processNodeIds.has(node.id)) return node
+          const processIndex = getStoryboardProcessNodeIndex(node as { id: string; type?: string; data?: CanvasNodeData })
+          const rowY = sourcePosition.y + (processIndex >= 9_000 ? 0 : processIndex * rowGap)
+          const nextPosition =
+            node.type === "storyboardGrid"
+              ? { x: gridX, y: sourcePosition.y }
+              : node.type === "image" || node.data?.role === "shot-image"
+                ? { x: imageX, y: rowY }
+                : { x: baseShotX, y: rowY }
+
+          return {
+            ...node,
+            position: nextPosition,
+            hidden: !nextVisible,
+            data: {
+              ...node.data,
+              hiddenByStoryboardProcessMode: !nextVisible,
+            },
+          }
+        }),
+      )
+    },
+    [getNodes, getStoryboardProcessNodeIndex, id, setNodes],
+  )
+
+  const toggleStoryboardProcessNodes = useCallback(() => {
+    const nextVisible = !isStoryboardProcessVisible
+    const currentNodes = getNodes() as Array<{ id: string; type?: string; data?: CanvasNodeData }>
+    const explicitProcessNodeIds = new Set([
+      ...(data.generatedShotNodeIds ?? []),
+      ...(data.generatedStoryboardGridNodeId ? [data.generatedStoryboardGridNodeId] : []),
+    ])
+    const processNodeIds = new Set(
+      currentNodes
+        .filter((node) => {
+          const nodeData = node.data
+          return Boolean(
+            explicitProcessNodeIds.has(node.id) ||
+              ((nodeData?.sourceStoryboardNodeId === id ||
+                nodeData?.storyboardGrid?.sourceStoryboardNodeId === id ||
+                nodeData?.shot?.sourceStoryboardNodeId === id) &&
+                (node.type === "shot" ||
+                  node.type === "storyboardGrid" ||
+                  nodeData?.role === "shot-image" ||
+                  nodeData?.role === "storyboard-process" ||
+                  nodeData?.isStoryboardProcessNode === true)),
+          )
+        })
+        .map((node) => node.id),
+    )
+    setNodes((nds) =>
+      nds.map((node) =>
+        node.id === id
+          ? {
+              ...node,
+              data: {
+                ...node.data,
+                storyboardProcessVisible: nextVisible,
+              },
+            }
+          : processNodeIds.has(node.id)
+            ? {
+                ...node,
+                hidden: !nextVisible,
+                data: {
+                  ...node.data,
+                  hiddenByStoryboardProcessMode: !nextVisible,
+                },
+              }
+            : node,
+      ),
+    )
+    if (nextVisible) {
+      layoutStoryboardProcessNodes(nextVisible, processNodeIds)
+    }
+    const currentEdges = getEdges()
+    setEdges((eds) =>
+      eds.map((edge) => {
+        const touchesProcess = processNodeIds.has(edge.source) || processNodeIds.has(edge.target)
+        const existingEdge = currentEdges.find((item) => item.id === edge.id)
+        const isFinalOutputEdge =
+          !touchesProcess &&
+          (existingEdge?.data as Record<string, unknown> | undefined)?.relation === "storyboard-final-output"
+        if (isFinalOutputEdge) return { ...edge, hidden: false }
+        return touchesProcess ? { ...edge, hidden: !nextVisible } : edge
+      }),
+    )
+  }, [data.generatedShotNodeIds, data.generatedStoryboardGridNodeId, getEdges, getNodes, id, isStoryboardProcessVisible, layoutStoryboardProcessNodes, setEdges, setNodes])
+
+  const toggleWritingMode = useCallback(() => {
+    const nextFocusMode = !isFocusWritingMode
+    const nextWidth = nextFocusMode ? 920 : isStoryboardNode || isDocumentNode ? 760 : 680
+    const nextHeight = nextFocusMode ? 720 : isStoryboardNode || isDocumentNode ? 620 : 560
+    setNodes((nds) =>
+      nds.map((node) =>
+        node.id === id
+          ? {
+              ...node,
+              width: nextWidth,
+              height: nextHeight,
+              measured: {
+                ...node.measured,
+                width: nextWidth,
+                height: nextHeight,
+              },
+              data: {
+                ...node.data,
+                writingMode: nextFocusMode ? "focus" : "normal",
+                displayWidth: nextWidth,
+                displayHeight: nextHeight,
+                autoSizeMode: "manual",
+              },
+            }
+          : node,
+      ),
+    )
+  }, [id, isDocumentNode, isFocusWritingMode, isStoryboardNode, setNodes])
+
+  const handleContinueStoryboardAssistant = useCallback(async (sourceText: string) => {
+    const currentText = editContent
+    setSlashQuery(null)
+    setSlashError(null)
+    setAiError(null)
+    setIsGenerating(true)
+
+    try {
+      await runStoryboardAssistantCommand({
+        text: sourceText,
+        stage: storyboardStage,
+        nodeId: id,
+        nodeWidth,
+        updateNode: (next) => {
+          setEditContent(next.text)
+          setNodes((nds) =>
+            nds.map((node) =>
+              node.id === id
+                ? {
+                    ...node,
+                    width: next.width,
+                    height: next.height,
+                    measured: {
+                      ...node.measured,
+                      width: next.width,
+                      height: next.height,
+                    },
+                    data: {
+                      ...node.data,
+                      title: STORYBOARD_ASSISTANT_LABELS[next.stage].title,
+                      content: next.text,
+                      prompt: next.text,
+                      storyboardAssistantStage: next.stage,
+                      autoSizeMode: "fixed-width-height-grows",
+                      displayWidth: next.width,
+                      displayHeight: next.height,
+                    },
+                  }
+                : node
+            )
+          )
+        },
+        triggerSplitStoryboard,
+      })
+    } catch (error: any) {
+      const message = error?.message || "故事分镜执行失败"
+      setSlashError(message)
+      setAiError(message)
+      updateContent(currentText)
+    } finally {
+      setIsGenerating(false)
+    }
+  }, [editContent, id, nodeWidth, setNodes, storyboardStage, triggerSplitStoryboard, updateContent])
+
+  const executeSlashCommand = useCallback(async (command: SlashCommand) => {
+    const currentQuery = slashQuery
+    const currentText = editContent
+    const cleanedText = currentQuery
+      ? removeSlashCommandFromText(currentText, currentQuery.range)
+      : currentText
+
+    setSlashQuery(null)
+    setSlashError(null)
+
+    if (command.id === "split-storyboard") {
+      updateContent(cleanedText)
+      triggerSplitStoryboard(id)
+      return
     }
 
-    if (start === end) {
-      const newText = text.slice(0, start) + prefix + suffix + text.slice(end)
-      setEditContent(newText)
-      setTimeout(() => {
-        textarea.selectionStart = start + prefix.length
-        textarea.selectionEnd = start + prefix.length
-        textarea.focus()
-      }, 0)
-    } else {
-      const selected = text.slice(start, end)
-      const newText = text.slice(0, start) + prefix + selected + suffix + text.slice(end)
-      setEditContent(newText)
-      setTimeout(() => {
-        textarea.selectionStart = start + prefix.length
-        textarea.selectionEnd = start + prefix.length + selected.length
-        textarea.focus()
-      }, 0)
+    if (command.id === "continue-storyboard-assistant" || command.id === "generate-storyboard-text") {
+      await handleContinueStoryboardAssistant(cleanedText)
+      return
     }
-  }, [editContent])
 
-  // AI Generate from bottom input bar
+    if (!["summarize", "expand", "rewrite"].includes(command.id)) return
+
+    setIsGenerating(true)
+    try {
+      const result = await runSlashTextCommand({
+        commandId: command.id as "summarize" | "expand" | "rewrite",
+        nodeText: cleanedText,
+      })
+      updateContent(result)
+    } catch (error: any) {
+      setSlashError(error?.message || "命令执行失败")
+      updateContent(currentText)
+    } finally {
+      setIsGenerating(false)
+    }
+  }, [editContent, handleContinueStoryboardAssistant, id, slashQuery, triggerSplitStoryboard, updateContent])
+
+  const handleMainTextKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!slashQuery || slashCommands.length === 0) return
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault()
+      setSlashActiveIndex((index) => (index + 1) % slashCommands.length)
+      return
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault()
+      setSlashActiveIndex((index) =>
+        index === 0 ? slashCommands.length - 1 : index - 1,
+      )
+      return
+    }
+    if (e.key === "Escape") {
+      e.preventDefault()
+      setSlashQuery(null)
+      return
+    }
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault()
+      const command = slashCommands[slashActiveIndex]
+      if (command) executeSlashCommand(command)
+    }
+  }, [executeSlashCommand, slashActiveIndex, slashCommands, slashQuery])
+
   const handleAiGenerate = useCallback(async () => {
-    if (!aiInput.trim()) return
+    const userPrompt = aiInput.trim()
+    if (!userPrompt) return
 
-    const isImageGen = selectedModel === "gpt-image-2"
+    const isImageGen = aiMode === "image"
+    const selectedModelOption = MODEL_OPTIONS.find((model) => model.value === selectedModel)
+    const modelForRequest =
+      selectedModelOption?.mode === aiMode
+        ? selectedModelOption.value
+        : isImageGen
+          ? DEFAULT_IMAGE_MODEL
+          : DEFAULT_CHAT_MODEL
     setIsGenerating(true)
     setAiError(null)
 
     try {
       if (isImageGen) {
-        // Image generation
-        const res = await fetch("/api/ai/generate-image", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            prompt: aiInput,
-            model: "gpt-image-2",
-          }),
+        const result = await generateImageFromPrompt({
+          prompt: userPrompt,
+          model: modelForRequest,
+          size: imageSize,
+          requestId: `content-image-${id}-${Date.now()}`,
         })
 
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}))
-          throw new Error(errData.error || `API error: ${res.status}`)
-        }
-
-        const result = await res.json()
-        if (!result.imageUrl) throw new Error("No image data returned")
+        const displayUrl = result.imageUrl
+        const assetId = result.assetId
 
         const currentNode = getNodes().find((n) => n.id === id)
         if (!currentNode) throw new Error("Node not found")
@@ -202,10 +515,24 @@ export const ContentNode = memo(function ContentNode({ id, data, selected }: Con
           type: "image" as const,
           position: { x: currentNode.position.x + 380, y: currentNode.position.y },
           data: {
-            title: `生成: ${aiInput.slice(0, 20)}...`,
-            imageUrl: result.imageUrl,
+            title: `生成: ${userPrompt.slice(0, 20)}${userPrompt.length > 20 ? "..." : ""}`,
+            imageUrl: displayUrl,
+            assetId,
             nodeKind: "ai-generated-image" as CanvasNodeKind,
+            prompt: userPrompt,
+            summary: result.prompt,
+            generationOutput: {
+              prompt: userPrompt,
+              finalPrompt: result.prompt,
+              revisedPrompt: result.revisedPrompt,
+              model: result.model || modelForRequest,
+              size: imageSize,
+            },
+            model: result.model || modelForRequest,
+            size: imageSize,
             sourcePromptId: id,
+            source: "generated" as const,
+            persistence: assetId ? "indexeddb" as const : undefined,
             displayWidth: 280,
             displayHeight: 280,
             createdAt: Date.now(),
@@ -222,14 +549,9 @@ export const ContentNode = memo(function ContentNode({ id, data, selected }: Con
           style: { stroke: DESIGN_TOKENS.nodeEdge, strokeWidth: 1.5 },
         }])
       } else {
-        // Text generation: delegate to workflow runner for streaming + history + Source Trace
         const combinedPrompt = content
-          ? `${content}
-
----
-
-用户追加指令: ${aiInput.trim()}`
-          : aiInput.trim()
+          ? `${content}\n\n---\n\n用户追加指令: ${userPrompt}`
+          : userPrompt
 
         await runNode(id, combinedPrompt)
       }
@@ -240,9 +562,8 @@ export const ContentNode = memo(function ContentNode({ id, data, selected }: Con
     } finally {
       setIsGenerating(false)
     }
-  }, [aiInput, selectedModel, id, content, runNode, getNodes, setNodes, setEdges])
+  }, [aiInput, aiMode, selectedModel, imageSize, id, content, runNode, getNodes, setNodes, setEdges])
 
-  // Handle AI input key events
   const handleAiInputKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
@@ -250,20 +571,20 @@ export const ContentNode = memo(function ContentNode({ id, data, selected }: Con
     }
   }
 
-  // Auto-resize AI input
-  useEffect(() => {
-    autoResize(aiInputRef.current)
-  }, [aiInput, autoResize])
-
-  const currentModel = MODEL_OPTIONS.find(m => m.value === selectedModel) || MODEL_OPTIONS[0]
+  const modeModelOptions = MODEL_OPTIONS.filter((model) => model.mode === aiMode)
+  const selectedModelForMode = modeModelOptions.some((model) => model.value === selectedModel)
+    ? selectedModel
+    : aiMode === "image"
+      ? DEFAULT_IMAGE_MODEL
+      : DEFAULT_CHAT_MODEL
+  const currentModel = MODEL_OPTIONS.find((model) => model.value === selectedModelForMode) || modeModelOptions[0] || MODEL_OPTIONS[0]
 
   return (
     <>
-      {/* Resizer */}
       {selected && (
         <NodeResizer
-          minWidth={320}
-          minHeight={200}
+          minWidth={520}
+          minHeight={420}
           handleStyle={{
             background: DESIGN_TOKENS.nodeHandle,
             border: "2px solid rgba(255,255,255,0.3)",
@@ -273,230 +594,342 @@ export const ContentNode = memo(function ContentNode({ id, data, selected }: Con
         />
       )}
 
-      {/* Connection Handles */}
       <Handle type="target" position={Position.Top} className="!bg-slate-400 !h-2.5 !w-2.5 !rounded-sm !border !border-white/30" />
       <Handle type="target" position={Position.Left} className="!bg-slate-400 !h-2.5 !w-2.5 !rounded-sm !border !border-white/30" />
       <Handle type="source" position={Position.Right} className="!bg-slate-500 !h-2.5 !w-2.5 !rounded-sm !border !border-white/30" />
       <Handle type="source" position={Position.Bottom} className="!bg-slate-500 !h-2.5 !w-2.5 !rounded-sm !border !border-white/30" />
 
-      {/* Node Content */}
       <div
-        className={`overflow-hidden rounded-2xl border transition-all ${
-          selected ? "border-slate-400/40" : "border-white/8"
-        }`}
+        className="flex flex-col overflow-hidden rounded-2xl border transition-all"
         style={{
-          width: 360,
-          minHeight: 200,
-          backgroundColor: DESIGN_TOKENS.panelSolid,
+          width: nodeWidth,
+          height: hasFixedNodeHeight ? nodeHeight : undefined,
+          minHeight: 420,
+          backgroundColor: "#f8fafc",
+          borderColor: selected ? "rgba(148, 163, 184, 0.4)" : DESIGN_TOKENS.border,
           boxShadow: selected ? DESIGN_TOKENS.shadowNode : "none",
         }}
       >
-        {/* ===== TOP TOOLBAR ===== */}
         <div
-          className="flex items-center gap-0.5 border-b px-3 py-2"
-          style={{ borderColor: DESIGN_TOKENS.border, backgroundColor: "rgba(0,0,0,0.25)" }}
+          className="flex items-center justify-between border-b px-3 py-2"
+          style={{ borderColor: DESIGN_TOKENS.border, backgroundColor: "rgba(0,0,0,0.18)" }}
         >
-          {/* Color picker placeholder */}
-          <button className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/8" style={{ color: DESIGN_TOKENS.textMuted }} title="颜色">
-            <Palette size={14} strokeWidth={1.5} />
-          </button>
-          <div className="mx-1 h-3.5 w-px" style={{ backgroundColor: DESIGN_TOKENS.border }} />
-
-          {/* Headings */}
-          <button onClick={() => applyFormat("h1")} className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/8" style={{ color: DESIGN_TOKENS.textSecondary }} title="H1">
-            <Heading1 size={14} strokeWidth={1.5} />
-          </button>
-          <button onClick={() => applyFormat("h2")} className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/8" style={{ color: DESIGN_TOKENS.textSecondary }} title="H2">
-            <Heading2 size={14} strokeWidth={1.5} />
-          </button>
-          <button onClick={() => applyFormat("h3")} className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/8" style={{ color: DESIGN_TOKENS.textSecondary }} title="H3">
-            <Heading3 size={14} strokeWidth={1.5} />
-          </button>
-          <button onClick={() => applyFormat("quote")} className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/8" style={{ color: DESIGN_TOKENS.textSecondary }} title="引用">
-            <Quote size={14} strokeWidth={1.5} />
-          </button>
-          <div className="mx-1 h-3.5 w-px" style={{ backgroundColor: DESIGN_TOKENS.border }} />
-
-          {/* Formatting */}
-          <button onClick={() => applyFormat("bold")} className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/8" style={{ color: DESIGN_TOKENS.textSecondary }} title="加粗">
-            <Bold size={14} strokeWidth={1.5} />
-          </button>
-          <button onClick={() => applyFormat("italic")} className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/8" style={{ color: DESIGN_TOKENS.textSecondary }} title="斜体">
-            <Italic size={14} strokeWidth={1.5} />
-          </button>
-          <button onClick={() => applyFormat("ul")} className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/8" style={{ color: DESIGN_TOKENS.textSecondary }} title="无序列表">
-            <List size={14} strokeWidth={1.5} />
-          </button>
-          <button onClick={() => applyFormat("ol")} className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/8" style={{ color: DESIGN_TOKENS.textSecondary }} title="有序列表">
-            <ListOrdered size={14} strokeWidth={1.5} />
-          </button>
-          <button onClick={() => applyFormat("hr")} className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/8" style={{ color: DESIGN_TOKENS.textSecondary }} title="分割线">
-            <Minus size={14} strokeWidth={1.5} />
-          </button>
-          <div className="mx-1 h-3.5 w-px" style={{ backgroundColor: DESIGN_TOKENS.border }} />
-
-          {/* Code */}
-          <button onClick={() => applyFormat("code")} className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/8" style={{ color: DESIGN_TOKENS.textSecondary }} title="代码块">
-            <Code size={14} strokeWidth={1.5} />
-          </button>
-          <div className="mx-1 h-3.5 w-px" style={{ backgroundColor: DESIGN_TOKENS.border }} />
-
-          {/* Attachments */}
-          <button className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/8" style={{ color: DESIGN_TOKENS.textSecondary }} title="附件">
-            <Paperclip size={14} strokeWidth={1.5} />
-          </button>
-          <button className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/8" style={{ color: DESIGN_TOKENS.textSecondary }} title="图片">
-            <ImagePlus size={14} strokeWidth={1.5} />
-          </button>
-
-          <div className="flex-1" />
-
-          <NodeRunStatusIndicator data={data} variant="dot" />
-
-          {/* Fullscreen */}
-          <button
-            onClick={() => setIsFullscreen(!isFullscreen)}
-            className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/8"
-            style={{ color: DESIGN_TOKENS.textMuted }}
-            title="全屏"
-          >
-            <Maximize2 size={13} strokeWidth={1.5} />
-          </button>
+          <div className="flex items-center gap-2">
+            <Sparkles size={14} strokeWidth={1.5} style={{ color: DESIGN_TOKENS.accentHover }} />
+            <span className="text-xs" style={{ color: DESIGN_TOKENS.textSecondary }}>
+              {contentNodeBadge}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={toggleWritingMode}
+              className="nodrag nopan flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] transition-colors hover:bg-white/10"
+              style={{ color: DESIGN_TOKENS.textSecondary }}
+              title={isFocusWritingMode ? "恢复普通写作尺寸" : "放大为大屏写作尺寸"}
+            >
+              {isFocusWritingMode ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+              <span>{isFocusWritingMode ? "恢复" : "大屏"}</span>
+            </button>
+            <NodeRunStatusIndicator data={data} variant="dot" />
+          </div>
         </div>
 
-        {/* ===== EDITING AREA ===== */}
-        <div className="relative">
-          {isEditing ? (
-            <textarea
-              ref={textareaRef}
-              value={editContent}
-              onChange={(e) => {
-                setEditContent(e.target.value)
-                autoResize(e.target)
-              }}
-              placeholder="双击开始编辑..."
-              className="w-full resize-none bg-transparent px-4 py-3 text-sm leading-relaxed text-white/80 placeholder:text-white/20 focus:outline-none"
-              style={{ minHeight: "120px" }}
-              autoFocus
-            />
-          ) : (
-            <div
-              className="min-h-[120px] cursor-text px-4 py-3"
-              onDoubleClick={handleDoubleClick}
-            >
-              {content ? (
+        {data.errorMessage && (
+          <div className="border-b px-4 py-2 text-[11px] text-amber-200/80" style={{ borderColor: DESIGN_TOKENS.border, backgroundColor: "rgba(245, 158, 11, 0.1)" }}>
+            {data.errorMessage}
+          </div>
+        )}
+
+        {isStoryboardRunVisible && storyboardRunMeta && (
+          <div className="border-b bg-white px-4 py-3" style={{ borderColor: "rgba(15, 23, 42, 0.08)" }}>
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-xs font-medium text-slate-800">
+                {storyboardRunMeta.runStatus === "running" || storyboardRunMeta.runStatus === "pending" ? (
+                  <Loader2 size={13} className="animate-spin text-slate-500" />
+                ) : storyboardRunMeta.runStatus === "failed" ? (
+                  <X size={13} className="text-amber-500" />
+                ) : (
+                  <Grid3X3 size={13} className="text-emerald-600" />
+                )}
+                <span>一键分镜图</span>
+              </div>
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500">
+                {STORYBOARD_RUN_STATUS_LABELS[storyboardRunMeta.runStatus]}
+              </span>
+            </div>
+            <p className="text-[11px] leading-5 text-slate-500">{storyboardRunMeta.message}</p>
+            {typeof storyboardRunMeta.progress === "number" && storyboardRunMeta.runStatus !== "idle" && (
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
                 <div
-                  className="text-sm leading-relaxed text-white/75"
-                  dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
+                  className="h-full rounded-full bg-slate-900 transition-all"
+                  style={{ width: `${Math.min(100, Math.max(0, storyboardRunMeta.progress))}%` }}
                 />
-              ) : (
-                <p className="text-sm text-white/20">双击开始编辑...</p>
+              </div>
+            )}
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <p className="text-[10px] leading-4 text-slate-400">
+                默认只展示最终分镜图；镜头卡片和合成预览属于可编辑过程，可按需展开。
+              </p>
+              {hasStoryboardProcessNodes && !isStoryboardRunActive && (
+                <button
+                  type="button"
+                  onClick={toggleStoryboardProcessNodes}
+                  className="nodrag nopan shrink-0 rounded-lg border border-slate-200 px-2 py-1 text-[10px] text-slate-500 transition-colors hover:bg-slate-50"
+                >
+                  {isStoryboardProcessVisible ? "隐藏过程" : "查看过程"}
+                </button>
               )}
             </div>
+          </div>
+        )}
+
+        {data.storyboardOutputImageUrl && (
+          <div className="border-b bg-white px-4 py-3" style={{ borderColor: "rgba(15, 23, 42, 0.08)" }}>
+            <div className="mb-2 flex items-center justify-between text-xs font-medium text-slate-800">
+              <span>{data.storyboardResultQuality === "fallback-shot" ? "临时分镜图" : "最终分镜图"}</span>
+              {hasStoryboardProcessNodes && (
+                <button
+                  type="button"
+                  onClick={toggleStoryboardProcessNodes}
+                  className="nodrag nopan rounded-lg border border-slate-200 px-2 py-1 text-[10px] text-slate-500 transition-colors hover:bg-slate-50"
+                >
+                  {isStoryboardProcessVisible ? "隐藏过程" : "查看过程"}
+                </button>
+              )}
+            </div>
+            {storyboardResultCaption && (
+              <p className="mb-2 text-[10px] leading-4 text-slate-500">{storyboardResultCaption}</p>
+            )}
+            {hasStandaloneStoryboardOutput ? (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-5 text-slate-500">
+                最终图片已放在右侧独立节点，当前这里只保留缩略提示，避免一个结果重复占用主视觉。
+              </div>
+            ) : (
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                <img src={data.storyboardOutputImageUrl} alt="分镜图" className="max-h-28 w-full object-cover" />
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="relative min-h-0 flex-1 overflow-visible bg-slate-100 px-4 py-4">
+          <div className="h-full rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <textarea
+            ref={textareaRef}
+            value={editContent}
+            onChange={(e) => {
+              updateContent(e.target.value)
+              updateSlashQueryFromTextarea(e.target.value, e.target.selectionStart)
+              if (!hasFixedNodeHeight) autoResize(e.target, mainTextMaxHeight)
+            }}
+            onKeyDown={handleMainTextKeyDown}
+            onSelect={(e) =>
+              updateSlashQueryFromTextarea(
+                e.currentTarget.value,
+                e.currentTarget.selectionStart,
+              )
+            }
+            onPointerDownCapture={(e) => e.stopPropagation()}
+            onMouseDownCapture={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+            placeholder={isStoryboardNode ? storyboardLabels.placeholder : isDocumentNode ? "在这里写故事、剧本、资料摘录，或从 TXT / Markdown 文档导入..." : "在这里输入你的想法，或输入 / 调用 AI 命令..."}
+            className="nodrag nopan nowheel h-full w-full resize-none rounded-2xl bg-white px-5 py-4 text-[15px] leading-7 text-slate-950 placeholder:text-slate-400 focus:outline-none"
+            style={hasFixedNodeHeight
+              ? { height: "100%", minHeight: 0, overflowY: "auto" }
+              : { minHeight: "320px", maxHeight: mainTextMaxHeight, overflowY: "auto" }}
+            rows={8}
+          />
+          {slashQuery && slashCommands.length > 0 && (
+            <InlineSlashCommandMenu
+              commands={slashCommands}
+              activeIndex={slashActiveIndex}
+              onSelect={executeSlashCommand}
+            />
           )}
+          {slashError && (
+            <div className="absolute left-3 top-full z-50 mt-2 rounded-lg px-2 py-1 text-[11px] text-red-300" style={{ backgroundColor: "rgba(239,68,68,0.12)" }}>
+              {slashError}
+            </div>
+          )}
+          </div>
         </div>
 
-        {/* ===== AI INPUT BAR ===== */}
         <div
-          className="border-t px-3 py-2.5"
+          className="shrink-0 border-t px-3 py-2.5"
           style={{ borderColor: DESIGN_TOKENS.border }}
         >
-          {/* Input area */}
-          <div className="relative">
-            <textarea
-              ref={aiInputRef}
-              value={aiInput}
-              onChange={(e) => setAiInput(e.target.value)}
-              onKeyDown={handleAiInputKeyDown}
-              placeholder="描述任何你想要生成的内容"
-              className="w-full resize-none rounded-xl border bg-transparent px-3 py-2.5 pr-10 text-sm text-white/80 placeholder:text-white/25 focus:outline-none"
-              style={{
-                borderColor: DESIGN_TOKENS.border,
-                minHeight: "44px",
-                maxHeight: "120px",
-              }}
-              rows={1}
-            />
-            <button
-              onClick={() => setIsFullscreen(!isFullscreen)}
-              className="absolute right-2 top-2"
-              style={{ color: DESIGN_TOKENS.textMuted }}
-            >
-              <Maximize2 size={14} strokeWidth={1.5} />
-            </button>
+          <div className="mb-2 grid gap-2 md:grid-cols-2">
+            {isStoryboardNode && (
+              <button
+                type="button"
+                onClick={() => handleContinueStoryboardAssistant(editContent)}
+                disabled={isGenerating || !hasStoryboardSeedText}
+                className="flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-all disabled:cursor-not-allowed disabled:opacity-40"
+                style={{
+                  backgroundColor: hasStoryboardSeedText ? DESIGN_TOKENS.accent : "rgba(255,255,255,0.08)",
+                  color: DESIGN_TOKENS.textPrimary,
+                }}
+                title={hasStoryboardSeedText ? storyboardLabels.button : "请先输入一句故事想法或故事正文"}
+              >
+                {isGenerating ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
+                <span>{isGenerating ? storyboardLabels.loading : storyboardLabels.button}</span>
+              </button>
+            )}
+            {isWritingSourceNode && (
+              <button
+                type="button"
+                onClick={() => triggerGenerateStoryboardImage(id)}
+                disabled={isGenerating || !editContent.trim()}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition-all hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                style={{
+                  borderColor: "rgba(15, 23, 42, 0.12)",
+                  backgroundColor: "#ffffff",
+                  color: "#0f172a",
+                }}
+                title={editContent.trim() ? "使用生图模式：自动拆分镜头、生成镜头图片并合成分镜图" : "请先输入故事、剧本或文字分镜"}
+              >
+                <Grid3X3 size={14} />
+                <span>一键生成分镜图</span>
+                <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-normal text-slate-500">生图模式</span>
+              </button>
+            )}
           </div>
 
-          {/* Bottom bar: Model + Voice + Speed + Token + Send */}
-          <div className="mt-2 flex items-center justify-between">
-            {/* Left: Model selector */}
-            <div className="relative">
-              <button
-                onClick={() => setShowModelDropdown(!showModelDropdown)}
-                className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs transition-colors hover:bg-white/5"
-                style={{ color: DESIGN_TOKENS.textSecondary }}
-              >
-                <Sparkles size={12} strokeWidth={1.5} />
-                <span>{currentModel.label}</span>
-                <ChevronDown size={12} strokeWidth={1.5} />
-              </button>
-
-              {showModelDropdown && (
-                <div
-                  className="absolute bottom-full left-0 mb-1 w-44 rounded-xl border py-1"
-                  style={{
-                    backgroundColor: DESIGN_TOKENS.panelSolid,
-                    borderColor: DESIGN_TOKENS.border,
-                    boxShadow: DESIGN_TOKENS.shadowMenu,
+          <div className="mb-2 flex items-center gap-1 rounded-xl border bg-white p-1" style={{ borderColor: "rgba(15, 23, 42, 0.12)" }}>
+            {AI_MODE_OPTIONS.map((option) => {
+              const Icon = option.icon
+              const active = aiMode === option.value
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => {
+                    setAiMode(option.value)
+                    setSelectedModel(option.value === "image" ? DEFAULT_IMAGE_MODEL : DEFAULT_CHAT_MODEL)
+                    setShowModelDropdown(false)
                   }}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors"
+                  style={{
+                    backgroundColor: active ? "rgba(15, 23, 42, 0.08)" : "transparent",
+                    color: active ? "#0f172a" : "#64748b",
+                  }}
+                  title={option.desc}
                 >
-                  {MODEL_OPTIONS.map((model) => (
+                  <Icon size={13} strokeWidth={1.7} />
+                  <span>{option.label}</span>
+                </button>
+              )
+            })}
+          </div>
+
+          <textarea
+            ref={aiInputRef}
+            value={aiInput}
+            onChange={(e) => {
+              setAiInput(e.target.value)
+              autoResize(e.target, 120)
+            }}
+            onKeyDown={handleAiInputKeyDown}
+            onPointerDownCapture={(e) => e.stopPropagation()}
+            onMouseDownCapture={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+            placeholder={aiMode === "image" ? "描述要生成的画面..." : "描述你想让 AI 做什么..."}
+            className="nodrag nopan nowheel w-full resize-none rounded-xl border bg-white px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none"
+            style={{
+              borderColor: "rgba(15, 23, 42, 0.12)",
+              minHeight: "44px",
+              maxHeight: "120px",
+              overflowY: "auto",
+            }}
+            rows={1}
+          />
+
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <div className="relative">
+                <button
+                  onClick={() => setShowModelDropdown(!showModelDropdown)}
+                  className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs transition-colors hover:bg-slate-200/70"
+                  style={{ color: "#334155" }}
+                >
+                  <Sparkles size={12} strokeWidth={1.5} />
+                  <span>{currentModel.label}</span>
+                  <ChevronDown size={12} strokeWidth={1.5} />
+                </button>
+
+                {showModelDropdown && (
+                  <div
+                    className="absolute bottom-full left-0 mb-1 w-44 rounded-xl border py-1"
+                    style={{
+                      backgroundColor: "#ffffff",
+                      borderColor: "rgba(15, 23, 42, 0.12)",
+                      boxShadow: DESIGN_TOKENS.shadowMenu,
+                    }}
+                  >
+                    <div className="px-3 py-1 text-[10px]" style={{ color: DESIGN_TOKENS.textMuted }}>
+                      当前模式：{aiMode === "image" ? "生图" : "对话"}
+                    </div>
+                    {modeModelOptions.map((model) => (
+                      <button
+                        key={model.value}
+                        onClick={() => {
+                          setSelectedModel(model.value)
+                          setShowModelDropdown(false)
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-slate-100"
+                        style={{ color: selectedModel === model.value ? DESIGN_TOKENS.accentHover : "#334155" }}
+                      >
+                        <Sparkles size={12} strokeWidth={1.5} />
+                        <div>
+                          <div className="font-medium">{model.label}</div>
+                          <div className="text-[10px]" style={{ color: DESIGN_TOKENS.textMuted }}>{model.desc}</div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {aiMode === "image" && (
+                <div className="flex items-center gap-1 rounded-lg border bg-white p-0.5" style={{ borderColor: "rgba(15, 23, 42, 0.12)" }}>
+                  {IMAGE_SIZE_OPTIONS.map((option) => (
                     <button
-                      key={model.value}
-                      onClick={() => {
-                        setSelectedModel(model.value)
-                        setShowModelDropdown(false)
+                      key={option.value}
+                      type="button"
+                      onClick={() => setImageSize(option.value)}
+                      title={option.desc}
+                      className="rounded-md px-2 py-0.5 text-[11px] transition-colors"
+                      style={{
+                        backgroundColor: imageSize === option.value ? "rgba(15, 23, 42, 0.08)" : "transparent",
+                        color: imageSize === option.value ? "#0f172a" : "#64748b",
                       }}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-white/5"
-                      style={{ color: selectedModel === model.value ? DESIGN_TOKENS.accentHover : DESIGN_TOKENS.textSecondary }}
                     >
-                      <Sparkles size={12} strokeWidth={1.5} />
-                      <div>
-                        <div className="font-medium">{model.label}</div>
-                        <div className="text-[10px]" style={{ color: DESIGN_TOKENS.textMuted }}>{model.desc}</div>
-                      </div>
+                      {option.label}
                     </button>
                   ))}
                 </div>
               )}
             </div>
 
-            {/* Right: Voice + Speed + Token + Send */}
-            <div className="flex items-center gap-1">
-              <button className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/5" style={{ color: DESIGN_TOKENS.textMuted }} title="语音输入">
-                <Mic size={14} strokeWidth={1.5} />
-              </button>
-              <div className="mx-1 h-3.5 w-px" style={{ backgroundColor: DESIGN_TOKENS.border }} />
-              <span className="text-[11px]" style={{ color: DESIGN_TOKENS.textMuted }}>1x</span>
-              <div className="mx-1 h-3.5 w-px" style={{ backgroundColor: DESIGN_TOKENS.border }} />
-              <span className="text-[11px]" style={{ color: DESIGN_TOKENS.textMuted }}>4</span>
-              <button
-                onClick={handleAiGenerate}
-                disabled={isGenerating || !aiInput.trim()}
-                className="ml-1 flex h-7 w-7 items-center justify-center rounded-full transition-all disabled:opacity-30"
-                style={{
-                  backgroundColor: aiInput.trim() ? DESIGN_TOKENS.accent : "rgba(255,255,255,0.1)",
-                }}
-              >
-                {isGenerating ? (
-                  <Loader2 size={14} className="animate-spin text-white/70" />
-                ) : (
-                  <ArrowUp size={14} strokeWidth={2} className="text-white/80" />
-                )}
-              </button>
-            </div>
+            <button
+              onClick={handleAiGenerate}
+              disabled={isGenerating || !aiInput.trim()}
+              className="ml-1 flex h-8 w-8 items-center justify-center rounded-full transition-all disabled:opacity-30"
+              style={{
+                backgroundColor: aiInput.trim() ? DESIGN_TOKENS.accent : "rgba(255,255,255,0.1)",
+              }}
+            >
+              {isGenerating ? (
+                <Loader2 size={15} className="animate-spin text-white/70" />
+              ) : (
+                <ArrowUp size={15} strokeWidth={2} className="text-white/80" />
+              )}
+            </button>
           </div>
 
-          {/* Error */}
           {aiError && (
             <div className="mt-2 flex items-center justify-between rounded-lg px-2 py-1.5" style={{ backgroundColor: "rgba(239,68,68,0.1)" }}>
               <span className="text-[11px] text-red-300/70">{aiError}</span>

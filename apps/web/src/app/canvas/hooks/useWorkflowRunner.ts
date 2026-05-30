@@ -27,6 +27,8 @@ import type { WorkflowRunEvent } from "../types/workflow-run"
 import { enhancePromptWithCinematicContext } from "@/lib/cinematic/context"
 import { getDefaultModel, getDefaultImageModel, getLocalProviderOverrides } from "@/lib/ai/client"
 import { buildRunRequest } from "@/lib/ai/run-request"
+import { normalizeGenerationError, formatGenerationErrorForDisplay } from "@/lib/ai/normalizeGenerationError"
+import { persistImageDataUrl } from "@/lib/assets/localImageStore"
 
 interface RunContext {
   runId: string
@@ -125,7 +127,7 @@ function isVideoAnalyzeStep(kind: CanvasNodeKind): boolean {
 function getSystemPrompt(kind: CanvasNodeKind): string {
   switch (kind) {
     case "script":
-      return "你是一个专业的视频脚本编剧。根据用户提供的前期目标，生成完整的视频脚本。包括旁白、场景描述和角色对话。保持简洁专业。"
+      return "你是一个专业的故事开发顾问。用户会提供新闻链接、文章摘录、资料片段或随手想法。你的任务不是直接写分镜，而是把杂乱输入提炼成可继续创作的故事种子。请输出：1. 核心事件；2. 可改编主题；3. 主角可能性；4. 主要冲突；5. 类型方向；6. 情绪基调；7. 可继续发展成完整故事的 3 个创意角度。内容要具体、可拍、避免空泛。"
     case "storyboard":
       return "你是一个专业的分镜师。根据脚本内容，生成分镜描述列表。每个分镜包括：镜头编号、景别、画面描述、运镜方式、时长。用JSON数组格式输出。"
     case "image-generation":
@@ -172,7 +174,10 @@ async function readSSEStream(
 
     // Error in stream
     if (parsed.error) {
-      throw new Error(parsed.error)
+      const normalized = typeof parsed.error === "object"
+        ? parsed.error
+        : normalizeGenerationError({ body: parsed.error })
+      throw Object.assign(new Error(formatGenerationErrorForDisplay(normalized)), { generationError: normalized })
     }
 
     // Text content
@@ -327,7 +332,11 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
         body: JSON.stringify(runRequest),
       })
 
-      if (!res.ok) throw new Error(`API error: ${res.status}`)
+      if (!res.ok) {
+        const text = await res.text().catch(() => "")
+        const normalized = normalizeGenerationError({ status: res.status, body: text, provider })
+        throw Object.assign(new Error(formatGenerationErrorForDisplay(normalized)), { generationError: normalized })
+      }
 
       const reader = res.body?.getReader()
       if (!reader) throw new Error("No response stream")
@@ -414,7 +423,11 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
         body: JSON.stringify(runRequest),
       })
 
-      if (!res.ok) throw new Error(`API error: ${res.status}`)
+      if (!res.ok) {
+        const text = await res.text().catch(() => "")
+        const normalized = normalizeGenerationError({ status: res.status, body: text, provider })
+        throw Object.assign(new Error(formatGenerationErrorForDisplay(normalized)), { generationError: normalized })
+      }
 
       const reader = res.body?.getReader()
       if (!reader) throw new Error("No response stream")
@@ -434,6 +447,21 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
       }
 
       const imageUrl: string = generatedImageUrl
+
+      // Persist base64 image to IndexedDB before storing in node data
+      let displayUrl = imageUrl
+      let assetId: string | undefined
+      if (imageUrl.startsWith("data:image")) {
+        try {
+          const persisted = await persistImageDataUrl(imageUrl, {
+            fileName: `workflow-${Date.now()}.png`,
+          })
+          displayUrl = persisted.objectUrl
+          assetId = persisted.assetId
+        } catch (err) {
+          console.error("[WorkflowRunner] Failed to persist generated image:", err)
+        }
+      }
 
       // ── Record AI usage ──────────────────────────────────
       const costUsd = estimateCostUsd({
@@ -466,8 +494,11 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
 
         if (resultNodeId) {
           updateNodeData(resultNodeId, {
-            imageUrl,
+            imageUrl: displayUrl,
+            assetId,
             nodeKind: "ai-generated-image" as CanvasNodeKind,
+            source: "generated" as const,
+            persistence: assetId ? "indexeddb" as const : undefined,
             displayWidth: 280,
             displayHeight: 200,
             runMeta: createSucceededRunMeta({ runId: runContext?.runId, message: "图片已生成" }),
@@ -481,8 +512,11 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
             position: { x: node.position.x + 340, y: node.position.y },
             data: {
               title: "生成结果",
-              imageUrl,
+              imageUrl: displayUrl,
+              assetId,
               nodeKind: "ai-generated-image" as CanvasNodeKind,
+              source: "generated" as const,
+              persistence: assetId ? "indexeddb" as const : undefined,
               displayWidth: 280,
               displayHeight: 200,
               status: "done" as const,
@@ -665,6 +699,11 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
       const updatedData = (updatedNode?.data ?? {}) as CanvasNodeData
       const resultUrl = updatedData.resultUrl ?? updatedData.imageUrl
 
+      // Sanitize: don't store base64/blob URLs in run history (localStorage)
+      const safeResultUrl = resultUrl && !resultUrl.startsWith("data:") && !resultUrl.startsWith("blob:")
+        ? resultUrl
+        : undefined
+
       // ── 视频分析节点：用 TypedRawOutput 包装完整结构化结果 ──
       //   格式 { kind: VIDEO_ANALYSIS_RAW_KIND, version: VIDEO_ANALYSIS_RAW_VERSION, data: VideoAnalysisResult }
       //   未来其他节点（图片分析、字幕分析等）通过 kind 区分
@@ -685,7 +724,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
         input: historyInput,
         output: {
           text: outputText || undefined,
-          imageUrls: resultUrl ? [resultUrl] : undefined,
+          imageUrls: safeResultUrl ? [safeResultUrl] : undefined,
           raw: rawOutput,
         },
         message: stepLabel + " 执行成功",
@@ -727,11 +766,14 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
       })
     } catch (err: any) {
       const finishedAt = new Date().toISOString()
+      const normalized = err?.generationError || normalizeGenerationError({ error: err, provider: "copse" })
+      const safeError = formatGenerationErrorForDisplay(normalized)
+      console.debug("[WorkflowRunner] runNode failed raw:", normalized.raw)
 
       const failedRunMeta = createFailedRunMeta({
-        error: err.message || "执行失败",
+        error: safeError,
         runId,
-        message: err.message || "执行失败",
+        message: safeError,
       })
 
       updateNodeData(nodeId, {
@@ -757,7 +799,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
         status: "failed",
         input: historyInput,
         output: partialText ? { text: partialText } : undefined,
-        error: err?.message ?? "执行失败",
+        error: safeError,
         message: stepLabel + " 执行失败",
         startedAt,
         finishedAt: new Date().toISOString(),
@@ -783,13 +825,13 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
         startedAt,
         finishedAt: new Date().toISOString(),
         status: "failed",
-        error: err?.message ?? "Unknown error",
+        error: safeError,
       })
 
       setState((prev) => ({
         ...prev,
         stepStatuses: { ...prev.stepStatuses, [nodeId]: "error" },
-        error: err.message || "执行失败",
+        error: safeError,
         isRunning: false,
         currentStep: null,
       }))
@@ -801,14 +843,14 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
         runId,
         nodeId,
         endedAt: failEndedAt,
-        error: err.message || "执行失败",
+        error: safeError,
       })
       onRunEvent?.({
         type: "run-finished",
         runId,
         endedAt: failEndedAt,
         status: "failed",
-        error: err.message || "执行失败",
+        error: safeError,
       })
     } finally {
       runningNodeIdsRef.current.delete(nodeId)
@@ -928,18 +970,21 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
         status: "success",
       })
     } catch (err: any) {
+      const normalized = err?.generationError || normalizeGenerationError({ error: err, provider: "copse" })
+      const safeError = formatGenerationErrorForDisplay(normalized)
+      console.debug("[WorkflowRunner] workflow failed raw:", normalized.raw)
       // ── P2-3A: emit run-finished (failed) ───────────────
       onRunEvent?.({
         type: "run-finished",
         runId: planRunId,
         endedAt: new Date().toISOString(),
         status: "failed",
-        error: err.message || "执行失败",
+        error: safeError,
       })
 
       setState((prev) => ({
         ...prev,
-        error: err.message || "执行失败",
+        error: safeError,
         isRunning: false,
       }))
       return

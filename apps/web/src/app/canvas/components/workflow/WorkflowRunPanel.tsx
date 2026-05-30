@@ -13,6 +13,7 @@ import type { WorkflowRunRecord, WorkflowRunEvent } from "../../types/workflow-r
 import { formatDurationMs, elapsedMs } from "../../types/workflow-run"
 import { DESIGN_TOKENS } from "../../styles/designSystem"
 import { WorkflowRunNodeRow } from "./WorkflowRunNodeRow"
+import { normalizeGenerationError, formatGenerationErrorForDisplay } from "@/lib/ai/normalizeGenerationError"
 
 // ── 设计 token 别名 ────────────────────────────────────
 const CLR = {
@@ -160,6 +161,7 @@ const StatsBar = memo(function StatsBar({ record }: { record: WorkflowRunRecord 
 
 const ErrorBanner = memo(function ErrorBanner({ error }: { error: string }) {
   if (!error) return null
+  const safeError = formatGenerationErrorForDisplay(normalizeGenerationError({ body: error }))
   return (
     <div
       style={{
@@ -173,7 +175,7 @@ const ErrorBanner = memo(function ErrorBanner({ error }: { error: string }) {
         lineHeight: 1.5,
       }}
     >
-      {error}
+      {safeError}
     </div>
   )
 })

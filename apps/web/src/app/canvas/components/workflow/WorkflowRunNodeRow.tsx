@@ -6,6 +6,7 @@
 import { memo } from "react"
 import type { WorkflowNodeRunRecord } from "../../types/workflow-run"
 import { getRunStatusIcon, getRunStatusColor, formatDurationMs } from "../../types/workflow-run"
+import { normalizeGenerationError, formatGenerationErrorForDisplay } from "@/lib/ai/normalizeGenerationError"
 
 interface Props {
   record: WorkflowNodeRunRecord
@@ -18,6 +19,9 @@ export const WorkflowRunNodeRow = memo(function WorkflowRunNodeRow({ record, ind
   const colorClass = getRunStatusColor(record.status)
   const title = record.title || record.nodeId
   const durationText = record.durationMs != null ? formatDurationMs(record.durationMs) : undefined
+  const safeError = record.error
+    ? formatGenerationErrorForDisplay(normalizeGenerationError({ body: record.error }))
+    : undefined
 
   return (
     <div
@@ -39,9 +43,9 @@ export const WorkflowRunNodeRow = memo(function WorkflowRunNodeRow({ record, ind
       {/* 标题 + 错误 */}
       <div className="flex-1 min-w-0">
         <span className="text-zinc-300 truncate block">{title}</span>
-        {record.error && (
+        {safeError && (
           <span className="text-red-400/80 text-[10px] truncate block mt-0.5">
-            {record.error}
+            {safeError}
           </span>
         )}
       </div>

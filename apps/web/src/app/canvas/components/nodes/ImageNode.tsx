@@ -2,9 +2,9 @@
 // Image Node Component - TapNow-inspired Design
 // Upload button + image preview + bottom AI generation input bar
 // ============================================================================
-"use client"
+"use client";
 
-import { memo, useState, useEffect, useCallback, useRef } from "react"
+import { memo, useState, useEffect, useCallback, useRef } from "react";
 import {
   AlertTriangle,
   Upload,
@@ -15,209 +15,463 @@ import {
   X,
   Sparkles,
   Maximize2,
-} from "lucide-react"
-import { Handle, Position, type NodeProps, useReactFlow } from "@xyflow/react"
-import { DESIGN_TOKENS } from "../../styles/designSystem"
-import type { CanvasNodeData, CanvasNodeKind } from "../canvas/types"
-import { NodeRunStatusIndicator } from "./NodeRunStatusIndicator"
+} from "lucide-react";
+import { Handle, Position, type NodeProps, useReactFlow } from "@xyflow/react";
+import { DESIGN_TOKENS } from "../../styles/designSystem";
+import type { CanvasNodeData, CanvasNodeKind } from "../canvas/types";
+import { NodeRunStatusIndicator } from "./NodeRunStatusIndicator";
+import {
+  persistImageFile,
+  persistImageDataUrl,
+  getLocalImageAsset,
+} from "@/lib/assets/localImageStore";
+import { prepareReferenceImageForGeneration } from "@/lib/images/prepareReferenceImage";
+import {
+  getImageProviderCapability,
+  assertImageToImageSupported,
+} from "@/lib/ai/imageProviderCapabilities";
+import {
+  normalizeGenerationError,
+  formatGenerationErrorForDisplay,
+} from "@/lib/ai/normalizeGenerationError";
+import { createImageGenerationSnapshot } from "@/lib/ai/createGenerationSnapshot";
 
 // Global registry for hover events
-const imageHoverRegistry: Record<string, {
-  onMouseEnter: (nodeId: string, event: MouseEvent) => void
-  onMouseLeave: () => void
-}> = {}
+const imageHoverRegistry: Record<
+  string,
+  {
+    onMouseEnter: (nodeId: string, event: MouseEvent) => void;
+    onMouseLeave: () => void;
+  }
+> = {};
 
-export function registerImageHoverHandlers(nodeId: string, handlers: {
-  onMouseEnter: (nodeId: string, event: MouseEvent) => void
-  onMouseLeave: () => void
-}) {
-  imageHoverRegistry[nodeId] = handlers
+export function registerImageHoverHandlers(
+  nodeId: string,
+  handlers: {
+    onMouseEnter: (nodeId: string, event: MouseEvent) => void;
+    onMouseLeave: () => void;
+  },
+) {
+  imageHoverRegistry[nodeId] = handlers;
 }
 
 export function unregisterImageHoverHandlers(nodeId: string) {
-  delete imageHoverRegistry[nodeId]
+  delete imageHoverRegistry[nodeId];
 }
 
 interface ImageNodeProps extends NodeProps {
   data: CanvasNodeData & {
-    imageUrl?: string
-    assetUrl?: string
-    fileName?: string
-    fileSize?: number
-    title?: string
-  }
+    imageUrl?: string;
+    assetUrl?: string;
+    fileName?: string;
+    fileSize?: number;
+    title?: string;
+  };
 }
 
 // Model options for image generation
 const IMAGE_MODELS = [
   { value: "gpt-image-2", label: "GPT-Image-2", desc: "高质量图像生成" },
-]
+];
 
 // Aspect ratio options
 const ASPECT_RATIOS = [
-  { value: "1:1", label: "1:1", size: "1024x1024", displaySize: "1024" },
-  { value: "16:9", label: "16:9", size: "1024x576", displaySize: "1024×576" },
-  { value: "9:16", label: "9:16", size: "576x1024", displaySize: "576×1024" },
-  { value: "4:3", label: "4:3", size: "1024x768", displaySize: "1024×768" },
-  { value: "3:4", label: "3:4", size: "768x1024", displaySize: "768×1024" },
-]
+  // gpt-image-2 via current provider accepts OpenAI-style fixed sizes.
+  // 1024x576 / 576x1024 / 1024x768 / 768x1024 currently return upstream 502.
+  { value: "16:9", label: "16:9", size: "1792x1024", displaySize: "1792×1024" },
+  { value: "1:1", label: "1:1", size: "1024x1024", displaySize: "1024×1024" },
+  { value: "9:16", label: "9:16", size: "1024x1792", displaySize: "1024×1792" },
+];
 
-export const ImageNode = memo(function ImageNode({ id, data, selected }: ImageNodeProps) {
-  const [isLoading, setIsLoading] = useState(true)
-  const [hasError, setHasError] = useState(false)
-  const [aiInput, setAiInput] = useState("")
-  const [selectedModel, setSelectedModel] = useState("gpt-image-2")
-  const [selectedRatio, setSelectedRatio] = useState("1:1")
-  const [showModelDropdown, setShowModelDropdown] = useState(false)
-  const [showRatioDropdown, setShowRatioDropdown] = useState(false)
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [aiError, setAiError] = useState<string | null>(null)
-  const aiInputRef = useRef<HTMLTextAreaElement>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const { setNodes, getNodes, setEdges } = useReactFlow()
+export const ImageNode = memo(function ImageNode({
+  id,
+  data,
+  selected,
+}: ImageNodeProps) {
+  const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
+  const [aiInput, setAiInput] = useState(
+    typeof data.prompt === "string" ? data.prompt : "",
+  );
+  const [selectedModel, setSelectedModel] = useState(
+    typeof data.model === "string" ? data.model : "gpt-image-2",
+  );
+  const [selectedRatio, setSelectedRatio] = useState("16:9");
+  const [showModelDropdown, setShowModelDropdown] = useState(false);
+  const [showRatioDropdown, setShowRatioDropdown] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const aiInputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { setNodes, getNodes, setEdges } = useReactFlow();
 
-  const imageUrl = data.imageUrl || data.assetUrl || ""
-  const fileName = data.fileName || data.title || "图片"
-  const displayWidth = data.displayWidth ?? 280
-  const displayHeight = data.displayHeight ?? 200
+  const imageUrl = data.imageUrl || data.assetUrl || "";
+  const fileName = data.fileName || data.title || "图片";
+  const isStoryboardFinalOutput = data.role === "storyboard-final-output" || data.isStoryboardFinalOutput === true;
+  const isShotProcessImage = data.role === "shot-image" || data.sourceType === "shot" || data.isStoryboardProcessNode === true;
+  const nodeLabel = isStoryboardFinalOutput ? "最终分镜图" : isShotProcessImage ? "镜头过程图" : "Image";
+  const headerTitle = isStoryboardFinalOutput ? data.title || "最终分镜图" : isShotProcessImage ? data.title || "镜头过程图" : fileName;
+  const canUploadReplacement = !isStoryboardFinalOutput && !isShotProcessImage;
+  const displayWidth = data.displayWidth ?? 280;
+  const displayHeight = data.displayHeight ?? 200;
 
   // Cleanup registry on unmount
   useEffect(() => {
-    return () => { unregisterImageHoverHandlers(id) }
-  }, [id])
+    return () => {
+      unregisterImageHoverHandlers(id);
+    };
+  }, [id]);
 
-  const handleImageLoad = () => setIsLoading(false)
-  const handleImageError = () => { setIsLoading(false); setHasError(true) }
+  const handleImageLoad = () => setIsLoading(false);
+  const handleImageError = () => {
+    setIsLoading(false);
+    setHasError(true);
+  };
 
-  const hoverHandlers = imageHoverRegistry[id]
-  const handleMouseEnter = useCallback((event: React.MouseEvent) => {
-    if (hoverHandlers) hoverHandlers.onMouseEnter(id, event.nativeEvent)
-  }, [hoverHandlers, id])
-  const handleMouseLeave = useCallback((event: React.MouseEvent) => {
-    if (hoverHandlers) hoverHandlers.onMouseLeave()
-  }, [hoverHandlers])
+  const hoverHandlers = imageHoverRegistry[id];
+  const handleMouseEnter = useCallback(
+    (event: React.MouseEvent) => {
+      if (hoverHandlers) hoverHandlers.onMouseEnter(id, event.nativeEvent);
+    },
+    [hoverHandlers, id],
+  );
+  const handleMouseLeave = useCallback(
+    (event: React.MouseEvent) => {
+      if (hoverHandlers) hoverHandlers.onMouseLeave();
+    },
+    [hoverHandlers],
+  );
+
+  // Keep the prompt editable after node reload / generation.
+  useEffect(() => {
+    if (typeof data.prompt === "string" && data.prompt !== aiInput) {
+      setAiInput(data.prompt);
+    }
+  }, [data.prompt]);
 
   // Auto-resize textarea
   const autoResize = useCallback((el: HTMLTextAreaElement | null) => {
-    if (!el) return
-    el.style.height = "auto"
-    el.style.height = el.scrollHeight + "px"
-  }, [])
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = el.scrollHeight + "px";
+  }, []);
 
   useEffect(() => {
-    autoResize(aiInputRef.current)
-  }, [aiInput, autoResize])
+    autoResize(aiInputRef.current);
+  }, [aiInput, autoResize]);
 
-  // Handle file upload
-  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+  // Handle file upload — persist to IndexedDB, use objectURL for display
+  const handleFileSelect = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      (async () => {
+        try {
+          const { assetId, objectUrl } = await persistImageFile(file);
 
-    const reader = new FileReader()
-    reader.onload = (event) => {
-      const url = event.target?.result as string
-      setNodes((nds) =>
-        nds.map((node) => {
-          if (node.id !== id) return node
-          return {
-            ...node,
-            data: {
-              ...node.data,
-              imageUrl: url,
-              assetUrl: url,
-              fileName: file.name,
-              fileSize: file.size,
-              mimeType: file.type,
-            },
-          }
-        })
-      )
-      setIsLoading(true)
-      setHasError(false)
-    }
-    reader.readAsDataURL(file)
-  }, [id, setNodes])
+          // Read dimensions for metadata
+          const dimensions = await new Promise<{
+            width: number;
+            height: number;
+          }>((resolve, reject) => {
+            const img = new Image();
+            img.onload = () =>
+              resolve({ width: img.naturalWidth, height: img.naturalHeight });
+            img.onerror = () => reject(new Error("Failed to load image"));
+            img.src = objectUrl;
+          }).catch(() => ({ width: undefined, height: undefined }));
+
+          setNodes((nds) =>
+            nds.map((node) => {
+              if (node.id !== id) return node;
+              return {
+                ...node,
+                data: {
+                  ...node.data,
+                  imageUrl: objectUrl,
+                  assetUrl: objectUrl,
+                  assetId,
+                  fileName: file.name,
+                  fileSize: file.size,
+                  mimeType: file.type,
+                  imageWidth: dimensions.width,
+                  imageHeight: dimensions.height,
+                  source: "upload" as const,
+                  persistence: "indexeddb" as const,
+                  loadError: undefined,
+                },
+              };
+            }),
+          );
+          setIsLoading(true);
+          setHasError(false);
+        } catch (err) {
+          console.error("[ImageNode] Failed to persist uploaded image:", err);
+          setAiError("图片上传失败");
+        }
+      })();
+    },
+    [id, setNodes],
+  );
 
   // AI Generate Image
   const handleAiGenerate = useCallback(async () => {
-    if (!aiInput.trim()) return
+    if (!aiInput.trim()) return;
 
-    setIsGenerating(true)
-    setAiError(null)
+    setIsGenerating(true);
+    setAiError(null);
 
     try {
-      const ratio = ASPECT_RATIOS.find(r => r.value === selectedRatio)
-      const size = ratio?.size || "1024x1024"
+      const ratio = ASPECT_RATIOS.find((r) => r.value === selectedRatio);
+      const size = ratio?.size || "1792x1024";
 
-      // Build request body — support image-to-image when imageUrl exists
+      const userPrompt = aiInput.trim();
+      const requestId = crypto.randomUUID();
+      const capability = getImageProviderCapability(selectedModel);
+      let referenceImage: Record<string, unknown> | undefined;
+
+      // Build request body — support image-to-image only when a persisted local asset exists.
+      // Blob URLs are runtime-only and must never be sent to the server.
       const bodyObj: Record<string, any> = {
-        prompt: aiInput,
-        model: "gpt-image-2",
+        prompt: userPrompt,
+        model: selectedModel,
         size,
+        requestId,
+      };
+
+      if (data.assetId) {
+        assertImageToImageSupported(capability);
+        const asset = await getLocalImageAsset(data.assetId);
+        if (!asset?.blob) {
+          throw new Error("参考图资源不存在，请重新上传图片。");
+        }
+
+        const prepared = await prepareReferenceImageForGeneration(asset.blob, {
+          maxBytes: capability.maxInputImageBytes,
+          maxSide: capability.maxInputImageSide,
+          mimeType: capability.acceptedInputMimeTypes.includes("image/jpeg")
+            ? "image/jpeg"
+            : "image/webp",
+        });
+
+        referenceImage = {
+          assetId: data.assetId,
+          sourceNodeId: id,
+          mimeType: prepared.mimeType,
+          width: prepared.width,
+          height: prepared.height,
+          originalByteSize: prepared.originalByteSize,
+          sentByteSize: prepared.byteSize,
+          compressed: prepared.compressed,
+        };
+        bodyObj.sourceImage = prepared.dataUrl;
       }
-      if (imageUrl) {
-        bodyObj.sourceImage = imageUrl
-      }
+
+      const generation = createImageGenerationSnapshot({
+        requestId,
+        mode: bodyObj.sourceImage ? "image-to-image" : "text-to-image",
+        userPrompt,
+        model: selectedModel,
+        size,
+        sourceNodeId: id,
+        sourceAssetId: data.assetId,
+        referenceImage,
+      });
+
+      setNodes((nds) =>
+        nds.map((node) =>
+          node.id === id
+            ? {
+                ...node,
+                data: { ...node.data, prompt: userPrompt, generation },
+              }
+            : node,
+        ),
+      );
 
       const res = await fetch("/api/ai/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(bodyObj),
-      })
+      });
 
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({}))
-        throw new Error(errData.error || `API error: ${res.status}`)
+        const errData = await res.json().catch(() => ({}));
+        const normalized =
+          errData.error && typeof errData.error === "object"
+            ? errData.error
+            : normalizeGenerationError({
+                status: res.status,
+                body: errData,
+                provider: capability.provider,
+              });
+        throw Object.assign(
+          new Error(formatGenerationErrorForDisplay(normalized)),
+          { generationError: normalized },
+        );
       }
 
-      const result = await res.json()
-      if (!result.imageUrl) throw new Error("No image data returned")
+      const result = await res.json();
+      if (!result.imageUrl) throw new Error("No image data returned");
 
-      const currentNode = getNodes().find((n) => n.id === id)
-      if (!currentNode) throw new Error("Node not found")
+      // Persist AI-generated image (base64 data URL) to IndexedDB
+      let displayUrl = result.imageUrl;
+      let assetId: string | undefined;
+
+      if (result.imageUrl.startsWith("data:image")) {
+        const persisted = await persistImageDataUrl(result.imageUrl, {
+          fileName: `generated-${Date.now()}.png`,
+        });
+        displayUrl = persisted.objectUrl;
+        assetId = persisted.assetId;
+      }
+
+      const currentNode = getNodes().find((n) => n.id === id);
+      if (!currentNode) throw new Error("Node not found");
 
       const newNode = {
         id: `node-${Date.now()}`,
         type: "image" as const,
-        position: { x: currentNode.position.x + 380, y: currentNode.position.y },
+        position: {
+          x: currentNode.position.x + 380,
+          y: currentNode.position.y,
+        },
         data: {
-          title: `生成: ${aiInput.slice(0, 20)}...`,
-          imageUrl: result.imageUrl,
+          title: `生成: ${userPrompt.slice(0, 20)}${userPrompt.length > 20 ? "..." : ""}`,
+          imageUrl: displayUrl,
+          assetId,
           nodeKind: "ai-generated-image" as CanvasNodeKind,
+          prompt: userPrompt,
+          summary: result.prompt,
+          generation: {
+            ...generation,
+            enhancedPrompt: result.prompt,
+            model: result.model || selectedModel,
+            status: "succeeded" as const,
+            completedAt: new Date().toISOString(),
+            endpoint: result.endpoint,
+            referenceFormat: result.referenceFormat,
+          },
+          generationOutput: {
+            prompt: userPrompt,
+            finalPrompt: result.prompt,
+            revisedPrompt: result.revisedPrompt,
+            model: result.model || selectedModel,
+            size,
+            sourceImageAssetId: data.assetId,
+            referenceImage,
+            requestId,
+            endpoint: result.endpoint,
+            referenceFormat: result.referenceFormat,
+          },
+          model: result.model || selectedModel,
           sourcePromptId: id,
-          displayWidth: 280,
-          displayHeight: ratio?.value === "16:9" ? 158 : ratio?.value === "9:16" ? 498 : 280,
+          source: "generated" as const,
+          persistence: assetId ? ("indexeddb" as const) : undefined,
+          displayWidth: ratio?.value === "9:16" ? 280 : 320,
+          displayHeight:
+            ratio?.value === "16:9" ? 180 : ratio?.value === "9:16" ? 498 : 280,
           createdAt: Date.now(),
         },
-      }
+      };
 
-      setNodes((nds) => [...nds, newNode])
-      setEdges((eds) => [...eds, {
-        id: `edge-${id}-${newNode.id}`,
-        source: id,
-        target: newNode.id,
-        type: "creative",
-        animated: true,
-        style: { stroke: DESIGN_TOKENS.nodeEdge, strokeWidth: 1.5 },
-      }])
+      setNodes((nds) => [...nds, newNode]);
+      setEdges((eds) => [
+        ...eds,
+        {
+          id: `edge-${id}-${newNode.id}`,
+          source: id,
+          target: newNode.id,
+          type: "creative",
+          animated: true,
+          style: { stroke: DESIGN_TOKENS.nodeEdge, strokeWidth: 1.5 },
+        },
+      ]);
+
+      setNodes((nds) =>
+        nds.map((node) =>
+          node.id === id &&
+          (node.data.generation as any)?.requestId === requestId
+            ? {
+                ...node,
+                data: {
+                  ...node.data,
+                  generation: {
+                    ...(node.data.generation as Record<string, unknown>),
+                    enhancedPrompt: result.prompt,
+                    status: "succeeded" as const,
+                    completedAt: new Date().toISOString(),
+                    endpoint: result.endpoint,
+                    referenceFormat: result.referenceFormat,
+                  },
+                },
+              }
+            : node,
+        ),
+      );
 
       // NOTE: intentionally NOT clearing aiInput so user can tweak & retry
-
     } catch (err: any) {
-      setAiError(err.message || "生成失败")
+      const normalized =
+        err?.generationError ||
+        normalizeGenerationError({
+          error: err,
+          provider: getImageProviderCapability(selectedModel).provider,
+        });
+      console.debug("[ImageNode] generation failed raw:", normalized.raw);
+      setNodes((nds) =>
+        nds.map((node) => {
+          if (node.id !== id) return node;
+          const currentGeneration = node.data.generation;
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              prompt: aiInput.trim() || node.data.prompt,
+              generation: currentGeneration
+                ? {
+                    ...currentGeneration,
+                    status: "failed" as const,
+                    error: {
+                      code: normalized.code,
+                      status: normalized.status,
+                      provider: normalized.provider,
+                      userMessage: normalized.userMessage,
+                      detail: normalized.detail,
+                      retryable: normalized.retryable,
+                    },
+                    completedAt: new Date().toISOString(),
+                  }
+                : currentGeneration,
+            },
+          };
+        }),
+      );
+      setAiError(formatGenerationErrorForDisplay(normalized));
     } finally {
-      setIsGenerating(false)
+      setIsGenerating(false);
     }
-  }, [aiInput, selectedRatio, id, getNodes, setNodes, setEdges, imageUrl])
+  }, [
+    aiInput,
+    selectedModel,
+    selectedRatio,
+    id,
+    getNodes,
+    setNodes,
+    setEdges,
+    imageUrl,
+    data.assetId,
+  ]);
   const handleAiInputKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault()
-      handleAiGenerate()
+      e.preventDefault();
+      handleAiGenerate();
     }
-  }
+  };
 
-  const currentModel = IMAGE_MODELS[0]
-  const currentRatio = ASPECT_RATIOS.find(r => r.value === selectedRatio) || ASPECT_RATIOS[0]
+  const currentModel = IMAGE_MODELS[0];
+  const currentRatio =
+    ASPECT_RATIOS.find((r) => r.value === selectedRatio) || ASPECT_RATIOS[0];
 
   return (
     <>
@@ -231,10 +485,26 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: ImageNo
       />
 
       {/* Connection Handles */}
-      <Handle type="target" position={Position.Top} className="!bg-slate-400 !h-2.5 !w-2.5 !rounded-sm !border !border-white/30" />
-      <Handle type="target" position={Position.Left} className="!bg-slate-400 !h-2.5 !w-2.5 !rounded-sm !border !border-white/30" />
-      <Handle type="source" position={Position.Right} className="!bg-slate-500 !h-2.5 !w-2.5 !rounded-sm !border !border-white/30" />
-      <Handle type="source" position={Position.Bottom} className="!bg-slate-500 !h-2.5 !w-2.5 !rounded-sm !border !border-white/30" />
+      <Handle
+        type="target"
+        position={Position.Top}
+        className="!bg-slate-400 !h-2.5 !w-2.5 !rounded-sm !border !border-white/30"
+      />
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="!bg-slate-400 !h-2.5 !w-2.5 !rounded-sm !border !border-white/30"
+      />
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="!bg-slate-500 !h-2.5 !w-2.5 !rounded-sm !border !border-white/30"
+      />
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="!bg-slate-500 !h-2.5 !w-2.5 !rounded-sm !border !border-white/30"
+      />
 
       {/* Node Content */}
       <div
@@ -242,30 +512,62 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: ImageNo
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
         style={{
-          width: 340,
-          backgroundColor: DESIGN_TOKENS.panelSolid,
-          borderColor: selected ? "rgba(148, 163, 184, 0.4)" : "rgba(255, 255, 255, 0.08)",
-          boxShadow: selected ? DESIGN_TOKENS.shadowNode : "none",
+          width: isStoryboardFinalOutput ? 380 : 340,
+          backgroundColor: isStoryboardFinalOutput ? "#f8fafc" : DESIGN_TOKENS.panelSolid,
+          borderColor: isStoryboardFinalOutput
+            ? selected
+              ? "rgba(15, 23, 42, 0.22)"
+              : "rgba(15, 23, 42, 0.1)"
+            : selected
+              ? "rgba(148, 163, 184, 0.4)"
+              : "rgba(255, 255, 255, 0.08)",
+          boxShadow: selected || isStoryboardFinalOutput ? DESIGN_TOKENS.shadowNode : "none",
         }}
       >
         {/* ===== UPLOAD BUTTON ===== */}
         <div
           className="flex items-center justify-between border-b px-3 py-2"
-          style={{ borderColor: DESIGN_TOKENS.border }}
+          style={{
+            borderColor: isStoryboardFinalOutput ? "rgba(15, 23, 42, 0.08)" : DESIGN_TOKENS.border,
+            backgroundColor: isStoryboardFinalOutput ? "#ffffff" : undefined,
+          }}
         >
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs transition-all hover:bg-white/5"
-            style={{ borderColor: DESIGN_TOKENS.border, color: DESIGN_TOKENS.textSecondary }}
-          >
-            <Upload size={13} strokeWidth={1.5} />
-            <span>上传</span>
-          </button>
+          {canUploadReplacement ? (
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs transition-all hover:bg-white/5"
+              style={{
+                borderColor: DESIGN_TOKENS.border,
+                color: DESIGN_TOKENS.textSecondary,
+              }}
+            >
+              <Upload size={13} strokeWidth={1.5} />
+              <span>上传</span>
+            </button>
+          ) : (
+            <div className="min-w-0">
+              <div
+                className="truncate text-xs font-medium"
+                style={{ color: isStoryboardFinalOutput ? "#0f172a" : DESIGN_TOKENS.textSecondary }}
+              >
+                {headerTitle}
+              </div>
+              <div
+                className="mt-0.5 text-[10px]"
+                style={{ color: isStoryboardFinalOutput ? "#64748b" : DESIGN_TOKENS.textMuted }}
+              >
+                {isStoryboardFinalOutput ? "一键分镜的最终结果" : "默认隐藏的分镜过程图"}
+              </div>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <NodeRunStatusIndicator data={data} variant="dot" />
-            <div className="flex items-center gap-1" style={{ color: DESIGN_TOKENS.textMuted }}>
+            <div
+              className="flex items-center gap-1"
+              style={{ color: isStoryboardFinalOutput ? "#64748b" : DESIGN_TOKENS.textMuted }}
+            >
               <ImageIcon size={13} strokeWidth={1.5} />
-              <span className="text-[11px]">Image</span>
+              <span className="text-[11px]">{nodeLabel}</span>
             </div>
           </div>
         </div>
@@ -274,7 +576,11 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: ImageNo
         <div className="p-3">
           <div
             className="relative flex items-center justify-center overflow-hidden rounded-xl bg-black/20"
-            style={{ width: "100%", height: 220 }}
+            style={{
+              width: "100%",
+              height: isStoryboardFinalOutput ? 214 : 220,
+              backgroundColor: isStoryboardFinalOutput ? "#e2e8f0" : "rgba(0,0,0,0.2)",
+            }}
           >
             {isLoading && imageUrl && (
               <div className="absolute inset-0 flex items-center justify-center">
@@ -282,10 +588,14 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: ImageNo
               </div>
             )}
 
-            {hasError ? (
+            {hasError || data.persistence === "missing" ? (
               <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-white/40">
                 <AlertTriangle size={28} strokeWidth={1.5} />
-                <span className="text-xs">图片加载失败</span>
+                <span className="text-xs">
+                  {data.loadError === "asset-not-found"
+                    ? "图片资源丢失"
+                    : "图片加载失败"}
+                </span>
               </div>
             ) : imageUrl ? (
               <img
@@ -315,16 +625,27 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: ImageNo
             <textarea
               ref={aiInputRef}
               value={aiInput}
-              onChange={(e) => setAiInput(e.target.value)}
+              onChange={(e) => {
+                const nextPrompt = e.target.value;
+                setAiInput(nextPrompt);
+                setNodes((nds) =>
+                  nds.map((node) =>
+                    node.id === id
+                      ? { ...node, data: { ...node.data, prompt: nextPrompt } }
+                      : node,
+                  ),
+                );
+              }}
               onKeyDown={handleAiInputKeyDown}
               onPointerDownCapture={(e) => e.stopPropagation()}
               onMouseDownCapture={(e) => e.stopPropagation()}
               onClick={(e) => e.stopPropagation()}
               onDoubleClick={(e) => e.stopPropagation()}
-              placeholder="描述任何你想要生成的内容"
-              className="nodrag nopan nowheel w-full resize-none rounded-xl border bg-transparent px-3 py-2.5 pr-10 text-sm text-white/80 placeholder:text-white/25 focus:outline-none"
+              placeholder={isStoryboardFinalOutput ? "描述你想如何调整这张分镜图..." : "描述任何你想要生成的内容"}
+              className="nodrag nopan nowheel w-full resize-none rounded-xl border bg-transparent px-3 py-2.5 pr-10 text-sm focus:outline-none"
               style={{
-                borderColor: DESIGN_TOKENS.border,
+                borderColor: isStoryboardFinalOutput ? "rgba(15, 23, 42, 0.12)" : DESIGN_TOKENS.border,
+                color: isStoryboardFinalOutput ? "#0f172a" : "rgba(255,255,255,0.8)",
                 minHeight: "44px",
                 maxHeight: "120px",
               }}
@@ -341,13 +662,16 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: ImageNo
           </div>
 
           {/* Bottom bar: Model + Ratio + Send */}
-          <div className="mt-2 flex items-center justify-between">
+          <div className="mt-2 flex items-center justify-between" style={{ justifyContent: isStoryboardFinalOutput ? "flex-end" : undefined }}>
             {/* Left: Model + Ratio */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2" style={{ display: isStoryboardFinalOutput ? "none" : undefined }}>
               {/* Model selector */}
               <div className="relative">
                 <button
-                  onClick={() => { setShowModelDropdown(!showModelDropdown); setShowRatioDropdown(false) }}
+                  onClick={() => {
+                    setShowModelDropdown(!showModelDropdown);
+                    setShowRatioDropdown(false);
+                  }}
                   className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs transition-colors hover:bg-white/5"
                   style={{ color: DESIGN_TOKENS.textSecondary }}
                 >
@@ -367,14 +691,27 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: ImageNo
                     {IMAGE_MODELS.map((model) => (
                       <button
                         key={model.value}
-                        onClick={() => { setSelectedModel(model.value); setShowModelDropdown(false) }}
+                        onClick={() => {
+                          setSelectedModel(model.value);
+                          setShowModelDropdown(false);
+                        }}
                         className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-white/5"
-                        style={{ color: selectedModel === model.value ? DESIGN_TOKENS.accentHover : DESIGN_TOKENS.textSecondary }}
+                        style={{
+                          color:
+                            selectedModel === model.value
+                              ? DESIGN_TOKENS.accentHover
+                              : DESIGN_TOKENS.textSecondary,
+                        }}
                       >
                         <Sparkles size={12} strokeWidth={1.5} />
                         <div>
                           <div className="font-medium">{model.label}</div>
-                          <div className="text-[10px]" style={{ color: DESIGN_TOKENS.textMuted }}>{model.desc}</div>
+                          <div
+                            className="text-[10px]"
+                            style={{ color: DESIGN_TOKENS.textMuted }}
+                          >
+                            {model.desc}
+                          </div>
                         </div>
                       </button>
                     ))}
@@ -385,12 +722,20 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: ImageNo
               {/* Ratio selector */}
               <div className="relative">
                 <button
-                  onClick={() => { setShowRatioDropdown(!showRatioDropdown); setShowModelDropdown(false) }}
+                  onClick={() => {
+                    setShowRatioDropdown(!showRatioDropdown);
+                    setShowModelDropdown(false);
+                  }}
                   className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs transition-colors hover:bg-white/5"
                   style={{ color: DESIGN_TOKENS.textSecondary }}
                 >
                   <span className="text-[10px]">{currentRatio.label}</span>
-                  <span className="text-[10px]" style={{ color: DESIGN_TOKENS.textMuted }}>· {currentRatio.displaySize}</span>
+                  <span
+                    className="text-[10px]"
+                    style={{ color: DESIGN_TOKENS.textMuted }}
+                  >
+                    · {currentRatio.displaySize}
+                  </span>
                   <ChevronDown size={12} strokeWidth={1.5} />
                 </button>
                 {showRatioDropdown && (
@@ -405,12 +750,25 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: ImageNo
                     {ASPECT_RATIOS.map((ratio) => (
                       <button
                         key={ratio.value}
-                        onClick={() => { setSelectedRatio(ratio.value); setShowRatioDropdown(false) }}
+                        onClick={() => {
+                          setSelectedRatio(ratio.value);
+                          setShowRatioDropdown(false);
+                        }}
                         className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-white/5"
-                        style={{ color: selectedRatio === ratio.value ? DESIGN_TOKENS.accentHover : DESIGN_TOKENS.textSecondary }}
+                        style={{
+                          color:
+                            selectedRatio === ratio.value
+                              ? DESIGN_TOKENS.accentHover
+                              : DESIGN_TOKENS.textSecondary,
+                        }}
                       >
                         <span className="font-medium">{ratio.label}</span>
-                        <span className="text-[10px]" style={{ color: DESIGN_TOKENS.textMuted }}>{ratio.displaySize}</span>
+                        <span
+                          className="text-[10px]"
+                          style={{ color: DESIGN_TOKENS.textMuted }}
+                        >
+                          {ratio.displaySize}
+                        </span>
                       </button>
                     ))}
                   </div>
@@ -425,13 +783,21 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: ImageNo
                 disabled={isGenerating || !aiInput.trim()}
                 className="ml-1 flex h-7 w-7 items-center justify-center rounded-full transition-all disabled:opacity-30"
                 style={{
-                  backgroundColor: aiInput.trim() ? DESIGN_TOKENS.accent : "rgba(255,255,255,0.1)",
+                  backgroundColor: aiInput.trim()
+                    ? DESIGN_TOKENS.accent
+                    : isStoryboardFinalOutput
+                      ? "rgba(15, 23, 42, 0.12)"
+                      : "rgba(255,255,255,0.1)",
                 }}
               >
                 {isGenerating ? (
                   <Loader2 size={14} className="animate-spin text-white/70" />
                 ) : (
-                  <ArrowUp size={14} strokeWidth={2} className="text-white/80" />
+                  <ArrowUp
+                    size={14}
+                    strokeWidth={2}
+                    className="text-white/80"
+                  />
                 )}
               </button>
             </div>
@@ -439,9 +805,15 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: ImageNo
 
           {/* Error */}
           {aiError && (
-            <div className="mt-2 flex items-center justify-between rounded-lg px-2 py-1.5" style={{ backgroundColor: "rgba(239,68,68,0.1)" }}>
+            <div
+              className="mt-2 flex items-center justify-between rounded-lg px-2 py-1.5"
+              style={{ backgroundColor: "rgba(239,68,68,0.1)" }}
+            >
               <span className="text-[11px] text-red-300/70">{aiError}</span>
-              <button onClick={() => setAiError(null)} className="text-[11px] text-white/40 hover:text-white/60">
+              <button
+                onClick={() => setAiError(null)}
+                className="text-[11px] text-white/40 hover:text-white/60"
+              >
                 <X size={12} />
               </button>
             </div>
@@ -449,7 +821,7 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: ImageNo
         </div>
       </div>
     </>
-  )
-})
+  );
+});
 
-export default ImageNode
+export default ImageNode;

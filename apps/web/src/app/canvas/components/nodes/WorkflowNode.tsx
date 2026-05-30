@@ -35,7 +35,7 @@ interface WorkflowNodeProps extends NodeProps {
 }
 
 const workflowLabels: Partial<Record<CanvasNodeKind, string>> = {
-  script: "脚本",
+  script: "灵感",
   storyboard: "分镜",
   "image-generation": "文生图",
   "image-result": "图片结果",
@@ -311,6 +311,21 @@ export const WorkflowNode = memo(function WorkflowNode({ id, data, selected }: W
               >
                 <Sparkles size={12} />
                 {isFinished ? "重新运行" : "运行此节点"}
+              </button>
+            )}
+
+            {kind === "script" && !isBusy && runStatus !== "pending" && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (typeof window !== "undefined") {
+                    window.dispatchEvent(new CustomEvent("starcanvas:create-storyboard-assistant", { detail: { nodeId: id } }))
+                  }
+                }}
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-sky-300/20 bg-sky-400/10 py-2 text-xs text-sky-100/70 transition-colors hover:bg-sky-400/15 hover:text-sky-50"
+              >
+                <Clapperboard size={12} />
+                用故事种子继续分镜
               </button>
             )}
           </div>

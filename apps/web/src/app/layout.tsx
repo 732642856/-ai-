@@ -16,8 +16,8 @@ export const metadata: Metadata = {
   title: "星轨画布（前期）",
   description: "面向创意构思、分镜草稿和视觉设计的 StarTrails 前期画布。",
   icons: {
-    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
-    apple: [{ url: "/startrails-icon.svg", type: "image/svg+xml" }],
+    icon: [{ url: "/startrails-icon.jpg", type: "image/jpeg" }],
+    apple: [{ url: "/startrails-icon.jpg", type: "image/jpeg" }],
   },
 };
 

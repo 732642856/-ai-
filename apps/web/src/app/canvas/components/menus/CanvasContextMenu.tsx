@@ -13,6 +13,8 @@ import {
   Maximize,
   ZoomIn,
   Upload,
+  Clapperboard,
+  Lightbulb,
 } from "lucide-react"
 import type { ContextMenuState } from "../canvas/types"
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
@@ -20,8 +22,9 @@ import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 interface CanvasContextMenuProps {
   state: ContextMenuState
   onClose: () => void
-  onAddNode: (type: "content" | "image", position: { x: number; y: number }, nodeKind?: string) => void
+  onAddNode: (type: "content" | "image" | "workflow", position: { x: number; y: number }, nodeKind?: string) => void
   onUploadImage: (position: { x: number; y: number }) => void
+  onUploadDocument?: (position: { x: number; y: number }) => void
   onPaste: () => void
   hasClipboard: boolean
 }
@@ -70,6 +73,7 @@ export const CanvasContextMenu = memo(function CanvasContextMenu({
   onClose,
   onAddNode,
   onUploadImage,
+  onUploadDocument,
   onPaste,
   hasClipboard,
 }: CanvasContextMenuProps) {
@@ -144,18 +148,26 @@ export const CanvasContextMenu = memo(function CanvasContextMenu({
       </div>
       <div className="py-1">
         <MenuItem
-          icon={<FileText size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
-          label="添加 Prompt 节点"
+          icon={<FilePen size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
+          label="添加写作文本"
           onClick={() => {
-            onAddNode("content", canvasPosition, "prompt")
+            onAddNode("content", canvasPosition, "text")
             onClose()
           }}
         />
         <MenuItem
-          icon={<FilePen size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
-          label="添加文本节点"
+          icon={<Clapperboard size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
+          label="添加故事分镜"
           onClick={() => {
-            onAddNode("content", canvasPosition, "text")
+            onAddNode("content", canvasPosition, "storyboard")
+            onClose()
+          }}
+        />
+        <MenuItem
+          icon={<Lightbulb size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
+          label="灵感碎片"
+          onClick={() => {
+            onAddNode("workflow", canvasPosition, "script")
             onClose()
           }}
         />
@@ -164,6 +176,14 @@ export const CanvasContextMenu = memo(function CanvasContextMenu({
           label="上传图片"
           onClick={() => {
             onUploadImage(canvasPosition)
+            onClose()
+          }}
+        />
+        <MenuItem
+          icon={<FileText size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
+          label="上传文档"
+          onClick={() => {
+            onUploadDocument?.(canvasPosition)
             onClose()
           }}
         />

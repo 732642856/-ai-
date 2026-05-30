@@ -1,5 +1,5 @@
 /**
- * CanvasDropOverlay - 拖拽图片到画布时的视觉反馈
+ * CanvasDropOverlay - 拖拽文件到画布时的视觉反馈
  */
 
 import { DESIGN_TOKENS } from "../../styles/designSystem"
@@ -51,7 +51,7 @@ export function CanvasDropOverlay({ isVisible, error }: CanvasDropOverlayProps) 
             {error || "释放以上传到画布"}
           </p>
           <p className="mt-1 text-sm" style={{ color: DESIGN_TOKENS.textMuted }}>
-            支持 JPG、PNG、WebP、GIF（最大 20MB）
+            支持 JPG、PNG、WebP、GIF、TXT、Markdown
           </p>
         </div>
       </div>

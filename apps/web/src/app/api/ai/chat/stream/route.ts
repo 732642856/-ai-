@@ -26,6 +26,26 @@ const isImageModel = (model: string): boolean => {
   return ["banana-pro", "bananapro", "mj-v7", "gpt-image-2"].includes(model)
 }
 
+const isChatModel = (model: string): boolean => {
+  return ["gpt-4o", "claude-3.5-sonnet", "gemini-pro", "glm-4", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-4o-audio-preview"].includes(model)
+}
+
+function resolveModelForMode(params: {
+  requestedModel?: unknown
+  requestedMode?: unknown
+  defaultModel: string
+  defaultImageModel: string
+}): string {
+  const requestedModel = typeof params.requestedModel === "string" ? params.requestedModel : undefined
+  const requestedMode = params.requestedMode === "image" ? "image" : "chat"
+
+  if (requestedMode === "image") {
+    return requestedModel && isImageModel(requestedModel) ? requestedModel : params.defaultImageModel
+  }
+
+  return requestedModel && isChatModel(requestedModel) ? requestedModel : params.defaultModel
+}
+
 const getEndpointForModel = (model: string, baseUrl: string): { endpoint: string; bodyTransformer: (body: any) => any } => {
   // 文本对话模型 → /v1/chat/completions
   if (["gpt-4o", "claude-3.5-sonnet", "gemini-pro", "glm-4", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-4o-audio-preview"].includes(model)) {
@@ -47,7 +67,7 @@ const getEndpointForModel = (model: string, baseUrl: string): { endpoint: string
         model: model,
         prompt: body.messages?.[body.messages.length - 1]?.content || "",
         n: 1,
-        size: "1024x1024",
+        size: "1024x576",
       }),
     }
   }
@@ -570,8 +590,13 @@ export async function POST(request: NextRequest) {
         : undefined
 
     const config = getConfig(overrides)
-    // Use config default if frontend passes old hardcoded default
-    const model = (typeof reqModel === "string" && reqModel !== "gpt-5.5" ? reqModel : config.defaultModel)
+    const requestedMode = context?.mode === "image" ? "image" : "chat"
+    const model = resolveModelForMode({
+      requestedModel: reqModel,
+      requestedMode,
+      defaultModel: config.defaultModel,
+      defaultImageModel: config.defaultImageModel,
+    })
 
     if (!message || typeof message !== "string") {
       return NextResponse.json(

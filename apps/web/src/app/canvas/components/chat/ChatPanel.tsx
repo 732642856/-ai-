@@ -19,11 +19,12 @@ import {
 } from "lucide-react"
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 import { useChatAttachments, type ChatAttachment } from "../../hooks/useChatAttachments"
-import { ChatInput } from "./ChatInput"
+import { ChatInput, type ChatTaskMode } from "./ChatInput"
 import type { AiModel } from "./ChatInput"
 import { useChatSSE, parseCanvasActions, stripCanvasActions } from "../../hooks/useChatSSE"
 import type { ChatCanvasAction, ApplyActionsReport, ApplyActionResult } from "../../features/canvas/actions/chatActions"
 import { getActionLabel, getStatusIcon, formatActionsSummary } from "../../features/canvas/actions/chatActions"
+import { generateImageFromPrompt } from "../../utils/imageGeneration"
 import { generateId } from "../../utils/generateId"
 import type { Node } from "@xyflow/react"
 
@@ -284,7 +285,7 @@ export function ChatPanel({
   }, [messages, isStreaming, scrollToBottom])
 
   // 发送消息
-  const handleSend = useCallback(async (model: string) => {
+  const handleSend = useCallback(async (model: string, mode: ChatTaskMode = "chat") => {
     if (!input.trim() && attachmentsState.attachments.length === 0) return
 
     const userMessage: Message = {
@@ -294,6 +295,8 @@ export function ChatPanel({
       attachments: [...attachmentsState.attachments],
     }
 
+    const assistantMessageId = generateId()
+
     setMessages((prev) => [...prev, userMessage])
     setInput("")
     attachmentsState.clearAttachments()
@@ -302,45 +305,85 @@ export function ChatPanel({
     setMessages((prev) => [
       ...prev,
       {
-        id: generateId(),
+        id: assistantMessageId,
         role: "assistant",
-        content: "",
+        content: mode === "image" ? "🎨 正在生成图片..." : "",
       },
     ])
 
     thinkingStartRef.current = Date.now()
 
     try {
-        const canvasContext = canvasNodes.slice(0, 30).map(toCanvasNodeContext)
-        const mentionedNodes = getMentionedNodes(userMessage.content, canvasNodes)
-
-        await sendMessage(userMessage.content, {
-          selectedNodeId,
-          selectedNode: selectedNode ? toCanvasNodeContext(selectedNode) : undefined,
-          nodes: canvasContext,
-          mentionedNodes,
-          canvasStats: {
-            total: canvasNodes.length,
-            byKind: canvasNodes.reduce<Record<string, number>>((acc, node) => {
-              const data = node.data as Record<string, any> | undefined
-              const kind = String(data?.nodeKind || node.type || "node")
-              acc[kind] = (acc[kind] || 0) + 1
-              return acc
-            }, {}),
-          },
-          attachments: userMessage.attachments?.map((a) => ({
-            id: a.id,
-            type: a.type,
-            name: a.name,
-            size: a.size,
-            mimeType: a.mimeType,
-            width: a.width,
-            height: a.height,
-          })),
+      if (mode === "image") {
+        const startedAt = Date.now()
+        const result = await generateImageFromPrompt({
+          prompt: userMessage.content,
           model,
+          size: "1792x1024",
+          requestId: `chat-image-${assistantMessageId}`,
         })
-    } catch (error) {
+
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.id === assistantMessageId
+              ? {
+                  ...message,
+                  content: "✅ 图片生成完成。点击下方按钮可添加到画布。",
+                  thinkingTime: Math.round((Date.now() - startedAt) / 1000),
+                  generatedImage: {
+                    imageUrl: result.imageUrl,
+                    prompt: result.prompt || userMessage.content,
+                    model: result.model || model,
+                    revisedPrompt: result.revisedPrompt,
+                  },
+                }
+              : message,
+          ),
+        )
+        return
+      }
+
+      const canvasContext = canvasNodes.slice(0, 30).map(toCanvasNodeContext)
+      const mentionedNodes = getMentionedNodes(userMessage.content, canvasNodes)
+
+      await sendMessage(userMessage.content, {
+        selectedNodeId,
+        selectedNode: selectedNode ? toCanvasNodeContext(selectedNode) : undefined,
+        nodes: canvasContext,
+        mentionedNodes,
+        canvasStats: {
+          total: canvasNodes.length,
+          byKind: canvasNodes.reduce<Record<string, number>>((acc, node) => {
+            const data = node.data as Record<string, any> | undefined
+            const kind = String(data?.nodeKind || node.type || "node")
+            acc[kind] = (acc[kind] || 0) + 1
+            return acc
+          }, {}),
+        },
+        attachments: userMessage.attachments?.map((a) => ({
+          id: a.id,
+          type: a.type,
+          name: a.name,
+          size: a.size,
+          mimeType: a.mimeType,
+          width: a.width,
+          height: a.height,
+        })),
+        model,
+        mode,
+      })
+    } catch (error: any) {
       console.error("[Chat] Send error:", error)
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === assistantMessageId
+            ? {
+                ...message,
+                content: error?.message || "生成失败，请稍后重试。",
+              }
+            : message,
+        ),
+      )
     }
   }, [
     input,

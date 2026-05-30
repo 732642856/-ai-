@@ -4,7 +4,7 @@
  */
 
 import { useRef, useState, type ChangeEvent, type KeyboardEvent } from "react"
-import { Paperclip, ArrowUp, Square, Mic, ChevronDown, Settings, Sparkles } from "lucide-react"
+import { Paperclip, ArrowUp, Square, Mic, Settings, MessageSquareText, Image } from "lucide-react"
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 import { ChatAttachmentPreview } from "./ChatAttachmentPreview"
 import { SlashCommandMenu } from "./SlashCommandMenu"
@@ -26,6 +26,23 @@ export interface ModelOption {
   type: "text" | "image" | "video"
 }
 
+export type ChatTaskMode = "chat" | "image"
+
+const DEFAULT_CHAT_MODEL = "gpt-5.5"
+const DEFAULT_IMAGE_MODEL = "gpt-image-2"
+
+const TASK_MODE_OPTIONS: Array<{
+  value: ChatTaskMode
+  label: string
+  desc: string
+  modelType: "text" | "image"
+  defaultModel: string
+  icon: typeof MessageSquareText
+}> = [
+  { value: "chat", label: "对话", desc: "写作、分析、整理画布", modelType: "text", defaultModel: DEFAULT_CHAT_MODEL, icon: MessageSquareText },
+  { value: "image", label: "生图", desc: "生成图片，自动使用图片模型", modelType: "image", defaultModel: DEFAULT_IMAGE_MODEL, icon: Image },
+]
+
 const MODEL_OPTIONS: ModelOption[] = [
   { value: "gpt-5.5", label: "GPT-5.5", provider: "copse.top", desc: "最强推理+创作", type: "text" },
   { value: "gpt-5.4", label: "GPT-5.4", provider: "copse.top", desc: "高性能多模态", type: "text" },
@@ -36,7 +53,7 @@ const MODEL_OPTIONS: ModelOption[] = [
 interface ChatInputProps {
   value: string
   onChange: (value: string) => void
-  onSend: (model: string, mode?: string) => void
+  onSend: (model: string, mode?: ChatTaskMode) => void
   onStop?: () => void
   isGenerating?: boolean
   selectedModel: string
@@ -95,18 +112,19 @@ export function ChatInput({
 }: ChatInputProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const [showModelDropdown, setShowModelDropdown] = useState(false)
-  const [activeTypeFilter, setActiveTypeFilter] = useState<"text" | "image" | "video" | null>(null)
+  const [taskMode, setTaskMode] = useState<ChatTaskMode>("chat")
   const [showNodeMention, setShowNodeMention] = useState(false)
   const [showSlashMenu, setShowSlashMenu] = useState(false)
   const [slashQuery, setSlashQuery] = useState("")
   const [mentionQuery, setMentionQuery] = useState("")
   const [mentionIndex, setMentionIndex] = useState(0)
 
-  const currentModel = getConfiguredModels().find((m) => m.value === selectedModel)
-  const filteredModels = activeTypeFilter
-    ? getConfiguredModels().filter((m) => m.type === activeTypeFilter)
-    : getConfiguredModels()
+  const currentMode = TASK_MODE_OPTIONS.find((option) => option.value === taskMode) ?? TASK_MODE_OPTIONS[0]
+  const selectedModelOption = getConfiguredModels().find((m) => m.value === selectedModel)
+  const selectedModelForMode =
+    selectedModelOption?.type === currentMode.modelType
+      ? selectedModelOption.value
+      : currentMode.defaultModel
 
   // @ 引用节点过滤
   const mentionableNodes = canvasNodes.filter((n) => n.data?.title || n.data?.text || n.data?.fileName)
@@ -147,7 +165,7 @@ export function ChatInput({
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
       if (!isGenerating && (value.trim() || attachments.length > 0)) {
-        onSend(selectedModel)
+        onSend(selectedModelForMode, taskMode)
       }
     }
   }
@@ -305,9 +323,9 @@ export function ChatInput({
       </div>
 
       {/* 底部工具栏 */}
-      <div className="flex items-center justify-between px-3 pb-3 pt-1">
+      <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-1">
         {/* 左侧工具 */}
-        <div className="flex items-center gap-1">
+        <div className="flex min-w-0 items-center gap-2">
           {/* 附件按钮 */}
           <button
             onClick={handlePaperclipClick}
@@ -329,61 +347,31 @@ export function ChatInput({
             className="hidden"
           />
 
-          {/* 模型选择器 */}
-          <div className="relative">
-            <button
-              onClick={() => setShowModelDropdown(!showModelDropdown)}
-              className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs transition-colors hover:bg-white/5"
-              style={{ color: DESIGN_TOKENS.textSecondary }}
-            >
-              <Sparkles size={12} strokeWidth={1.5} style={{ color: DESIGN_TOKENS.accent }} />
-              <span>{currentModel?.label ?? "选择模型"}</span>
-              <ChevronDown size={12} strokeWidth={1.5} />
-            </button>
-            {showModelDropdown && (
-              <div
-                className="absolute bottom-full left-0 mb-1 w-56 rounded-xl border py-1"
-                style={{
-                  backgroundColor: DESIGN_TOKENS.panelSolid,
-                  borderColor: DESIGN_TOKENS.border,
-                }}
-              >
-                {/* 类型筛选 */}
-                <div className="flex gap-1 border-b px-2 pb-1" style={{ borderColor: DESIGN_TOKENS.border }}>
-                  {(["text", "image", "video"] as const).map((type) => (
-                    <button
-                      key={type}
-                      onClick={() => setActiveTypeFilter(activeTypeFilter === type ? null : type)}
-                      className="rounded-md px-2 py-0.5 text-[10px] transition-colors"
-                      style={{
-                        backgroundColor: activeTypeFilter === type ? DESIGN_TOKENS.accentSoft : "transparent",
-                        color: activeTypeFilter === type ? DESIGN_TOKENS.accent : DESIGN_TOKENS.textMuted,
-                      }}
-                    >
-                      {type === "text" ? "文本" : type === "image" ? "图像" : "视频"}
-                    </button>
-                  ))}
-                </div>
-                {/* 模型列表 */}
-                {filteredModels.map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={() => {
-                      onModelChange(opt.value)
-                      setShowModelDropdown(false)
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-white/5"
-                    style={{
-                      color: selectedModel === opt.value ? DESIGN_TOKENS.accent : DESIGN_TOKENS.textSecondary,
-                    }}
-                  >
-                    <span className="font-medium">{opt.label}</span>
-                    <span className="text-[10px]" style={{ color: DESIGN_TOKENS.textMuted }}>{opt.provider}</span>
-                    <span className="ml-auto text-[10px]" style={{ color: DESIGN_TOKENS.textMuted }}>{opt.desc}</span>
-                  </button>
-                ))}
-              </div>
-            )}
+          {/* 任务模式：用户先选用途，系统自动匹配模型 */}
+          <div className="flex h-9 items-center gap-1 rounded-full p-1" style={{ backgroundColor: "rgba(255,255,255,0.06)" }}>
+            {TASK_MODE_OPTIONS.map((option) => {
+              const Icon = option.icon
+              const active = taskMode === option.value
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => {
+                    setTaskMode(option.value)
+                    onModelChange(option.defaultModel)
+                  }}
+                  className="flex h-7 items-center gap-1.5 rounded-full px-3 text-xs font-medium leading-none whitespace-nowrap transition-colors"
+                  style={{
+                    backgroundColor: active ? "rgba(255,255,255,0.14)" : "transparent",
+                    color: active ? DESIGN_TOKENS.text : DESIGN_TOKENS.textMuted,
+                  }}
+                  title={option.desc}
+                >
+                  <Icon size={14} strokeWidth={1.7} />
+                  <span>{option.label}</span>
+                </button>
+              )
+            })}
           </div>
         </div>
 
@@ -444,7 +432,7 @@ export function ChatInput({
             </button>
           ) : (
             <button
-              onClick={() => onSend(selectedModel)}
+              onClick={() => onSend(selectedModelForMode, taskMode)}
               disabled={disabled || (!value.trim() && attachments.length === 0)}
               className="flex h-9 w-9 items-center justify-center rounded-full transition-all"
               style={{

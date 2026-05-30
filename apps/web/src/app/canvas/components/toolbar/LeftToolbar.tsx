@@ -1,38 +1,31 @@
 /**
- * LeftToolbar - 左侧胶囊工具栏（精简版 6 按钮）
+ * LeftToolbar - 左侧胶囊工具栏
+ * - "+" 按钮打开 AddNodePanel（TapNow 风格侧面板）
+ * - 底部保留素材库、聊天、用户
  */
 
-import { Library, Image, FileText, MessageCircle, Film } from "lucide-react"
-import { DESIGN_TOKENS } from "../../styles/designSystem"
+import { Plus, Library, MessageCircle, Clock3 } from "lucide-react"
+import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 
 interface LeftToolbarProps {
   onOpenAssetLibrary: () => void
-  onCreateNode: () => void
-  onUploadImage: () => void
-  onAddText: () => void
-  onCreateVideoWorkflow?: () => void
+  onToggleAddNodePanel: () => void
+  isAddNodePanelOpen: boolean
   onToggleChat: () => void
   isChatOpen: boolean
+  onOpenWorkspaceHistory?: () => void
   onOpenUserMenu: () => void
 }
 
 export function LeftToolbar({
   onOpenAssetLibrary,
-  onCreateNode,
-  onUploadImage,
-  onAddText,
-  onCreateVideoWorkflow,
+  onToggleAddNodePanel,
+  isAddNodePanelOpen,
   onToggleChat,
   isChatOpen,
+  onOpenWorkspaceHistory,
   onOpenUserMenu,
 }: LeftToolbarProps) {
-  const tools = [
-    { icon: Image, label: "参考图", onClick: onUploadImage },
-    { icon: FileText, label: "创意文本", onClick: onAddText },
-    { icon: Film, label: "前期流程", onClick: onCreateVideoWorkflow || onCreateNode },
-    { icon: Library, label: "素材库", onClick: onOpenAssetLibrary },
-  ]
-
   return (
     <div
       className="fixed left-3 top-1/2 z-20 flex flex-col items-center rounded-full border p-2"
@@ -43,17 +36,21 @@ export function LeftToolbar({
         backdropFilter: "blur(20px)",
       }}
     >
-      {/* 星语头像 - 新建 Prompt 节点 */}
+      {/* 添加节点 (+) 按钮 */}
       <button
-        onClick={onCreateNode}
-        className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full transition-all hover:scale-105"
-        title="新建 Prompt"
+        onClick={onToggleAddNodePanel}
+        className="flex h-10 w-10 items-center justify-center rounded-full transition-all hover:scale-105"
+        style={{
+          backgroundColor: isAddNodePanelOpen
+            ? DESIGN_TOKENS.accentSoftHover
+            : DESIGN_TOKENS.accentSoft,
+          color: isAddNodePanelOpen
+            ? DESIGN_TOKENS.accentHover
+            : DESIGN_TOKENS.accent,
+        }}
+        title="添加节点"
       >
-        <img
-          src="/avatar.png"
-          alt="星语"
-          className="h-full w-full object-cover"
-        />
+        <Plus size={20} strokeWidth={2} />
       </button>
 
       {/* 分隔线 */}
@@ -62,20 +59,15 @@ export function LeftToolbar({
         style={{ backgroundColor: DESIGN_TOKENS.border }}
       />
 
-      {/* 工具按钮 */}
-      <div className="flex flex-col items-center gap-1">
-        {tools.map((tool) => (
-          <button
-            key={tool.label}
-            onClick={tool.onClick}
-            className="flex h-9 w-9 items-center justify-center rounded-full transition-all hover:bg-white/10"
-            style={{ color: DESIGN_TOKENS.textMuted }}
-            title={tool.label}
-          >
-            <tool.icon size={18} strokeWidth={1.5} />
-          </button>
-        ))}
-      </div>
+      {/* 素材库 */}
+      <button
+        onClick={onOpenAssetLibrary}
+        className="flex h-9 w-9 items-center justify-center rounded-full transition-all hover:bg-white/10"
+        style={{ color: DESIGN_TOKENS.textMuted }}
+        title="素材库"
+      >
+        <Library size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />
+      </button>
 
       {/* 分隔线 */}
       <div
@@ -89,11 +81,21 @@ export function LeftToolbar({
         className="flex h-9 w-9 items-center justify-center rounded-full transition-all hover:bg-white/10"
         style={{
           color: isChatOpen ? DESIGN_TOKENS.accent : DESIGN_TOKENS.textMuted,
-          backgroundColor: isChatOpen ? "rgba(100,116,139,0.15)" : "transparent",
+          backgroundColor: isChatOpen ? DESIGN_TOKENS.accentSoft : "transparent",
         }}
         title={isChatOpen ? "关闭聊天" : "打开聊天"}
       >
-        <MessageCircle size={18} strokeWidth={1.5} />
+        <MessageCircle size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />
+      </button>
+
+      {/* 工作记录 */}
+      <button
+        onClick={onOpenWorkspaceHistory}
+        className="flex h-9 w-9 items-center justify-center rounded-full transition-all hover:bg-white/10"
+        style={{ color: DESIGN_TOKENS.textMuted }}
+        title="工作记录"
+      >
+        <Clock3 size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />
       </button>
 
       {/* 分隔线 */}

@@ -1,115 +1,151 @@
-const workflowSteps = [
-  "输入创意 / 主题 / 类型方向",
-  "拆成分镜与镜头草稿",
-  "上传参考图和视觉素材",
-  "生成关键画面 / 首帧方案",
-  "整理前期项目包 JSON",
-  "交给星轨画布（后期）继续精修",
-]
-
-const modules = [
-  { name: "创意构思", desc: "从一句话、类型感、人物关系和情绪出发，沉淀可执行的创作方向" },
-  { name: "分镜草稿", desc: "火柴人也能用：姿态站位 + AI 背景 + 镜头意图，自动补全 Prompt" },
-  { name: "视觉设计", desc: "关键帧、首帧、角色/场景参考图和风格板统一管理" },
-  { name: "素材包", desc: "把脚本、分镜、图片、视频和音频整理成前期项目包" },
-  { name: "交接后期", desc: "通过 startrails-project.json 交给星轨画布（后期）做节奏和成片精修" },
-]
-
 export default function Home() {
   return (
-    <main className="min-h-screen bg-[#09090b] text-zinc-50">
-      <section className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 py-8 lg:px-10">
-        <nav className="flex items-center justify-between border-b border-white/10 pb-5">
-          <div className="flex items-center gap-4">
-            <img src="/startrails-icon.svg" alt="StarTrails 星轨图标" className="h-14 w-14 rounded-[1.25rem] border border-white/10 object-cover shadow-xl shadow-cyan-950/40" />
-            <div>
-              <p className="text-sm uppercase tracking-[0.4em] text-cyan-300">StarTrails</p>
-              <h1 className="mt-2 text-xl font-semibold">星轨画布（前期）</h1>
-            </div>
-          </div>
-          <div className="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm text-cyan-100">
-创意构思 / 分镜草稿 / 视觉设计
-          </div>
-        </nav>
+    <main className="min-h-screen bg-white text-[#1d1d1f]">
+      {/* Navigation */}
+      <nav className="mx-auto flex max-w-[1024px] items-center justify-between px-8 py-4">
+        <div className="flex items-center gap-3">
+          <img
+            src="/startrails-icon.jpg"
+            alt="星轨"
+            className="h-10 w-10 rounded-xl object-cover"
+          />
+          <span className="text-[15px] font-medium tracking-tight">Startrail Ai</span>
+        </div>
+        <a
+          href="/canvas"
+          className="text-[13px] font-medium text-[#0066cc] hover:underline"
+        >
+          进入画布
+        </a>
+      </nav>
 
-        <div className="grid flex-1 items-center gap-10 py-12 lg:grid-cols-[1.05fr_0.95fr]">
-          <div>
-            <div className="mb-5 inline-flex rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-zinc-300">
-前期闭环：从一句灵感到分镜草稿、关键画面和交接包
-            </div>
-            <h2 className="max-w-3xl text-5xl font-semibold tracking-tight text-white lg:text-7xl">
-先把灵感变成能交给后期的分镜和画面。
-            </h2>
-            <p className="mt-6 max-w-2xl text-lg leading-8 text-zinc-300">
-              星轨画布（前期）专注创意构思、分镜草稿和视觉设计：把主题、人物关系、火柴人站位、参考图、首帧和风格板沉淀到同一张画布里，最后整理成 startrails-project.json，交给星轨画布（后期）继续做成片节奏和细节精修。
-            </p>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <a
-                href="/canvas"
-                className="rounded-full bg-cyan-300 px-6 py-3 text-sm font-semibold text-zinc-950 transition hover:bg-cyan-200"
-              >
-进入前期画布
-              </a>
-              <a
-                href="/api-placeholder"
-                className="rounded-full border border-white/15 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
-              >
-查看交接说明
-              </a>
-            </div>
-          </div>
+      {/* Hero */}
+      <section className="mx-auto max-w-[1024px] px-8 pt-24 pb-16">
+          <h1 className="text-[56px] font-semibold leading-[1.1] tracking-[-0.02em] text-[#1d1d1f]">
+            Startrail Ai
+          </h1>
+          <p className="mt-3 text-[28px] font-normal leading-[1.3] text-[#86868b]">
+            从灵感，到画面。
+          </p>
+        <p className="mt-6 max-w-[640px] text-[21px] leading-[1.4] font-normal text-[#86868b]">
+          星轨画布把创意构思、分镜草稿和视觉参考放在同一张无限画布上。
+          从一句话出发，沉淀成可交给后期的完整项目包。
+        </p>
+        <div className="mt-10 flex items-center gap-4">
+          <a
+            href="/canvas"
+            className="rounded-full bg-[#0071e3] px-7 py-3 text-[14px] font-medium text-white transition hover:bg-[#0077ed]"
+          >
+            开始创作
+          </a>
+          <a
+            href="#how"
+            className="rounded-full px-7 py-3 text-[14px] font-medium text-[#0071e3] transition hover:underline"
+          >
+            了解更多
+          </a>
+        </div>
+      </section>
 
-          <div className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-5 shadow-2xl shadow-cyan-950/30">
-            <div className="rounded-[1.5rem] border border-white/10 bg-zinc-950 p-5">
-              <div className="mb-5 flex items-center gap-2">
-                <span className="h-3 w-3 rounded-full bg-red-400" />
-                <span className="h-3 w-3 rounded-full bg-yellow-300" />
-                <span className="h-3 w-3 rounded-full bg-green-400" />
-                <span className="ml-3 text-sm text-zinc-500">canvas.mvp</span>
-              </div>
-              <div className="relative min-h-[430px] overflow-hidden rounded-2xl bg-[radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.14)_1px,transparent_0)] [background-size:24px_24px]">
-                <div className="absolute left-6 top-8 w-56 rounded-2xl border border-purple-300/30 bg-purple-300/10 p-4">
-                  <p className="text-xs text-purple-200">Storyboard Node</p>
-                  <p className="mt-2 text-sm text-white">火柴人站位：人物在前景，AI 生成霓虹巷口背景。</p>
-                  <p className="mt-2 text-xs text-purple-100/70">火柴人层 / AI 背景层 / 标注层</p>
-                </div>
-                <div className="absolute right-7 top-24 w-60 rounded-2xl border border-cyan-300/30 bg-cyan-300/10 p-4">
-                  <p className="text-xs text-cyan-200">Prompt Analyzer + BYOK</p>
-                  <p className="mt-2 text-sm text-white">从火柴人、草图、一句话、参考图反推完整 Prompt</p>
-                  <p className="mt-2 text-xs text-cyan-100/70">OpenAI Compatible · 自配中转站</p>
-                </div>
-                <div className="absolute bottom-8 left-20 right-10 rounded-2xl border border-emerald-300/30 bg-emerald-300/10 p-4">
-                  <p className="text-xs text-emerald-200">Handoff Package</p>
-                  <p className="mt-2 text-sm text-white">整理创意、分镜、参考图和关键画面，导出给后期继续精修。</p>
-                </div>
-                <div className="absolute left-[260px] top-[115px] h-px w-28 rotate-12 bg-cyan-300/50" />
-                <div className="absolute right-[190px] top-[250px] h-px w-32 rotate-[125deg] bg-emerald-300/50" />
-              </div>
+      {/* Product Visual */}
+      <section className="mx-auto max-w-[1024px] px-8 pb-24">
+        <div className="overflow-hidden rounded-3xl bg-[#f5f5f7]">
+          <div className="relative min-h-[480px] overflow-hidden">
+            {/* Subtle grid */}
+            <div
+              className="absolute inset-0 opacity-[0.06]"
+              style={{
+                backgroundImage:
+                  "radial-gradient(circle, #000 1px, transparent 1px)",
+                backgroundSize: "24px 24px",
+              }}
+            />
+            {/* Nodes */}
+            <div className="absolute left-10 top-12 w-52 rounded-2xl border border-[#e5e5ea] bg-white/80 p-4 shadow-sm">
+              <p className="text-[11px] font-medium text-[#8e8e93]">分镜节点</p>
+              <p className="mt-1.5 text-[13px] text-[#1d1d1f]">
+                火柴人站位 + AI 背景生成
+              </p>
             </div>
+            <div className="absolute right-10 top-20 w-56 rounded-2xl border border-[#e5e5ea] bg-white/80 p-4 shadow-sm">
+              <p className="text-[11px] font-medium text-[#8e8e93]">Prompt 分析器</p>
+              <p className="mt-1.5 text-[13px] text-[#1d1d1f]">
+                从草图、参考图反推完整生成指令
+              </p>
+            </div>
+            <div className="absolute bottom-12 left-24 right-24 rounded-2xl border border-[#e5e5ea] bg-white/80 p-4 shadow-sm">
+              <p className="text-[11px] font-medium text-[#8e8e93]">项目包导出</p>
+              <p className="mt-1.5 text-[13px] text-[#1d1d1f]">
+                整理脚本、分镜、参考图和关键画面，导出给后期继续精修
+              </p>
+            </div>
+            {/* Connection lines */}
+            <div className="absolute left-[230px] top-[100px] h-px w-20 rotate-12 bg-[#c7c7cc]" />
+            <div className="absolute right-[200px] top-[260px] h-px w-24 rotate-[125deg] bg-[#c7c7cc]" />
           </div>
         </div>
+      </section>
 
-        <section className="grid gap-4 border-t border-white/10 pt-6 md:grid-cols-2 lg:grid-cols-5">
-          {modules.map((item) => (
-            <div key={item.name} className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
-              <h3 className="font-semibold text-white">{item.name}</h3>
-              <p className="mt-2 text-sm leading-6 text-zinc-400">{item.desc}</p>
-            </div>
-          ))}
-        </section>
-
-        <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-5">
-          <p className="mb-4 text-sm font-medium text-zinc-300">前期工程闭环</p>
-          <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
-            {workflowSteps.map((step, index) => (
-              <div key={step} className="rounded-xl bg-zinc-900 p-4 text-sm text-zinc-300">
-                <span className="mb-2 block text-xs text-cyan-300">0{index + 1}</span>
-                {step}
+      {/* Features */}
+      <section id="how" className="border-t border-[#d2d2d7]">
+        <div className="mx-auto max-w-[1024px] px-8 py-20">
+          <h2 className="text-[32px] font-semibold tracking-[-0.01em] text-[#1d1d1f]">
+            工作流程
+          </h2>
+          <div className="mt-12 grid gap-8 md:grid-cols-3">
+            {[
+              {
+                title: "创意构思",
+                desc: "从一句话、类型感、人物关系出发，沉淀可执行的创作方向。",
+              },
+              {
+                title: "分镜草稿",
+                desc: "火柴人也能用：姿态站位 + AI 背景 + 镜头意图，自动补全 Prompt。",
+              },
+              {
+                title: "视觉设计",
+                desc: "关键帧、首帧、角色/场景参考图和风格板统一管理。",
+              },
+            ].map((item) => (
+              <div key={item.title}>
+                <h3 className="text-[19px] font-semibold text-[#1d1d1f]">
+                  {item.title}
+                </h3>
+                <p className="mt-2 text-[15px] leading-[1.5] text-[#86868b]">
+                  {item.desc}
+                </p>
               </div>
             ))}
           </div>
-        </section>
+        </div>
       </section>
+
+      {/* CTA */}
+      <section className="border-t border-[#d2d2d7]">
+        <div className="mx-auto max-w-[1024px] px-8 py-20 text-center">
+          <h2 className="text-[40px] font-semibold tracking-[-0.02em] text-[#1d1d1f]">
+            准备好开始了吗？
+          </h2>
+          <p className="mx-auto mt-4 max-w-[480px] text-[17px] text-[#86868b]">
+            打开画布，从第一句话开始构建你的视觉故事。
+          </p>
+          <a
+            href="/canvas"
+            className="mt-8 inline-block rounded-full bg-[#0071e3] px-8 py-3.5 text-[14px] font-medium text-white transition hover:bg-[#0077ed]"
+          >
+            进入 Startrail Ai
+          </a>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="border-t border-[#d2d2d7]">
+        <div className="mx-auto max-w-[1024px] px-8 py-6">
+          <p className="text-[11px] text-[#86868b]">
+            Startrail Ai. 从灵感，到画面。
+          </p>
+        </div>
+      </footer>
     </main>
   )
 }
