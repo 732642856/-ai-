@@ -1,4 +1,3 @@
 packages:
-  - "apps/web"
-  - "packages/canvas"
-  - "packages/shared"
+  - "apps/*"
+  - "packages/*"
