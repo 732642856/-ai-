@@ -104,6 +104,7 @@ export async function generateImageFromPrompt(input: {
   size?: string
   requestId?: string
   timeoutMs?: number
+  sourceImage?: string       // data URL for image-to-image (character reference)
 }) {
   const controller = new AbortController()
   const timeoutMs = input.timeoutMs ?? IMAGE_GENERATION_CLIENT_TIMEOUT_MS
@@ -120,6 +121,7 @@ export async function generateImageFromPrompt(input: {
         model: input.model || "gpt-image-2",
         size: input.size || "1792x1024",
         requestId: input.requestId,
+        ...(input.sourceImage ? { sourceImage: input.sourceImage } : {}),
       }),
     })
   } catch (error: any) {

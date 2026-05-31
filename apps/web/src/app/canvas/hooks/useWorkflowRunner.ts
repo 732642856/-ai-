@@ -23,6 +23,7 @@ import { buildRestorePromptPatch, sanitizeHistoryRawOutput } from "../utils/hist
 import { VIDEO_ANALYSIS_RAW_KIND, VIDEO_ANALYSIS_RAW_VERSION } from "../types/video-analysis"
 import type { ExecutionPlan } from "../utils/execution-plan"
 import { generateMockFrameUrls, runMockVideoAnalyze } from "../utils/mock-video-analyzer"
+import { quickLayout } from "../utils/dagre-layout"
 import type { WorkflowRunEvent } from "../types/workflow-run"
 import { enhancePromptWithCinematicContext } from "@/lib/cinematic/context"
 import { getDefaultModel, getDefaultImageModel, getLocalProviderOverrides } from "@/lib/ai/client"
@@ -609,6 +610,238 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
     }
 
     // ------------------------------------------------------------------
+    // AGENT STEP (Phase 1: DirectorAgent — story breakdown)
+    // ------------------------------------------------------------------
+    if (kind === "agent") {
+      const input = node.data.content ?? ""
+      if (!input.trim()) {
+        updateNodeData(node.id, {
+          runMeta: createFailedRunMeta({ runId: runContext?.runId, error: "Agent 输入为空", message: "请先在 Agent 节点粘贴剧本文本" }),
+          summary: "请输入剧本后重新运行",
+        })
+        return ""
+      }
+
+      updateNodeData(node.id, {
+        runMeta: createRunningRunMeta({ runId: runContext?.runId, source: runContext?.source, message: "Agent 分析中..." }),
+        summary: "正在分析剧本...",
+      })
+
+      const _providerOverrides = getLocalProviderOverrides()
+
+      const agentPrompt = `你是一个专业的影视前期导演 AI（DirectorAgent）。
+
+用户会给你一段剧本或故事文本，你需要将其拆解为结构化的分镜脚本。
+
+请按以下 JSON 格式输出：
+
+{
+  "title": "作品标题",
+  "characters": [
+    { "name": "角色名", "description": "外观描述", "role": "主角/配角/群演" }
+  ],
+  "scenes": [
+    {
+      "sceneNumber": 1,
+      "location": "场景地点",
+      "timeOfDay": "日/夜/黄昏",
+      "mood": "氛围描述",
+      "shots": [
+        {
+          "shotNumber": 1,
+          "shotType": "远景/全景/中景/近景/特写",
+          "cameraMovement": "固定/推/拉/摇/移/跟",
+          "description": "画面描述",
+          "dialogue": "对白（如有）",
+          "action": "角色动作描述",
+          "duration": "预估秒数"
+        }
+      ]
+    }
+  ]
+}
+
+规则：
+1. 每个场景至少 2 个分镜
+2. 角色描述要具体到可用于 AI 生图
+3. 只输出 JSON，不要其他文字`
+
+      const runRequest = buildRunRequest({
+        nodeKind: kind,
+        taskType: "text",
+        prompt: input,
+        upstreamContent: upstreamText || undefined,
+        localDefaultModel: localModels.textModel,
+        envDefaultModel: resolvedTextModel,
+        providerOverrides: _providerOverrides ? { ..._providerOverrides } as Record<string, unknown> : undefined,
+        systemOverride: agentPrompt,
+      })
+
+      const res = await fetch("/api/ai/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(runRequest),
+      })
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "")
+        const normalized = normalizeGenerationError({ status: res.status, body: text, provider })
+        throw Object.assign(new Error(formatGenerationErrorForDisplay(normalized)), { generationError: normalized })
+      }
+
+      const reader = res.body?.getReader()
+      if (!reader) throw new Error("Agent 无响应流")
+
+      let fullOutput = ""
+      const { text: resultText, usage } = await readSSEStream(reader, (delta) => {
+        fullOutput += delta
+        updateNodeData(node.id, {
+          agentOutput: fullOutput,
+          summary: fullOutput.slice(0, 200) + (fullOutput.length > 200 ? "..." : ""),
+          runMeta: createRunningRunMeta({ runId: runContext?.runId, source: runContext?.source, message: "Agent 分析中..." }),
+        })
+      })
+
+      const finalOutput = resultText || fullOutput
+      if (!finalOutput.trim()) throw new Error("Agent 返回空结果")
+
+      // Store structured output and mark done
+      updateNodeData(node.id, {
+        agentOutput: finalOutput,
+        agentStatus: "done",
+        runMeta: createSucceededRunMeta({ runId: runContext?.runId, message: "剧本分析完成" }),
+        summary: `已生成 ${(finalOutput.match(/"sceneNumber"/g) || []).length} 个场景`,
+        content: finalOutput,
+      })
+
+      // ── Record AI usage ──
+      const agentEndedAt = new Date().toISOString()
+      const usageRecord: AIUsageRecord = {
+        id: `usage-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        nodeId: node.id,
+        runId: runContext?.runId,
+        provider,
+        model: runRequest.model,
+        taskType: "text",
+        inputTokens: usage?.promptTokens,
+        outputTokens: usage?.completionTokens,
+        totalTokens: usage?.totalTokens,
+        estimatedCostUsd: estimateCostUsd({ provider, model: runRequest.model, taskType: "text", inputTokens: usage?.promptTokens, outputTokens: usage?.completionTokens }),
+        currency: "USD",
+        startedAt: agentEndedAt,
+        finishedAt: agentEndedAt,
+        status: "success",
+      }
+      useAIUsageStore.getState().addUsageRecord(usageRecord)
+
+      // ── Phase 2: auto-orchestrate — parse Agent JSON → create node chain ──
+      try {
+        const plan = JSON.parse(finalOutput)
+
+        const newNodes: Node<CanvasNodeData>[] = []
+        const newEdges: Edge[] = []
+
+        // For each character → ContentNode
+        if (Array.isArray(plan.characters)) {
+          plan.characters.forEach((char: Record<string, unknown>, i: number) => {
+            const charId = `agent-char-${node.id}-${i}`
+            newNodes.push({
+              id: charId,
+              type: "content",
+              position: { x: 0, y: 0 },
+              data: {
+                nodeKind: "text" as CanvasNodeKind,
+                title: `角色: ${char.name ?? ""}`,
+                content: `【${char.role ?? ""}】${char.name ?? ""}\n\n${char.description ?? ""}`,
+                createdAt: Date.now(),
+              },
+            })
+            newEdges.push({
+              id: `e-${node.id}-${charId}`,
+              source: node.id,
+              target: charId,
+              type: "creative",
+              animated: false,
+              style: { stroke: "rgba(168, 85, 247, 0.3)", strokeWidth: 1.5 },
+            })
+          })
+        }
+
+        // For each scene.shot → ContentNode (shot details)
+        if (Array.isArray(plan.scenes)) {
+          plan.scenes.forEach((scene: Record<string, unknown>) => {
+            const shots = scene.shots as Array<Record<string, unknown>> ?? []
+            shots.forEach((shot: Record<string, unknown>, j: number) => {
+              const shotId = `agent-shot-${node.id}-${String(scene.sceneNumber ?? "")}-${j}`
+              const shotLabel = `S${scene.sceneNumber ?? "?"}_SHOT${shot.shotNumber ?? j + 1}`
+              const shotDesc = [
+                `【分镜 ${shotLabel}】`,
+                shot.description ?? "",
+                shot.dialogue ? `对白: ${shot.dialogue}` : "",
+                shot.action ? `动作: ${shot.action}` : "",
+                `景别: ${shot.shotType ?? ""}  运镜: ${shot.cameraMovement ?? ""}  时长: ${shot.duration ?? ""}s`,
+                `氛围: ${scene.mood ?? ""}  时段: ${scene.timeOfDay ?? ""}`,
+              ].filter(Boolean).join("\n")
+
+              newNodes.push({
+                id: shotId,
+                type: "content",
+                position: { x: 0, y: 0 },
+                data: {
+                  nodeKind: "shot" as CanvasNodeKind,
+                  title: shotLabel,
+                  content: shotDesc,
+                  prompt: `Generate a storyboard image for: ${shot.description ?? ""}. ${shot.shotType ?? ""} shot, ${shot.cameraMovement ?? ""} camera movement.`,
+                  createdAt: Date.now(),
+                },
+              })
+              newEdges.push({
+                id: `e-${node.id}-${shotId}`,
+                source: node.id,
+                target: shotId,
+                type: "creative",
+                animated: false,
+                style: { stroke: "rgba(168, 85, 247, 0.3)", strokeWidth: 1.5 },
+              })
+            })
+          })
+        }
+
+        if (newNodes.length > 0) {
+          const currentNodes = getNodes()
+          const currentEdges = getEdges()
+          const combinedNodes = [...currentNodes, ...newNodes]
+          const combinedEdges = [...currentEdges, ...newEdges]
+
+          // Auto-layout with dagre
+          const layoutedNodes = quickLayout(combinedNodes, combinedEdges, 3)
+
+          // Mark agent-created nodes as selected (visual highlight for batch ops)
+          const newIds = new Set(newNodes.map((n) => n.id))
+          const layoutedWithSelection = layoutedNodes.map((n) =>
+            newIds.has(n.id) ? { ...n, selected: true as const } : { ...n, selected: false as const },
+          )
+          setNodes(layoutedWithSelection)
+          setEdges(combinedEdges)
+
+          // Write child node IDs back to the agent node (for batch-generate button)
+          const childIds = newNodes.map((nn) => nn.id)
+          setNodes((nds) =>
+            nds.map((n) =>
+              n.id === node.id
+                ? { ...n, data: { ...n.data, _childNodeIds: childIds } }
+                : n,
+            ),
+          )
+        }
+      } catch (parseErr) {
+        console.warn("[Agent] auto-orchestrate failed (JSON parse), Agent output still displayed:", parseErr)
+      }
+
+      return finalOutput
+    }
+
+    // ------------------------------------------------------------------
     // PASS-THROUGH STEP (audio, video-generation, composition, etc.)
     // ------------------------------------------------------------------
     updateNodeData(node.id, {
@@ -869,7 +1102,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
 
     // Find all workflow nodes
     const workflowNodes = allNodes.filter(
-      (n) => n.type === "workflow" || (n.type === "content" && n.data.nodeKind === "text")
+      (n) => n.type === "workflow" || n.type === "agent" || (n.type === "content" && n.data.nodeKind === "text")
     )
 
     if (workflowNodes.length === 0) return
@@ -911,6 +1144,8 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
       mode: "full",
     })
 
+    let failingNodeId: string | undefined
+
     try {
       for (let i = 0; i < sortedNodes.length; i++) {
         if (abortRef.current) break
@@ -940,6 +1175,8 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
         const source: NodeRunSource = "workflow"
 
         updateNodeData(node.id, { runMeta: createRunningRunMeta({ runId, source, message: "工作流 " + (i + 1) + "/" + sortedNodes.length }) })
+
+        failingNodeId = node.id
 
         // Execute
         await executeStep(node, allNodes, allEdges, { runId, source })
@@ -982,10 +1219,24 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
         error: safeError,
       })
 
+      // Mark the failing node as failed (otherwise it stays "running")
+      if (failingNodeId) {
+        updateNodeData(failingNodeId, {
+          runMeta: createFailedRunMeta({
+            runId: planRunId,
+            error: safeError,
+            message: safeError,
+          }),
+        })
+      }
+
       setState((prev) => ({
         ...prev,
         error: safeError,
         isRunning: false,
+        stepStatuses: failingNodeId
+          ? { ...prev.stepStatuses, [failingNodeId]: "error" as const }
+          : prev.stepStatuses,
       }))
       return
     }
@@ -1065,6 +1316,28 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
     },
     [updateNodeData, runNode],
   )
+
+  // ==========================================================================
+  // P1-7: RUN AGENT FROM CANVAS — AgentNode 运行的公开入口
+  // ==========================================================================
+
+  const runAgentFromCanvas = useCallback(async (nodeId: string) => {
+    const node = getNodes().find((n) => n.id === nodeId)
+    if (!node) return
+    const content = (node.data as Record<string, unknown>)?.content as string ?? ""
+    if (!content.trim()) {
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.id === nodeId
+            ? { ...n, data: { ...n.data, agentStatus: "error" as const, agentOutput: "请先输入剧本内容" } }
+            : n,
+        ),
+      )
+      return
+    }
+    // Execute via runNode which handles history/stats/error/usage
+    await runNode(nodeId)
+  }, [getNodes, setNodes, runNode])
 
   // ==========================================================================
   // P2-2: RUN EXECUTION PLAN — 级联执行
@@ -1290,6 +1563,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
     state,
     runWorkflow,
     runNode,
+    runAgentFromCanvas,
     runExecutionPlan,
     stopWorkflow,
     restorePromptFromHistory,

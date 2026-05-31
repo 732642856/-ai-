@@ -10,6 +10,8 @@ import { ChatAttachmentPreview } from "./ChatAttachmentPreview"
 import { SlashCommandMenu } from "./SlashCommandMenu"
 import type { ChatAttachment } from "../../hooks/useChatAttachments"
 import type { SlashCommand } from "../../types/slash-commands"
+import { getCachedDefaultImageModel } from "@/lib/ai/client"
+import { getModelOptions } from "@/lib/ai/imageProviderCapabilities"
 
 // copse.top 实际支持的 AI 模型列表
 export type AiModel =
@@ -29,7 +31,7 @@ export interface ModelOption {
 export type ChatTaskMode = "chat" | "image"
 
 const DEFAULT_CHAT_MODEL = "gpt-5.5"
-const DEFAULT_IMAGE_MODEL = "gpt-image-2"
+const DEFAULT_IMAGE_MODEL = getCachedDefaultImageModel()
 
 const TASK_MODE_OPTIONS: Array<{
   value: ChatTaskMode
@@ -43,11 +45,14 @@ const TASK_MODE_OPTIONS: Array<{
   { value: "image", label: "生图", desc: "生成图片，自动使用图片模型", modelType: "image", defaultModel: DEFAULT_IMAGE_MODEL, icon: Image },
 ]
 
+const IMAGE_MODEL_OPTIONS = getModelOptions()
+const DEFAULT_IMAGE_OPTION = IMAGE_MODEL_OPTIONS[0]
+
 const MODEL_OPTIONS: ModelOption[] = [
   { value: "gpt-5.5", label: "GPT-5.5", provider: "copse.top", desc: "最强推理+创作", type: "text" },
   { value: "gpt-5.4", label: "GPT-5.4", provider: "copse.top", desc: "高性能多模态", type: "text" },
   { value: "gpt-5.4-mini", label: "GPT-5.4 Mini", provider: "copse.top", desc: "快速响应", type: "text" },
-  { value: "gpt-image-2", label: "GPT-Image-2", provider: "copse.top", desc: "高质量图像生成", type: "image" },
+  { value: DEFAULT_IMAGE_OPTION.value, label: DEFAULT_IMAGE_OPTION.label, provider: "copse.top", desc: "高质量图像生成", type: "image" },
 ]
 
 interface ChatInputProps {

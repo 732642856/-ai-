@@ -102,9 +102,13 @@ import ContentNode from "./components/nodes/ContentNode";
 import WorkflowNode from "./components/nodes/WorkflowNode";
 import ShotNode from "./components/nodes/ShotNode";
 import StoryboardGridNode from "./components/nodes/StoryboardGridNode";
+import AgentNode from "./components/nodes/AgentNode";
 import { generateId } from "./utils/generateId";
 import { quickLayout } from "./utils/dagre-layout";
 import { parseStoryboardTextToShots } from "./utils/storyboardParser";
+import BatchProgressBar, {
+  type BatchProgressHandle,
+} from "./components/nodes/BatchProgressBar";
 import { generateImageFromPrompt } from "./utils/imageGeneration";
 import { composeStoryboardGrid } from "./utils/storyboardGridComposer";
 import { buildVideoWorkflowTemplate } from "./utils/videoWorkflowTemplate";
@@ -463,12 +467,32 @@ CreativeEdge.displayName = "CreativeEdge";
 // ============================================================================
 // Node Types
 // ============================================================================
+// Module-level mutable ref for AgentNode's onRunAgent callback.
+// Set once when the component mounts via StarCanvasInner.
+let _runAgentFn: ((nodeId: string) => void) | undefined;
+let _runBatchGenerateFn: ((nodeIds: string[]) => void) | undefined;
+
+// ── Undo/redo stacks ──
+interface UndoEntry { nodes: Node<CanvasNodeData>[]; edges: Edge[] }
+const _undoStack: UndoEntry[] = []
+const _redoStack: UndoEntry[] = []
+const MAX_UNDO = 50
+
+function pushUndo(entry: UndoEntry) {
+  _undoStack.push(entry)
+  if (_undoStack.length > MAX_UNDO) _undoStack.shift()
+  _redoStack.length = 0 // clear redo on new action
+}
+
 const nodeTypes = {
   image: ImageNode,
   content: ContentNode,
   workflow: WorkflowNode,
   shot: ShotNode,
   storyboardGrid: StoryboardGridNode,
+  agent: (props: any) => (
+    <AgentNode {...props} onRunAgent={_runAgentFn} onBatchGenerate={_runBatchGenerateFn} />
+  ),
 };
 
 const edgeTypes = { creative: CreativeEdge };
@@ -560,6 +584,7 @@ function StarCanvasInner() {
   const latestShotGenerationRequestIdsRef = useRef<Record<string, string>>({});
   nodesRef.current = nodes;
   edgesRef.current = edges;
+  const batchProgressRef = useRef<BatchProgressHandle>(null);
 
   useEffect(() => {
     return () => {
@@ -2530,9 +2555,224 @@ function StarCanvasInner() {
       setRunEvents((prev) => [...prev, event]);
     }, []),
   });
+
+  // Wire AgentNode's run button to the workflow runner
+  _runAgentFn = workflowRunner.runAgentFromCanvas;
+
+  // Batch generate: iterate agent-created nodes, generate images from prompt
+  // Uses BatchProgressBar for global progress + per-node retry support
+  const handleBatchGenerateShots = useCallback(
+    async (nodeIds: string[]) => {
+      if (!nodeIds.length) return;
+
+      // Start global progress bar
+      batchProgressRef.current?.start(nodeIds.length);
+
+      for (const nodeId of nodeIds) {
+        const node = nodesRef.current.find((n) => n.id === nodeId);
+        const prompt = node?.data?.prompt ?? "";
+        if (!prompt.trim()) continue;
+
+        // Mark as running
+        setNodes((nds) =>
+          nds.map((n) =>
+            n.id === nodeId
+              ? { ...n, data: { ...n.data, generationStatus: "generating" as const } }
+              : n,
+          ),
+        );
+
+        try {
+          const model = await getDefaultImageModel();
+          const result = await generateImageFromPrompt({
+            prompt,
+            model,
+            size: "1792x1024",
+          });
+
+          const imageNodeId = generateId();
+          const nodeWidth = typeof node?.width === "number" ? node.width : 320;
+
+          const imageNode: Node<CanvasNodeData> = {
+            id: imageNodeId,
+            type: "image",
+            position: {
+              x: (node?.position.x ?? 0) + nodeWidth + 80,
+              y: node?.position.y ?? 0,
+            },
+            data: {
+              title: node?.data?.title ? `${node.data.title} 图` : "分镜图",
+              imageUrl: result.imageUrl,
+              assetId: result.assetId,
+              nodeKind: "ai-generated-image",
+              sourceShotId: nodeId,
+              sourcePromptId: nodeId,
+              sourceType: "shot",
+              prompt,
+              model,
+              source: "generated",
+              persistence: result.assetId ? "indexeddb" : undefined,
+              displayWidth: 320,
+              displayHeight: 180,
+              createdAt: Date.now(),
+            },
+          };
+
+          setNodes((nds) => [
+            ...nds.map((n) =>
+              n.id === nodeId
+                ? {
+                    ...n,
+                    data: {
+                      ...n.data,
+                      generationStatus: "succeeded" as const,
+                      imageUrl: result.imageUrl,
+                      generatedImageUrl: result.imageUrl,
+                      errorMessage: undefined,
+                    },
+                  }
+                : n,
+            ),
+            imageNode,
+          ]);
+
+          setEdges((eds) => [
+            ...eds,
+            {
+              id: `edge-gen-${nodeId}-${imageNodeId}`,
+              source: nodeId,
+              target: imageNodeId,
+              type: "creative",
+              animated: true,
+              style: { stroke: "rgba(168, 85, 247, 0.3)", strokeWidth: 1.5 },
+            },
+          ]);
+
+          batchProgressRef.current?.tick();
+        } catch (err: any) {
+          // Mark node as failed with retry metadata
+          setNodes((nds) =>
+            nds.map((n) =>
+              n.id === nodeId
+                ? {
+                    ...n,
+                    data: {
+                      ...n.data,
+                      generationStatus: "failed" as const,
+                      errorMessage: err?.message || "图片生成失败",
+                      _retryCount: ((n.data as any)._retryCount ?? 0) + 1,
+                    },
+                  }
+                : n,
+            ),
+          );
+          batchProgressRef.current?.fail();
+        }
+      }
+    },
+    [setNodes, setEdges],
+  );
+
+  // Single-node retry: clear error and re-generate
+  const handleRetryGenerate = useCallback(
+    async (nodeId: string) => {
+      const node = nodesRef.current.find((n) => n.id === nodeId);
+      const prompt = node?.data?.prompt ?? "";
+      if (!prompt.trim()) return;
+
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.id === nodeId
+            ? { ...n, data: { ...n.data, generationStatus: "generating" as const, errorMessage: undefined } }
+            : n,
+        ),
+      );
+
+      try {
+        const model = await getDefaultImageModel();
+        const result = await generateImageFromPrompt({ prompt, model, size: "1792x1024" });
+
+        // Create result node similarly to batch flow
+        const imageNodeId = generateId();
+        const nodeWidth = typeof node?.width === "number" ? node.width : 320;
+        const imageNode: Node<CanvasNodeData> = {
+          id: imageNodeId,
+          type: "image",
+          position: { x: (node?.position.x ?? 0) + nodeWidth + 80, y: node?.position.y ?? 0 },
+          data: {
+            title: node?.data?.title ? `${node.data.title} 图` : "分镜图",
+            imageUrl: result.imageUrl,
+            assetId: result.assetId,
+            nodeKind: "ai-generated-image",
+            sourceShotId: nodeId,
+            sourcePromptId: nodeId,
+            sourceType: "shot",
+            prompt,
+            model,
+            source: "generated",
+            persistence: result.assetId ? "indexeddb" : undefined,
+            displayWidth: 320,
+            displayHeight: 180,
+            createdAt: Date.now(),
+          },
+        };
+
+        setNodes((nds) => [
+          ...nds.map((n) =>
+            n.id === nodeId
+              ? {
+                  ...n,
+                  data: {
+                    ...n.data,
+                    generationStatus: "succeeded" as const,
+                    imageUrl: result.imageUrl,
+                    generatedImageUrl: result.imageUrl,
+                    errorMessage: undefined,
+                  },
+                }
+              : n,
+          ),
+          imageNode,
+        ]);
+
+        setEdges((eds) => [
+          ...eds,
+          {
+            id: `edge-gen-${nodeId}-${imageNodeId}`,
+            source: nodeId,
+            target: imageNodeId,
+            type: "creative",
+            animated: true,
+            style: { stroke: "rgba(168, 85, 247, 0.3)", strokeWidth: 1.5 },
+          },
+        ]);
+      } catch (err: any) {
+        setNodes((nds) =>
+          nds.map((n) =>
+            n.id === nodeId
+              ? {
+                  ...n,
+                  data: {
+                    ...n.data,
+                    generationStatus: "failed" as const,
+                    errorMessage: err?.message || "重试失败",
+                    _retryCount: ((n.data as any)._retryCount ?? 0) + 1,
+                  },
+                }
+              : n,
+          ),
+        );
+      }
+    },
+    [setNodes, setEdges],
+  );
+
+  _runBatchGenerateFn = handleBatchGenerateShots;
+
   const hasWorkflowNodes = nodes.some(
     (n) =>
       n.type === "workflow" ||
+      n.type === "agent" ||
       (n.type === "content" && n.data.nodeKind === "text"),
   );
 
@@ -3499,6 +3739,7 @@ function StarCanvasInner() {
       positionOverride?: { x: number; y: number },
       nodeKind?: CanvasNodeKind,
     ) => {
+      pushUndo({ nodes: nodesRef.current, edges: edgesRef.current });
       const defaultSize =
         type === "workflow"
           ? NODE_DEFAULT_SIZE.workflow
@@ -3595,6 +3836,7 @@ function StarCanvasInner() {
   // ========================================================================
   const deleteNode = useCallback(
     (nodeId: string) => {
+      pushUndo({ nodes: nodesRef.current, edges: edgesRef.current });
       setNodes((nds) => {
         const nextNodes = nds.filter((n) => n.id !== nodeId);
         nodesRef.current = nextNodes;
@@ -3613,6 +3855,7 @@ function StarCanvasInner() {
   );
 
   const deleteSelectedElements = useCallback(() => {
+    pushUndo({ nodes: nodesRef.current, edges: edgesRef.current });
     const selectedNodeIds = new Set(
       nodesRef.current.filter((node) => node.selected).map((node) => node.id),
     );
@@ -3650,6 +3893,7 @@ function StarCanvasInner() {
 
   const deleteEdge = useCallback(
     (edgeId: string) => {
+      pushUndo({ nodes: nodesRef.current, edges: edgesRef.current });
       setEdges((eds) => eds.filter((e) => e.id !== edgeId));
     },
     [setEdges],
@@ -3657,6 +3901,7 @@ function StarCanvasInner() {
 
   const duplicateNode = useCallback(
     (nodeId: string) => {
+      pushUndo({ nodes: nodesRef.current, edges: edgesRef.current });
       const node = nodesRef.current.find((n) => n.id === nodeId);
       if (!node) return;
 
@@ -4535,6 +4780,35 @@ function StarCanvasInner() {
         useCanvasStore.getState().openPromptPreview(selectedNodeId);
       }
 
+      // Ctrl+Z: undo
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === "z") {
+        e.preventDefault();
+        const entry = _undoStack.pop();
+        if (entry) {
+          _redoStack.push({ nodes: nodesRef.current, edges: edgesRef.current });
+          setNodes(entry.nodes);
+          setEdges(entry.edges);
+          nodesRef.current = entry.nodes;
+          edgesRef.current = entry.edges;
+        }
+      }
+
+      // Ctrl+Shift+Z or Ctrl+Y: redo
+      if (
+        ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "z") ||
+        ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === "y")
+      ) {
+        e.preventDefault();
+        const entry = _redoStack.pop();
+        if (entry) {
+          _undoStack.push({ nodes: nodesRef.current, edges: edgesRef.current });
+          setNodes(entry.nodes);
+          setEdges(entry.edges);
+          nodesRef.current = entry.nodes;
+          edgesRef.current = entry.edges;
+        }
+      }
+
       if (e.key === "Escape") {
         closeContextMenu();
         closeFloatingToolbar();
@@ -4577,7 +4851,9 @@ function StarCanvasInner() {
   // RENDER
   // ========================================================================
   return (
-    <div className="relative h-screen w-screen overflow-hidden startrails-flow">
+    <>
+      <BatchProgressBar ref={batchProgressRef} />
+      <div className="relative h-screen w-screen overflow-hidden startrails-flow">
       <div className="fixed left-20 top-3 z-20 flex items-center gap-2">
         <div
           className="pointer-events-none rounded-2xl border px-4 py-2 text-xs shadow-lg backdrop-blur-xl"
@@ -5721,6 +5997,7 @@ function StarCanvasInner() {
         onHistoryPanelClosed={() => setShowHistory(false)}
       />
     </div>
+    </>
   );
 }
 // StarCanvasInner closes here

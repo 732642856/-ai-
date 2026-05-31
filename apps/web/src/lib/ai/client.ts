@@ -176,6 +176,11 @@ export async function getDefaultImageModel(): Promise<string> {
   }
 }
 
+/** 同步读取缓存的默认图片模型名（组件初始化时用，无需 await）。首次加载前 fallback。 */
+export function getCachedDefaultImageModel(): string {
+  return _cachedDefaultImageModel || "gpt-image-2"
+}
+
 /**
  * 从服务端获取视频分析模型名（带缓存）。
  * 如果没配置 AI_VIDEO_MODEL，返回默认文本模型。

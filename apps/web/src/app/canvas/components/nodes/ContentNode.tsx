@@ -37,6 +37,8 @@ import {
   STORYBOARD_ASSISTANT_LABELS,
 } from "@/lib/storyboard/storyboardTextNode"
 import { InlineSlashCommandMenu } from "../menus/InlineSlashCommandMenu"
+import { getCachedDefaultImageModel } from "@/lib/ai/client"
+import { getModelOptions } from "@/lib/ai/imageProviderCapabilities"
 
 interface ContentNodeProps extends NodeProps {
   data: CanvasNodeData
@@ -45,11 +47,16 @@ interface ContentNodeProps extends NodeProps {
 type ContentAiMode = "chat" | "image"
 
 const DEFAULT_CHAT_MODEL = "gpt-5.5"
-const DEFAULT_IMAGE_MODEL = "gpt-image-2"
+const DEFAULT_IMAGE_MODEL = getCachedDefaultImageModel()
 
 const MODEL_OPTIONS = [
   { value: DEFAULT_CHAT_MODEL, label: "GPT-5.5", desc: "文本生成", mode: "chat" as const },
-  { value: DEFAULT_IMAGE_MODEL, label: "GPT-Image-2", desc: "图片生成", mode: "image" as const },
+  {
+    value: DEFAULT_IMAGE_MODEL,
+    label: getModelOptions().find((m) => m.value === DEFAULT_IMAGE_MODEL)?.label || "图片模型",
+    desc: "图片生成",
+    mode: "image" as const,
+  },
 ]
 
 const AI_MODE_OPTIONS: Array<{

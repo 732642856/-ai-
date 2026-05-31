@@ -43,4 +43,26 @@ describe("generateImageFromPrompt", () => {
       globalThis.fetch = originalFetch
     }
   })
+
+  it("passes sourceImage in the request body when provided", async () => {
+    let requestBody: Record<string, unknown> | null = null
+    globalThis.fetch = async (url, opts) => {
+      requestBody = JSON.parse((opts?.body as string) ?? "{}")
+      return new Response(JSON.stringify({
+        imageUrl: "blob:mock",
+        prompt: "test",
+        model: "gpt-image-2",
+      }), { status: 200 })
+    }
+
+    await generateImageFromPrompt({
+      prompt: "a character",
+      sourceImage: "data:image/png;base64,mockref",
+    })
+
+    assert.ok(requestBody, "fetch was called")
+    assert.equal(requestBody?.sourceImage, "data:image/png;base64,mockref")
+    assert.equal(requestBody?.prompt, "a character")
+    globalThis.fetch = originalFetch
+  })
 })

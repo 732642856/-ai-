@@ -31,6 +31,7 @@ export type CanvasNodeKind =
   | "ai-generated-image"
   | "video-sample-frames"
   | "video-analyze"
+  | "agent"
 
 // ============================================================================
 // Node Run Status (P1-3 六态模型)
@@ -222,6 +223,14 @@ export type CanvasNodeData = {
   storyboard?: any
   shot?: StoryboardShotData
   storyboardGrid?: StoryboardGridData
+  agentOutput?: string
+  agentStatus?: "idle" | "running" | "done" | "error"
+  agentPhase?: string
+  _fallbackComposite?: boolean
+  _childNodeIds?: string[]
+  _batchProgress?: string
+  _retryCount?: number
+  _batchPending?: boolean
   previs3d?: any
   generationJob?: any
   sourcePromptId?: string
@@ -686,5 +695,12 @@ export const nodeToneStyles: Record<CanvasNodeKind, {
     meta: "text-slate-300/60",
     border: "1px solid rgba(148, 163, 184, 0.2)",
     background: "rgba(100, 116, 139, 0.1)",
+  },
+  agent: {
+    eyebrow: "text-purple-300",
+    body: "text-purple-200/75",
+    meta: "text-purple-300/60",
+    border: "1px solid rgba(168, 85, 247, 0.2)",
+    background: "rgba(168, 85, 247, 0.1)",
   },
 }

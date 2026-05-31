@@ -35,6 +35,8 @@ import {
   formatGenerationErrorForDisplay,
 } from "@/lib/ai/normalizeGenerationError";
 import { createImageGenerationSnapshot } from "@/lib/ai/createGenerationSnapshot";
+import { getCachedDefaultImageModel } from "@/lib/ai/client";
+import { getModelOptions } from "@/lib/ai/imageProviderCapabilities";
 
 // Global registry for hover events
 const imageHoverRegistry: Record<
@@ -69,10 +71,8 @@ interface ImageNodeProps extends NodeProps {
   };
 }
 
-// Model options for image generation
-const IMAGE_MODELS = [
-  { value: "gpt-image-2", label: "GPT-Image-2", desc: "高质量图像生成" },
-];
+// Model options for image generation (dynamically from capabilities)
+const IMAGE_MODELS = getModelOptions();
 
 // Aspect ratio options
 const ASPECT_RATIOS = [
@@ -94,7 +94,7 @@ export const ImageNode = memo(function ImageNode({
     typeof data.prompt === "string" ? data.prompt : "",
   );
   const [selectedModel, setSelectedModel] = useState(
-    typeof data.model === "string" ? data.model : "gpt-image-2",
+    typeof data.model === "string" ? data.model : getCachedDefaultImageModel(),
   );
   const [selectedRatio, setSelectedRatio] = useState("16:9");
   const [showModelDropdown, setShowModelDropdown] = useState(false);
@@ -809,13 +809,29 @@ export const ImageNode = memo(function ImageNode({
               className="mt-2 flex items-center justify-between rounded-lg px-2 py-1.5"
               style={{ backgroundColor: "rgba(239,68,68,0.1)" }}
             >
-              <span className="text-[11px] text-red-300/70">{aiError}</span>
-              <button
-                onClick={() => setAiError(null)}
-                className="text-[11px] text-white/40 hover:text-white/60"
-              >
-                <X size={12} />
-              </button>
+              <div className="flex-1 min-w-0 mr-2">
+                <span className="text-[11px] text-red-300/70 block truncate">{aiError}</span>
+                {/* Retry count display */}
+                {(data as any)._retryCount > 0 && (
+                  <span className="text-[10px] text-red-400/50 block mt-0.5">
+                    已重试 {(data as any)._retryCount} 次
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <button
+                  onClick={() => handleAiGenerate()}
+                  className="text-[10px] px-2 py-0.5 rounded bg-red-500/20 text-red-300 hover:bg-red-500/40 transition-colors"
+                >
+                  🔄 重试
+                </button>
+                <button
+                  onClick={() => setAiError(null)}
+                  className="text-[11px] text-white/40 hover:text-white/60"
+                >
+                  <X size={12} />
+                </button>
+              </div>
             </div>
           )}
         </div>
