@@ -259,7 +259,7 @@ export function ChatPanel({
         }
       }
       if (DEBUG_AI) {
-        console.log("[DEBUG_AI] Response complete")
+        console.debug("[DEBUG_AI] Response complete")
       }
     },
     onError: (error) => {

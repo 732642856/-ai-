@@ -103,7 +103,7 @@ export function useCanvasDropUpload(
       };
 
       if (DEBUG_DROP) {
-        console.log("[DEBUG_DROP_UPLOAD] Image loaded:", {
+        console.debug("[DEBUG_DROP_UPLOAD] Image loaded:", {
           id: meta.id,
           assetId: meta.assetId,
           name: meta.name,
@@ -178,7 +178,7 @@ export function useCanvasDropUpload(
       };
 
       if (DEBUG_DROP) {
-        console.log("[DEBUG_DROP_UPLOAD] Created node:", {
+        console.debug("[DEBUG_DROP_UPLOAD] Created node:", {
           id: node.id,
           position,
           displaySize: `${width}x${height}`,
@@ -218,7 +218,7 @@ export function useCanvasDropUpload(
     e.stopPropagation();
 
     if (DEBUG_DROP) {
-      console.log("[DEBUG_DROP_UPLOAD] Drag enter");
+      console.debug("[DEBUG_DROP_UPLOAD] Drag enter");
     }
 
     // 检查是否有可导入文件（图片或纯文本文档）
@@ -257,7 +257,7 @@ export function useCanvasDropUpload(
       setDragError(null);
 
       if (DEBUG_DROP) {
-        console.log("[DEBUG_DROP_UPLOAD] Drag leave");
+        console.debug("[DEBUG_DROP_UPLOAD] Drag leave");
       }
     }
   }, []);
@@ -272,7 +272,7 @@ export function useCanvasDropUpload(
       setDragError(null);
 
       if (DEBUG_DROP) {
-        console.log("[DEBUG_DROP_UPLOAD] Drop event:", {
+        console.debug("[DEBUG_DROP_UPLOAD] Drop event:", {
           screenX: e.clientX,
           screenY: e.clientY,
         });
@@ -285,7 +285,7 @@ export function useCanvasDropUpload(
       });
 
       if (DEBUG_DROP) {
-        console.log("[DEBUG_DROP_UPLOAD] Canvas position:", canvasPosition);
+        console.debug("[DEBUG_DROP_UPLOAD] Canvas position:", canvasPosition);
       }
 
       // 获取文件列表
@@ -294,7 +294,7 @@ export function useCanvasDropUpload(
       const documentFiles = files.filter(isTextDocumentFile);
 
       if (DEBUG_DROP) {
-        console.log("[DEBUG_DROP_UPLOAD] Files:", {
+        console.debug("[DEBUG_DROP_UPLOAD] Files:", {
           total: files.length,
           images: imageFiles.length,
           documents: documentFiles.length,

@@ -140,6 +140,7 @@ import {
   formatGenerationErrorForDisplay,
 } from "@/lib/ai/normalizeGenerationError";
 import { createImageGenerationSnapshot } from "@/lib/ai/createGenerationSnapshot";
+import { getDefaultImageModel } from "@/lib/ai/client";
 import { createShotImageNode } from "@/lib/storyboard/createShotImageNode";
 import {
   STORYBOARD_SHOT_LAYOUT,
@@ -1102,7 +1103,7 @@ function StarCanvasInner() {
 
       const requestId = generateId();
       latestShotGenerationRequestIdsRef.current[nodeId] = requestId;
-      const model = "gpt-image-2";
+      const model = await getDefaultImageModel() || "gpt-image-2";
       const size = "1792x1024";
       const nextAttempt = (shot.generationAttempts || 0) + 1;
       const generationSnapshot = createImageGenerationSnapshot({
@@ -2246,7 +2247,7 @@ function StarCanvasInner() {
 
     const anchorNode = selectedShotNodes[0];
     const gridNodeId = generateId();
-    const model = "gpt-image-2";
+    const model = await getDefaultImageModel() || "gpt-image-2";
     const size = "1792x1024";
     const requestId = generateId();
     const startedAt = Date.now();
@@ -2412,30 +2413,70 @@ function StarCanvasInner() {
       });
     } catch (error: any) {
       const message = error?.message || "多格分镜图生成失败";
-      setNodes((nds) =>
-        nds.map((node) =>
-          shotNodeIds.includes(node.id) && node.data.shot
-            ? {
-                ...node,
-                data: {
-                  ...node.data,
-                  shot: {
-                    ...node.data.shot,
-                    status: "error" as const,
-                    generationStatus: "failed" as const,
-                    generationFinishedAt: Date.now(),
-                    generationRequestId: error?.requestId || requestId,
-                    generationAttempts: error?.attempts || node.data.shot.generationAttempts,
-                    generationErrorCode: error?.code || "COMPOSITE_GENERATION_FAILED",
-                    generationRetryable: error?.retryable ?? true,
-                    errorMessage: message,
-                    generationError: message,
+      // 尝试 fallback：选中有镜头图的 shot，按 x 位置排序保稳定
+      const shotsWithImage = selectedShotNodes
+        .filter((shot) => getShotImageUrl(shot.id))
+        .sort((a, b) => a.position.x - b.position.x);
+      if (shotsWithImage.length > 0) {
+        const fallbackShot = shotsWithImage[0];
+        const fallbackImageUrl = getShotImageUrl(fallbackShot.id)!;
+        const fallbackWarning =
+          "合成分镜图失败，已使用第一张可用镜头图作为结果。";
+        const fallbackNode = {
+          id: gridNodeId,
+          type: "image" as const,
+          position: {
+            x: anchorNode.position.x + STORYBOARD_SHOT_LAYOUT.shotWidth + 520,
+            y: anchorNode.position.y,
+          },
+          data: {
+            title: "合成降级结果",
+            nodeKind: "ai-generated-image" as const,
+            imageUrl: fallbackImageUrl,
+            source: "generated" as const,
+            sourceType: "shot" as const,
+            persistence: "remote" as const,
+            displayWidth: 380,
+            displayHeight: 214,
+            createdAt: Date.now(),
+            storyboardWarning: fallbackWarning,
+            storyboardSourceNodeId: anchorNode.id,
+            _fallbackComposite: true,
+          },
+        };
+        setNodes((nds) => [...nds, fallbackNode]);
+        console.warn(
+          "[handleComposeSelectedShots] compose failed, fallback to shot image:",
+          fallbackShot.id,
+          error,
+        );
+      } else {
+        // 没有任何可用镜头图 → 标记 error
+        setNodes((nds) =>
+          nds.map((node) =>
+            shotNodeIds.includes(node.id) && node.data.shot
+              ? {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    shot: {
+                      ...node.data.shot,
+                      status: "error" as const,
+                      generationStatus: "failed" as const,
+                      generationFinishedAt: Date.now(),
+                      generationRequestId: error?.requestId || requestId,
+                      generationAttempts: error?.attempts || node.data.shot.generationAttempts,
+                      generationErrorCode: error?.code || "COMPOSITE_GENERATION_FAILED",
+                      generationRetryable: error?.retryable ?? true,
+                      errorMessage: message,
+                      generationError: message,
+                    },
                   },
-                },
-              }
-            : node,
-        ),
-      );
+                }
+              : node,
+          ),
+        );
+      }
     } finally {
       setNodes((nds) =>
         nds.map((node) => {
@@ -3505,7 +3546,7 @@ function StarCanvasInner() {
       };
 
       if (DEBUG_NODE) {
-        console.log("[DEBUG_NODE] Creating node:", newNode);
+        console.debug("[DEBUG_NODE] Creating node:", newNode);
       }
 
       setNodes((nds) => [...nds, newNode]);
@@ -3687,7 +3728,7 @@ function StarCanvasInner() {
         const act = actions[i];
 
         if (DEBUG_NODE) {
-          console.log("[DEBUG_NODE] Applying chat action:", act);
+          console.debug("[DEBUG_NODE] Applying chat action:", act);
         }
 
         try {
@@ -4178,7 +4219,7 @@ function StarCanvasInner() {
         dismissCanvasHint();
 
         if (DEBUG_NODE) {
-          console.log("[DEBUG_NODE] Added attachment from chat:", newNode.id);
+          console.debug("[DEBUG_NODE] Added attachment from chat:", newNode.id);
         }
       }); // end assetIdPromise.then
     },
@@ -4228,7 +4269,7 @@ function StarCanvasInner() {
 
       const title = node.data.title || node.data.fileName || "图片";
       const promptText = `Generate a variation of this image: ${title}`;
-      const model = "gpt-image-2";
+      const model = await getDefaultImageModel() || "gpt-image-2";
       const size = "1792x1024";
       const requestId = crypto.randomUUID();
       const capability = getImageProviderCapability(model);

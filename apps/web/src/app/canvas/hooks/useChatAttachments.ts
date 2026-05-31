@@ -59,7 +59,7 @@ export function useChatAttachments() {
         setAttachments((prev) => [...prev, attachment])
 
         if (DEBUG_CHAT) {
-          console.log("[DEBUG_CHAT_ATTACHMENTS] Added attachment:", {
+          console.debug("[DEBUG_CHAT_ATTACHMENTS] Added attachment:", {
             id: attachment.id,
             type: attachment.type,
             name: attachment.name,
@@ -86,7 +86,7 @@ export function useChatAttachments() {
         setAttachments((prev) => [...prev, attachment])
 
         if (DEBUG_CHAT) {
-          console.log("[DEBUG_CHAT_ATTACHMENTS] Added attachment:", {
+          console.debug("[DEBUG_CHAT_ATTACHMENTS] Added attachment:", {
             id: attachment.id,
             type: attachment.type,
             name: attachment.name,
