@@ -261,3 +261,48 @@ export function getShotVisualPrompt(
 ): string {
   return shot?.visualPrompt || shot?.description || fallbackPrompt || "";
 }
+
+export interface StoryboardGridImageUrlValidation {
+  valid: boolean;
+  validCount: number;
+  totalCount: number;
+  missingIndices: number[];
+  message: string;
+}
+
+export function validateStoryboardGridImageUrls(
+  imageUrls: Array<string | null | undefined>,
+  shotTitles: string[],
+): StoryboardGridImageUrlValidation {
+  const validCount = imageUrls.filter((url) => Boolean(url?.trim())).length;
+  const totalCount = imageUrls.length;
+  const missingIndices = imageUrls
+    .map((url, i) => (!url?.trim() ? i : -1))
+    .filter((i) => i >= 0);
+
+  if (validCount === 0) {
+    return {
+      valid: false,
+      validCount: 0,
+      totalCount,
+      missingIndices,
+      message: "还没有可合成的镜头图片。一键生成分镜图会先生成镜头图片；如果仍停在这里，请在左侧原文节点重新点击\u201C一键生成分镜图\u201D，或在镜头节点点击\u201C生成图片\u201D。",
+    };
+  }
+  if (validCount < totalCount) {
+    const titles = missingIndices
+      .map((i) => shotTitles[i] || `镜头${i + 1}`)
+      .join("、");
+    return {
+      valid: false,
+      validCount,
+      totalCount,
+      missingIndices,
+      message:
+        missingIndices.length === 1
+          ? `镜头\u300C${titles}\u300D缺少可用的镜头图片，请先生成该镜头图片后再合成。`
+          : `以下 ${missingIndices.length} 个镜头缺少可用的镜头图片：${titles}。请先生成后再合成。`,
+    };
+  }
+  return { valid: true, validCount, totalCount, missingIndices: [], message: "" };
+}

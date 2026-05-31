@@ -10,6 +10,7 @@ import {
   getStoryboardCompositeLayout,
   shouldComposeStoryboardLocally,
   shouldUseLocalStoryboardCompose,
+  validateStoryboardGridImageUrls,
   type StoryboardCompositeSettings,
 } from "./storyboardComposite.ts";
 
@@ -426,6 +427,79 @@ describe("storyboardComposite", () => {
         getShotImageUrlFromCanvas({ shotId: "shot-1", nodes: [shot, linkedImage] }),
         "blob:http://localhost/from-generation-output",
       );
+    });
+  });
+
+  describe("validateStoryboardGridImageUrls", () => {
+    it("returns invalid when all URLs are null/undefined", () => {
+      const result = validateStoryboardGridImageUrls([null, undefined], ["Shot 1", "Shot 2"]);
+      assert.equal(result.valid, false);
+      assert.equal(result.validCount, 0);
+      assert.equal(result.totalCount, 2);
+      assert.equal(result.missingIndices.length, 2);
+      assert.match(result.message, /还没有可合成的镜头图片/);
+    });
+
+    it("returns invalid when all URLs are empty strings", () => {
+      const result = validateStoryboardGridImageUrls(["", "  "], ["Shot 1", "Shot 2"]);
+      assert.equal(result.valid, false);
+      assert.equal(result.validCount, 0);
+    });
+
+    it("returns invalid when some URLs are missing (partial failure)", () => {
+      const result = validateStoryboardGridImageUrls(
+        ["blob:http://localhost/a", null, "blob:http://localhost/c"],
+        ["星空镜头", "室内镜头", "室外镜头"],
+      );
+      assert.equal(result.valid, false);
+      assert.equal(result.validCount, 2);
+      assert.equal(result.totalCount, 3);
+      assert.deepEqual(result.missingIndices, [1]);
+      assert.match(result.message, /镜头「室内镜头」/);
+      assert.match(result.message, /请先生成该镜头图片/);
+    });
+
+    it("returns invalid with multiple missing URLs and names them all", () => {
+      const result = validateStoryboardGridImageUrls(
+        ["blob:http://localhost/a", null, undefined, "blob:http://localhost/d"],
+        ["星空镜头", "室内镜头", "室外镜头", "动作镜头"],
+      );
+      assert.equal(result.valid, false);
+      assert.equal(result.validCount, 2);
+      assert.equal(result.totalCount, 4);
+      assert.deepEqual(result.missingIndices, [1, 2]);
+      assert.match(result.message, /2 个镜头/);
+      assert.match(result.message, /室内镜头、室外镜头/);
+    });
+
+    it("falls back to generic names when shotTitles are empty", () => {
+      const result = validateStoryboardGridImageUrls([null, "blob:img"], ["", ""]);
+      assert.equal(result.valid, false);
+      assert.equal(result.validCount, 1);
+      assert.equal(result.missingIndices.length, 1);
+      assert.match(result.message, /镜头1/);
+    });
+
+    it("returns valid when all URLs are present", () => {
+      const result = validateStoryboardGridImageUrls(
+        ["blob:http://localhost/a", "blob:http://localhost/b", "blob:http://localhost/c"],
+        ["Shot 1", "Shot 2", "Shot 3"],
+      );
+      assert.equal(result.valid, true);
+      assert.equal(result.validCount, 3);
+      assert.equal(result.totalCount, 3);
+      assert.equal(result.missingIndices.length, 0);
+      assert.equal(result.message, "");
+    });
+
+    it("treats whitespace-only URLs as missing", () => {
+      const result = validateStoryboardGridImageUrls(
+        ["blob:img", "   "],
+        ["Shot 1", "Shot 2"],
+      );
+      assert.equal(result.valid, false);
+      assert.equal(result.validCount, 1);
+      assert.deepEqual(result.missingIndices, [1]);
     });
   });
 });

@@ -155,6 +155,7 @@ import {
   createStoryboardCompositeEdges,
   getShotImageUrlFromCanvas,
   shouldUseLocalStoryboardCompose,
+  validateStoryboardGridImageUrls,
   type StoryboardCompositeLayout,
   type StoryboardCompositeSettings,
 } from "@/lib/storyboard/storyboardComposite";
@@ -209,7 +210,7 @@ const ZOOM_CONSTRAINTS = {
 };
 const SHOT_GENERATION_WATCHDOG_TIMEOUT_MS = 90_000;
 const SHOT_GENERATION_WATCHDOG_INTERVAL_MS = 10_000;
-const SHOT_GENERATION_BATCH_CONCURRENCY = 2;
+const SHOT_GENERATION_BATCH_CONCURRENCY = 1;
 const STORYBOARD_FINAL_OUTPUT_OFFSET_X = 420;
 const STORYBOARD_PROCESS_NODE_OFFSET_X = 860;
 const STORYBOARD_PROCESS_IMAGE_OFFSET_X = STORYBOARD_PROCESS_NODE_OFFSET_X + STORYBOARD_SHOT_LAYOUT.shotWidth + 72;
@@ -1550,10 +1551,12 @@ function StarCanvasInner() {
       );
 
       try {
-        if (imageUrls.every((url) => !url)) {
-          throw new Error(
-            "还没有可合成的镜头图片。一键生成分镜图会先生成镜头图片；如果仍停在这里，请在左侧原文节点重新点击“一键生成分镜图”，或在镜头节点点击“生成图片”。",
-          );
+        const validation = validateStoryboardGridImageUrls(
+          imageUrls,
+          shotNodes.map((n) => n.data.shot?.title || n.data.title || ""),
+        );
+        if (!validation.valid) {
+          throw new Error(validation.message);
         }
         const dataUrl = await composeStoryboardGrid({
           images: imageUrls.slice(0, grid.maxShots || 9),
@@ -1905,6 +1908,48 @@ function StarCanvasInner() {
           assetId: latestShotNode.data.shot?.generatedImageAssetId || imageNode?.data.assetId,
         });
       });
+
+      if (validShotImages.length > 0 && validShotImages.length < candidateShotNodes.length) {
+        const failedShotIds = candidateShotNodes
+          .filter((shot) => !validShotImages.some((v) => v.shotNodeId === shot.id))
+          .map((shot) => shot.id);
+        const failedTitles = candidateShotNodes
+          .filter((shot) => failedShotIds.includes(shot.id))
+          .map((shot) => shot.data.shot?.title || shot.data.title || "未命名镜头");
+        const message =
+          failedTitles.length === 1
+            ? `镜头「${failedTitles[0]}」图片生成失败。请重试该镜头后再合成。`
+            : `以下 ${failedTitles.length} 个镜头图片生成失败：${failedTitles.join("、")}。请重试后再合成。`;
+        updateSourceRunMeta({ status: "failed", progress: 100, message, error: message });
+        setNodes((nds) => {
+          const updated = nds.map((node) =>
+            node.id === nodeId
+              ? {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    generatedShotNodeIds: candidateShotNodes.map((shotNode) => shotNode.id),
+                    generatedStoryboardGridNodeId: gridNode?.id,
+                    storyboardError: message,
+                    storyboardErrorPhase: "partial-shot-failure",
+                    storyboardWarning: undefined,
+                  },
+                }
+              : node,
+          );
+          const visibility = applyStoryboardProcessVisibility({
+            nodes: updated,
+            edges: edgesRef.current,
+            sourceNodeId: nodeId,
+            showProcess: processVisible,
+          });
+          nodesRef.current = visibility.nodes;
+          edgesRef.current = visibility.edges;
+          setEdges(visibility.edges);
+          return visibility.nodes;
+        });
+        return;
+      }
 
       if (validShotImages.length === 0) {
         const latestCandidateShotNodes = candidateShotNodes
