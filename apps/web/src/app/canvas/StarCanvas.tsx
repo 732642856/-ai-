@@ -107,6 +107,7 @@ import { quickLayout } from "./utils/dagre-layout";
 import { parseStoryboardTextToShots } from "./utils/storyboardParser";
 import { generateImageFromPrompt } from "./utils/imageGeneration";
 import { composeStoryboardGrid } from "./utils/storyboardGridComposer";
+import { buildVideoWorkflowTemplate } from "./utils/videoWorkflowTemplate";
 import { useWorkflowRunner } from "./hooks/useWorkflowRunner";
 import { buildExecutionPlan } from "./utils/execution-plan";
 import { useCanvasPersistence } from "./hooks/useCanvasPersistence";
@@ -3470,89 +3471,22 @@ function StarCanvasInner() {
 
   const handleCreateVideoWorkflow = useCallback(() => {
     const basePosition = getCenteredFlowPosition({ width: 1120, height: 540 });
-    const template: Array<{
-      kind: CanvasNodeKind;
-      x: number;
-      y: number;
-      overrides?: Partial<CanvasNodeData>;
-    }> = [
-      {
-        kind: "text",
-        x: 0,
-        y: 160,
-        overrides: {
-          title: "前期目标",
-          content: "输入主题、类型、人物、情绪、画面风格和交付目标。",
-          prompt: "输入主题、类型、人物、情绪、画面风格和交付目标。",
-        },
-      },
-      { kind: "script", x: 320, y: 40 },
-      { kind: "storyboard", x: 640, y: 40 },
-      { kind: "image-generation", x: 960, y: 40 },
-      {
-        kind: "image-result",
-        x: 1280,
-        y: 40,
-        overrides: {
-          title: "关键画面结果",
-          runMeta: createIdleRunMeta(),
-          workflowRole: "Image Output",
-          summary: "这里承接生成后的角色、场景、首帧或风格板图片。",
-        },
-      },
-      { kind: "video-generation", x: 1600, y: 40 },
-      { kind: "audio", x: 960, y: 280 },
-      { kind: "subtitle", x: 1280, y: 280 },
-      { kind: "composition", x: 1600, y: 280 },
-      { kind: "video-result", x: 1920, y: 160 },
-    ];
-
-    const newNodes: Node<CanvasNodeData>[] = template.map((item) => {
-      const type = item.kind === "text" ? "content" : "workflow";
-      return {
-        id: generateId(),
-        type,
-        position: { x: basePosition.x + item.x, y: basePosition.y + item.y },
-        data: {
-          ...(type === "workflow"
-            ? getWorkflowDefaults(item.kind)
-            : {
-                title: "前期目标",
-                nodeKind: "text" as CanvasNodeKind,
-                runMeta: createIdleRunMeta(),
-                content: "输入主题、类型、人物、情绪、画面风格和交付目标。",
-                prompt: "输入主题、类型、人物、情绪、画面风格和交付目标。",
-                createdAt: Date.now(),
-              }),
-          ...item.overrides,
-        },
-      };
+    const { nodes: newNodes, edges: newEdges } = buildVideoWorkflowTemplate({
+      basePosition,
+      generateId,
+      edgeStyle: { stroke: DESIGN_TOKENS.nodeEdge, strokeWidth: 2 },
     });
 
-    const edgePairs = [
-      [0, 1],
-      [1, 2],
-      [2, 3],
-      [3, 4],
-      [4, 5],
-      [5, 8],
-      [1, 6],
-      [1, 7],
-      [6, 8],
-      [7, 8],
-      [8, 9],
-    ];
-    const newEdges: Edge[] = edgePairs.map(([sourceIndex, targetIndex]) => ({
-      id: generateId(),
-      source: newNodes[sourceIndex].id,
-      target: newNodes[targetIndex].id,
-      type: "creative",
-      animated: false,
-      style: { stroke: DESIGN_TOKENS.nodeEdge, strokeWidth: 2 },
-    }));
-
-    setNodes(newNodes);
-    setEdges(newEdges);
+    setNodes((nds) => {
+      const nextNodes = [...nds, ...newNodes];
+      nodesRef.current = nextNodes;
+      return nextNodes;
+    });
+    setEdges((eds) => {
+      const nextEdges = [...eds, ...newEdges];
+      edgesRef.current = nextEdges;
+      return nextEdges;
+    });
     dismissCanvasHint();
     setChatOpen(true);
     setTimeout(() => fitViewToVisibleCanvas(650), 80);
