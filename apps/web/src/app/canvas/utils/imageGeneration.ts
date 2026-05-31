@@ -1,6 +1,15 @@
-import { persistImageDataUrl } from "@/lib/assets/localImageStore"
+import { persistImageDataUrl } from "../../../lib/assets/localImageStore.ts"
 
-export const IMAGE_GENERATION_CLIENT_TIMEOUT_MS = 75_000
+export const IMAGE_GENERATION_CLIENT_TIMEOUT_MS = 150_000
+
+type ApiErrorPayload = {
+  code?: string
+  userMessage?: string
+  message?: string
+  detail?: string
+  status?: number
+  retryable?: boolean
+}
 
 export type ImageGenerationErrorCode =
   | "CLIENT_TIMEOUT"
@@ -59,7 +68,7 @@ async function readJsonSafely(res: Response): Promise<any> {
 }
 
 function normalizeApiError(payload: any, status: number): ImageGenerationError {
-  const error = payload?.error
+  const error = payload?.error as string | ApiErrorPayload | undefined
   if (typeof error === "string") {
     return new ImageGenerationError({
       message: error || `API error: ${status}`,
@@ -71,8 +80,15 @@ function normalizeApiError(payload: any, status: number): ImageGenerationError {
     })
   }
 
+  const detail = typeof error?.detail === "string" ? error.detail.trim() : ""
+  const userMessage = typeof error?.userMessage === "string" ? error.userMessage.trim() : ""
+  const rawMessage = typeof error?.message === "string" ? error.message.trim() : ""
+  const message = detail && userMessage && detail !== userMessage
+    ? `${userMessage}\n${detail}`
+    : userMessage || rawMessage || `API error: ${status}`
+
   return new ImageGenerationError({
-    message: error?.userMessage || error?.message || `API error: ${status}`,
+    message,
     code: error?.code || "API_ERROR",
     status: error?.status || status,
     requestId: payload?.requestId,
@@ -126,13 +142,21 @@ export async function generateImageFromPrompt(input: {
   }
 
   if (!payload?.imageUrl || typeof payload.imageUrl !== "string") {
+    const error = payload?.error as string | ApiErrorPayload | undefined
+    const message = typeof error === "object" && error
+      ? error.userMessage || error.message || "图片生成服务没有返回可用图片，请重试。"
+      : typeof error === "string"
+        ? error
+        : "图片生成服务没有返回可用图片，请重试。"
+
     throw new ImageGenerationError({
-      message: "图片生成服务没有返回可用图片，请重试。",
-      code: "INVALID_RESPONSE",
+      message,
+      code: typeof error === "object" && error ? error.code || "INVALID_RESPONSE" : "INVALID_RESPONSE",
       status: res.status,
       requestId: payload?.requestId,
       attempts: payload?.attempts,
-      retryable: true,
+      retryable: typeof error === "object" && error ? error.retryable ?? true : true,
+      detail: typeof error === "object" && error ? error.detail : undefined,
     })
   }
 

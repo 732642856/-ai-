@@ -1792,7 +1792,7 @@ function StarCanvasInner() {
       updateSourceRunMeta({
         status: "pending",
         progress: 8,
-        message: "准备生成分镜图：先拆镜头，再生成镜头图，最后合成一张分镜图",
+        message: "准备生成分镜图：先拆镜头，再生成镜头图；单镜头会直接作为最终结果，多镜头再合成分镜图",
       });
 
       const processVisible = sourceNode.data.storyboardProcessVisible === true;
@@ -1861,7 +1861,9 @@ function StarCanvasInner() {
         message:
           missingShotNodes.length > 0
             ? `正在生成镜头图：0/${missingShotNodes.length}，每个镜头会独立成功或失败`
-            : "镜头图已存在，正在准备合成最终分镜图",
+            : candidateShotNodes.length <= 1
+              ? "镜头图已存在，正在准备最终分镜图"
+              : "镜头图已存在，正在准备合成最终分镜图",
       });
 
       await runWithConcurrency(
@@ -1883,17 +1885,23 @@ function StarCanvasInner() {
         assetId?: string;
       }> = [];
       candidateShotNodes.forEach((shotNode) => {
-        const imageUrl = getShotImageUrlFromCanvas({ shotId: shotNode.id, nodes: nodesRef.current });
+        const latestShotNode = nodesRef.current.find((node) => node.id === shotNode.id) ?? shotNode;
+        const imageUrl = getShotImageUrlFromCanvas({ shotId: latestShotNode.id, nodes: nodesRef.current });
         if (!imageUrl) return;
-        const imageNodeId = shotNode.data.shot?.generatedImageNodeId;
+        const imageNodeId = latestShotNode.data.shot?.generatedImageNodeId;
         const imageNode = imageNodeId
           ? nodesRef.current.find((node) => node.id === imageNodeId)
-          : undefined;
+          : nodesRef.current.find(
+              (node) =>
+                node.type === "image" &&
+                (node.data.sourceShotId === latestShotNode.id ||
+                  node.data.generationOutput?.sourceShotId === latestShotNode.id),
+            );
         validShotImages.push({
-          shotNodeId: shotNode.id,
+          shotNodeId: latestShotNode.id,
           imageUrl,
-          imageNodeId,
-          assetId: shotNode.data.shot?.generatedImageAssetId || imageNode?.data.assetId,
+          imageNodeId: imageNode?.id ?? imageNodeId,
+          assetId: latestShotNode.data.shot?.generatedImageAssetId || imageNode?.data.assetId,
         });
       });
 
@@ -2157,7 +2165,14 @@ function StarCanvasInner() {
       settings,
     });
 
-    if (!sourcePrompt && imageUrls.every((url) => !url)) {
+    const missingImageCount = imageUrls.filter((url) => !url?.trim()).length;
+    const shouldGenerateComposite = !shouldUseLocalCompose;
+
+    if (!sourcePrompt && missingImageCount > 0) {
+      const message =
+        missingImageCount === selectedShotNodes.length
+          ? "选中的镜头没有可用于生成的剧本文本、生图 Prompt 或镜头图片"
+          : `选中的 ${selectedShotNodes.length} 个镜头中有 ${missingImageCount} 个缺少镜头图片，也没有可用于重新生成整张分镜图的剧本文本或生图 Prompt`;
       setNodes((nds) =>
         nds.map((node) =>
           shotNodeIds.includes(node.id) && node.data.shot
@@ -2170,10 +2185,10 @@ function StarCanvasInner() {
                     status: "error" as const,
                     generationStatus: "failed" as const,
                     generationFinishedAt: Date.now(),
-                    generationErrorCode: "EMPTY_COMPOSITE_PROMPT",
+                    generationErrorCode: "EMPTY_COMPOSITE_SOURCE",
                     generationRetryable: false,
-                    errorMessage: "选中的镜头没有可用于生成的剧本文本或生图 Prompt",
-                    generationError: "选中的镜头没有可用于生成的剧本文本或生图 Prompt",
+                    errorMessage: message,
+                    generationError: message,
                   },
                 },
               }
@@ -2290,6 +2305,8 @@ function StarCanvasInner() {
             },
             strategy: settings.strategy,
             localCompose: shouldUseLocalCompose,
+            missingImageCount,
+            generatedComposite: shouldGenerateComposite,
           },
             compositeSettings: {
               ...settings,

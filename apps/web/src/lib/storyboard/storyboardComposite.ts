@@ -40,7 +40,10 @@ export type StoryboardCompositeLayout = {
 export function shouldComposeStoryboardLocally(
   imageUrls: Array<string | null | undefined>,
 ): boolean {
-  return imageUrls.length > 0 && imageUrls.every(Boolean);
+  return (
+    imageUrls.length > 0 &&
+    imageUrls.every((url) => typeof url === "string" && url.trim().length > 0)
+  );
 }
 
 export function shouldUseLocalStoryboardCompose(input: {
@@ -240,14 +243,16 @@ export function getShotImageUrlFromCanvas(input: {
   const directUrl = shotNode?.data.shot?.generatedImageUrl;
   if (directUrl) return directUrl;
 
+  const generatedImageNodeId = shotNode?.data.shot?.generatedImageNodeId;
   const linkedImageNode = nodes.find(
     (node) =>
       node.type === "image" &&
       (node.data.sourceShotId === shotId ||
-        node.id === shotNode?.data.shot?.generatedImageNodeId),
+        node.data.generationOutput?.sourceShotId === shotId ||
+        node.id === generatedImageNodeId),
   );
 
-  return linkedImageNode?.data.imageUrl;
+  return linkedImageNode?.data.imageUrl || linkedImageNode?.data.generationOutput?.imageUrl;
 }
 
 export function getShotVisualPrompt(

@@ -108,7 +108,10 @@ export const ContentNode = memo(function ContentNode({ id, data, selected, width
   const storyboardRunMeta = data.runMeta
   const hasStoryboardProcessNodes = Boolean(data.generatedShotNodeIds?.length || data.generatedStoryboardGridNodeId)
   const isStoryboardProcessVisible = data.storyboardProcessVisible === true
-  const isStoryboardRunActive = storyboardRunMeta?.runStatus === "pending" || storyboardRunMeta?.runStatus === "running"
+  const hasStoryboardFinalOutput = Boolean(data.storyboardOutputImageUrl || data.storyboardOutputImageNodeId)
+  const shouldSuppressStaleStoryboardFailure = hasStoryboardFinalOutput && storyboardRunMeta?.runStatus === "failed"
+  const effectiveStoryboardRunMeta = shouldSuppressStaleStoryboardFailure ? undefined : storyboardRunMeta
+  const isStoryboardRunActive = effectiveStoryboardRunMeta?.runStatus === "pending" || effectiveStoryboardRunMeta?.runStatus === "running"
   const hasStandaloneStoryboardOutput = Boolean(data.storyboardOutputImageNodeId)
   const storyboardResultCaption =
     data.storyboardResultQuality === "fallback-shot"
@@ -129,9 +132,9 @@ export const ContentNode = memo(function ContentNode({ id, data, selected, width
         : "写作文本"
   const isStoryboardRunVisible =
     isWritingSourceNode &&
-    storyboardRunMeta?.message &&
-    storyboardRunMeta.source === "manual" &&
-    ["pending", "running", "succeeded", "failed"].includes(storyboardRunMeta.runStatus)
+    effectiveStoryboardRunMeta?.message &&
+    effectiveStoryboardRunMeta.source === "manual" &&
+    ["pending", "running", "succeeded", "failed"].includes(effectiveStoryboardRunMeta.runStatus)
   const slashCommands = useMemo(
     () => getSlashCommandsForTarget("text", slashQuery?.query ?? ""),
     [slashQuery],
@@ -641,13 +644,13 @@ export const ContentNode = memo(function ContentNode({ id, data, selected, width
           </div>
         )}
 
-        {isStoryboardRunVisible && storyboardRunMeta && (
+        {isStoryboardRunVisible && effectiveStoryboardRunMeta && (
           <div className="border-b bg-white px-4 py-3" style={{ borderColor: "rgba(15, 23, 42, 0.08)" }}>
             <div className="mb-2 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 text-xs font-medium text-slate-800">
-                {storyboardRunMeta.runStatus === "running" || storyboardRunMeta.runStatus === "pending" ? (
+                {effectiveStoryboardRunMeta.runStatus === "running" || effectiveStoryboardRunMeta.runStatus === "pending" ? (
                   <Loader2 size={13} className="animate-spin text-slate-500" />
-                ) : storyboardRunMeta.runStatus === "failed" ? (
+                ) : effectiveStoryboardRunMeta.runStatus === "failed" ? (
                   <X size={13} className="text-amber-500" />
                 ) : (
                   <Grid3X3 size={13} className="text-emerald-600" />
@@ -655,15 +658,15 @@ export const ContentNode = memo(function ContentNode({ id, data, selected, width
                 <span>一键分镜图</span>
               </div>
               <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500">
-                {STORYBOARD_RUN_STATUS_LABELS[storyboardRunMeta.runStatus]}
+                {STORYBOARD_RUN_STATUS_LABELS[effectiveStoryboardRunMeta.runStatus]}
               </span>
             </div>
-            <p className="text-[11px] leading-5 text-slate-500">{storyboardRunMeta.message}</p>
-            {typeof storyboardRunMeta.progress === "number" && storyboardRunMeta.runStatus !== "idle" && (
+            <p className="text-[11px] leading-5 text-slate-500">{effectiveStoryboardRunMeta.message}</p>
+            {typeof effectiveStoryboardRunMeta.progress === "number" && effectiveStoryboardRunMeta.runStatus !== "idle" && (
               <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
                 <div
                   className="h-full rounded-full bg-slate-900 transition-all"
-                  style={{ width: `${Math.min(100, Math.max(0, storyboardRunMeta.progress))}%` }}
+                  style={{ width: `${Math.min(100, Math.max(0, effectiveStoryboardRunMeta.progress))}%` }}
                 />
               </div>
             )}
@@ -788,7 +791,7 @@ export const ContentNode = memo(function ContentNode({ id, data, selected, width
                   backgroundColor: "#ffffff",
                   color: "#0f172a",
                 }}
-                title={editContent.trim() ? "使用生图模式：自动拆分镜头、生成镜头图片并合成分镜图" : "请先输入故事、剧本或文字分镜"}
+                title={editContent.trim() ? "使用生图模式：自动拆分镜头并生成镜头图片；单镜头直接作为最终结果，多镜头再合成分镜图" : "请先输入故事、剧本或文字分镜"}
               >
                 <Grid3X3 size={14} />
                 <span>一键生成分镜图</span>

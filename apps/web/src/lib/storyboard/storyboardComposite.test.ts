@@ -79,6 +79,13 @@ describe("storyboardComposite", () => {
       );
     });
 
+    it("returns false when a selected shot has only a blank image url", () => {
+      assert.equal(
+        shouldComposeStoryboardLocally(["blob:http://localhost/a", "   "]),
+        false,
+      );
+    });
+
     it("returns true only when every selected shot has an image", () => {
       assert.equal(
         shouldComposeStoryboardLocally([
@@ -398,6 +405,26 @@ describe("storyboardComposite", () => {
       assert.equal(
         getShotImageUrlFromCanvas({ shotId: "shot-1", nodes: [shot, linkedImage] }),
         "blob:http://localhost/linked",
+      );
+    });
+
+    it("falls back to generation output lineage when shot fields are stale", () => {
+      const shot = makeShotNode({ id: "shot-1" });
+      const linkedImage: Node<CanvasNodeData> = {
+        id: "image-1",
+        type: "image",
+        position: { x: 0, y: 0 },
+        data: {
+          generationOutput: {
+            sourceShotId: "shot-1",
+            imageUrl: "blob:http://localhost/from-generation-output",
+          },
+        },
+      };
+
+      assert.equal(
+        getShotImageUrlFromCanvas({ shotId: "shot-1", nodes: [shot, linkedImage] }),
+        "blob:http://localhost/from-generation-output",
       );
     });
   });
