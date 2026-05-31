@@ -79,6 +79,13 @@ describe("storyboardComposite", () => {
       );
     });
 
+    it("returns false when a selected shot has only a blank image url", () => {
+      assert.equal(
+        shouldComposeStoryboardLocally(["blob:http://localhost/a", "   "]),
+        false,
+      );
+    });
+
     it("returns true only when every selected shot has an image", () => {
       assert.equal(
         shouldComposeStoryboardLocally([

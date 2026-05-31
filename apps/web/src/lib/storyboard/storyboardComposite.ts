@@ -40,7 +40,10 @@ export type StoryboardCompositeLayout = {
 export function shouldComposeStoryboardLocally(
   imageUrls: Array<string | null | undefined>,
 ): boolean {
-  return imageUrls.length > 0 && imageUrls.every(Boolean);
+  return (
+    imageUrls.length > 0 &&
+    imageUrls.every((url) => typeof url === "string" && url.trim().length > 0)
+  );
 }
 
 export function shouldUseLocalStoryboardCompose(input: {

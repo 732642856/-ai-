@@ -2165,7 +2165,14 @@ function StarCanvasInner() {
       settings,
     });
 
-    if (!sourcePrompt && imageUrls.every((url) => !url)) {
+    const missingImageCount = imageUrls.filter((url) => !url?.trim()).length;
+    const shouldGenerateComposite = !shouldUseLocalCompose;
+
+    if (!sourcePrompt && missingImageCount > 0) {
+      const message =
+        missingImageCount === selectedShotNodes.length
+          ? "选中的镜头没有可用于生成的剧本文本、生图 Prompt 或镜头图片"
+          : `选中的 ${selectedShotNodes.length} 个镜头中有 ${missingImageCount} 个缺少镜头图片，也没有可用于重新生成整张分镜图的剧本文本或生图 Prompt`;
       setNodes((nds) =>
         nds.map((node) =>
           shotNodeIds.includes(node.id) && node.data.shot
@@ -2178,10 +2185,10 @@ function StarCanvasInner() {
                     status: "error" as const,
                     generationStatus: "failed" as const,
                     generationFinishedAt: Date.now(),
-                    generationErrorCode: "EMPTY_COMPOSITE_PROMPT",
+                    generationErrorCode: "EMPTY_COMPOSITE_SOURCE",
                     generationRetryable: false,
-                    errorMessage: "选中的镜头没有可用于生成的剧本文本或生图 Prompt",
-                    generationError: "选中的镜头没有可用于生成的剧本文本或生图 Prompt",
+                    errorMessage: message,
+                    generationError: message,
                   },
                 },
               }
@@ -2298,6 +2305,8 @@ function StarCanvasInner() {
             },
             strategy: settings.strategy,
             localCompose: shouldUseLocalCompose,
+            missingImageCount,
+            generatedComposite: shouldGenerateComposite,
           },
             compositeSettings: {
               ...settings,
