@@ -31,6 +31,7 @@ export type CanvasNodeKind =
   | "ai-generated-image"
   | "video-sample-frames"
   | "video-analyze"
+  | "video"
   | "agent"
 
 // ============================================================================
@@ -181,6 +182,15 @@ export type StoryboardCompositeSettings = {
 
 export type StoryboardAssistantStage = "idea" | "story" | "storyboard-text"
 
+/** 运行时元数据（不持久化，仅前端运行时使用） */
+export interface RuntimeMeta {
+  batchProgress?: string
+  retryCount?: number
+  batchPending?: boolean
+  fallbackComposite?: boolean
+  childNodeIds?: string[]
+}
+
 export type CanvasNodeData = {
   label?: ReactNode
   title?: string
@@ -226,11 +236,18 @@ export type CanvasNodeData = {
   agentOutput?: string
   agentStatus?: "idle" | "running" | "done" | "error"
   agentPhase?: string
-  _fallbackComposite?: boolean
+  runtimeMeta?: RuntimeMeta
+  /** @deprecated 迁移到 runtimeMeta.childNodeIds */
   _childNodeIds?: string[]
+  /** @deprecated 迁移到 runtimeMeta.batchProgress */
   _batchProgress?: string
+  /** @deprecated 迁移到 runtimeMeta.retryCount */
   _retryCount?: number
+  /** @deprecated 迁移到 runtimeMeta.batchPending */
   _batchPending?: boolean
+  /** @deprecated 迁移到 runtimeMeta.fallbackComposite */
+  _fallbackComposite?: boolean
+  /** @deprecated 迁移到 runtimeMeta */
   previs3d?: any
   generationJob?: any
   sourcePromptId?: string
@@ -702,5 +719,12 @@ export const nodeToneStyles: Record<CanvasNodeKind, {
     meta: "text-purple-300/60",
     border: "1px solid rgba(168, 85, 247, 0.2)",
     background: "rgba(168, 85, 247, 0.1)",
+  },
+  video: {
+    eyebrow: "text-amber-300",
+    body: "text-amber-200/75",
+    meta: "text-amber-300/60",
+    border: "1px solid rgba(245, 158, 11, 0.2)",
+    background: "rgba(245, 158, 11, 0.1)",
   },
 }

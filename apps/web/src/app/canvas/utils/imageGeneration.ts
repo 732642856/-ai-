@@ -98,6 +98,36 @@ function normalizeApiError(payload: any, status: number): ImageGenerationError {
   })
 }
 
+// ── Error message mapping ──
+
+const ERROR_MESSAGES: Record<string, string> = {
+  network: "网络连接失败，请检查网络后重试",
+  "Failed to fetch": "网络请求失败，请检查网络后重试",
+  "fetch failed": "网络请求失败，请检查网络后重试",
+  rate_limit: "请求过于频繁，请稍后重试",
+  "rate limit": "请求过于频繁，请稍后重试",
+  "content_filter": "内容不符合安全规范，请调整描述后重试",
+  "content_policy": "内容不符合安全规范，请调整描述后重试",
+  "safety": "生成被安全策略拦截，请调整描述后重试",
+  "timeout": "请求超时，图片生成耗时过长",
+  "timed out": "请求超时，图片生成耗时过长",
+  unauthorized: "API 认证失败，请检查配置",
+  "413": "图片文件过大，请压缩后重试",
+  "Payload Too Large": "图片文件过大，请压缩后重试",
+}
+
+export function friendlyErrorMessage(raw: string): string {
+  if (!raw) return "生图失败，请重试"
+  const lower = raw.toLowerCase()
+  for (const [key, msg] of Object.entries(ERROR_MESSAGES)) {
+    if (lower.includes(key)) return msg
+  }
+  // Truncate technical errors
+  if (raw.length > 80) return `生成失败: ${raw.slice(0, 60)}...`
+  if (raw.startsWith("TypeError") || raw.startsWith("Error")) return `生图失败: ${raw.slice(0, 60)}`
+  return raw
+}
+
 export async function generateImageFromPrompt(input: {
   prompt: string
   model?: string

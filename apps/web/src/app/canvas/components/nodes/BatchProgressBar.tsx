@@ -34,6 +34,12 @@ export default function BatchProgressBar({ ref }: BatchProgressBarProps) {
   const totalRef = useRef(0);
   const failedRef = useRef(0);
   const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMountedRef = useRef(true);
+
+  // Track mount state for external calls (start/tick/fail may be invoked after unmount)
+  useEffect(() => {
+    return () => { isMountedRef.current = false };
+  }, []);
 
   const show = useCallback(() => {
     const el = containerRef.current;
@@ -78,6 +84,7 @@ export default function BatchProgressBar({ ref }: BatchProgressBarProps) {
 
   React.useImperativeHandle(ref, () => ({
     start(total: number) {
+      if (!isMountedRef.current) return;
       currentRef.current = 0;
       totalRef.current = total;
       failedRef.current = 0;

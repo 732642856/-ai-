@@ -810,19 +810,39 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
         if (newNodes.length > 0) {
           const currentNodes = getNodes()
           const currentEdges = getEdges()
-          const combinedNodes = [...currentNodes, ...newNodes]
-          const combinedEdges = [...currentEdges, ...newEdges]
 
-          // Auto-layout with dagre
-          const layoutedNodes = quickLayout(combinedNodes, combinedEdges, 3)
+          // Only layout new nodes (don't reposition existing ones)
+          const layoutedNew = quickLayout(newNodes, newEdges, 3)
 
-          // Mark agent-created nodes as selected (visual highlight for batch ops)
-          const newIds = new Set(newNodes.map((n) => n.id))
-          const layoutedWithSelection = layoutedNodes.map((n) =>
-            newIds.has(n.id) ? { ...n, selected: true as const } : { ...n, selected: false as const },
+          // Find bottom edge of existing canvas content
+          const maxExistingY = currentNodes.reduce(
+            (max, n) => Math.max(max, n.position.y + (n.measured?.height ?? 200)),
+            0,
           )
-          setNodes(layoutedWithSelection)
-          setEdges(combinedEdges)
+          const existingMinX = currentNodes.reduce(
+            (min, n) => Math.min(min, n.position.x),
+            Infinity,
+          )
+          const offsetX = Number.isFinite(existingMinX) ? existingMinX : 100
+
+          // Position new nodes below existing content
+          const positioned = layoutedNew.map((n) => ({
+            ...n,
+            position: {
+              x: n.position.x + offsetX,
+              y: n.position.y + maxExistingY + 100,
+            },
+          }))
+
+          const allNodes = [...currentNodes, ...positioned]
+
+          // Mark agent-created nodes as selected
+          const newIds = new Set(newNodes.map((n) => n.id))
+          const allWithSelection = allNodes.map((n) =>
+            newIds.has(n.id) ? { ...n, selected: true as const } : n,
+          )
+          setNodes(allWithSelection)
+          setEdges([...currentEdges, ...newEdges])
 
           // Write child node IDs back to the agent node (for batch-generate button)
           const childIds = newNodes.map((nn) => nn.id)
