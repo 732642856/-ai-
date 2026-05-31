@@ -11,6 +11,7 @@ import {
   BackgroundVariant,
   ReactFlow,
   ReactFlowProvider,
+  MiniMap,
   addEdge,
   useNodesState,
   useEdgesState,
@@ -49,6 +50,8 @@ import {
   Image as ImageIcon,
   Settings2,
   Eye,
+  ArrowLeft,
+  ArrowRight,
   type LucideIcon,
 } from "lucide-react";
 
@@ -82,9 +85,11 @@ import { EmptyCanvasGuide } from "./components/canvas/EmptyCanvasGuide";
 import { CanvasDropOverlay } from "./components/canvas/CanvasDropOverlay";
 import { AssetLibraryPanel } from "./components/canvas/AssetLibraryPanel";
 import { CanvasContextMenu } from "./components/menus/CanvasContextMenu";
+import PropertyPanel from "./components/panels/PropertyPanel";
 import { NodeContextMenu } from "./components/menus/NodeContextMenu";
 import { EdgeContextMenu } from "./components/menus/EdgeContextMenu";
 import { ImageHoverToolbar } from "./components/toolbar/ImageHoverToolbar";
+import SelectionToolbar from "./components/toolbar/SelectionToolbar";
 import { LeftToolbar } from "./components/toolbar/LeftToolbar";
 import { AddNodePanel } from "./components/toolbar/AddNodePanel";
 import { ChatPanel } from "./components/chat/ChatPanel";
@@ -102,6 +107,7 @@ import ContentNode from "./components/nodes/ContentNode";
 import WorkflowNode from "./components/nodes/WorkflowNode";
 import ShotNode from "./components/nodes/ShotNode";
 import StoryboardGridNode from "./components/nodes/StoryboardGridNode";
+import VideoNode from "./components/nodes/VideoNode";
 import AgentNode from "./components/nodes/AgentNode";
 import { generateId } from "./utils/generateId";
 import { quickLayout } from "./utils/dagre-layout";
@@ -109,7 +115,7 @@ import { parseStoryboardTextToShots } from "./utils/storyboardParser";
 import BatchProgressBar, {
   type BatchProgressHandle,
 } from "./components/nodes/BatchProgressBar";
-import { generateImageFromPrompt } from "./utils/imageGeneration";
+import { generateImageFromPrompt, friendlyErrorMessage } from "./utils/imageGeneration";
 import { composeStoryboardGrid } from "./utils/storyboardGridComposer";
 import { buildVideoWorkflowTemplate } from "./utils/videoWorkflowTemplate";
 import { useWorkflowRunner } from "./hooks/useWorkflowRunner";
@@ -471,17 +477,32 @@ CreativeEdge.displayName = "CreativeEdge";
 // Set once when the component mounts via StarCanvasInner.
 let _runAgentFn: ((nodeId: string) => void) | undefined;
 let _runBatchGenerateFn: ((nodeIds: string[]) => void) | undefined;
+let _doUndo: (() => void) | undefined;
+let _doRedo: (() => void) | undefined;
 
 // ── Undo/redo stacks ──
 interface UndoEntry { nodes: Node<CanvasNodeData>[]; edges: Edge[] }
 const _undoStack: UndoEntry[] = []
 const _redoStack: UndoEntry[] = []
 const MAX_UNDO = 50
+let _undoTimer: ReturnType<typeof setTimeout> | undefined
 
 function pushUndo(entry: UndoEntry) {
+  // Debounce: coalesce rapid mutations (e.g., double-delete) within 300ms
+  if (_undoTimer) return
+  _undoTimer = setTimeout(() => { _undoTimer = undefined }, 300)
+
   _undoStack.push(entry)
   if (_undoStack.length > MAX_UNDO) _undoStack.shift()
   _redoStack.length = 0 // clear redo on new action
+}
+
+function tryUndo() {
+  _doUndo?.()
+}
+
+function tryRedo() {
+  _doRedo?.()
 }
 
 const nodeTypes = {
@@ -490,6 +511,7 @@ const nodeTypes = {
   workflow: WorkflowNode,
   shot: ShotNode,
   storyboardGrid: StoryboardGridNode,
+  video: VideoNode,
   agent: (props: any) => (
     <AgentNode {...props} onRunAgent={_runAgentFn} onBatchGenerate={_runBatchGenerateFn} />
   ),
@@ -571,6 +593,9 @@ function StarCanvasInner() {
     closePromptPreview,
   } = useCanvasStore();
 
+  const [showPropertyPanel, setShowPropertyPanel] = useState(false);
+  const [selectionCount, setSelectionCount] = useState(0);
+
   // ========================================================================
   // REACT FLOW STATE
   // ========================================================================
@@ -589,6 +614,9 @@ function StarCanvasInner() {
   useEffect(() => {
     return () => {
       revokeAllTrackedObjectUrls();
+      // Clean up module-level bridge variables to prevent stale closures
+      _runAgentFn = undefined;
+      _runBatchGenerateFn = undefined;
     };
   }, []);
 
@@ -2559,19 +2587,54 @@ function StarCanvasInner() {
   // Wire AgentNode's run button to the workflow runner
   _runAgentFn = workflowRunner.runAgentFromCanvas;
 
+  // Wire undo/redo for toolbar buttons
+  _doUndo = () => {
+    const entry = _undoStack.pop();
+    if (entry) {
+      _redoStack.push({ nodes: nodesRef.current, edges: edgesRef.current });
+      setNodes(entry.nodes);
+      setEdges(entry.edges);
+      nodesRef.current = entry.nodes;
+      edgesRef.current = entry.edges;
+    }
+  };
+  _doRedo = () => {
+    const entry = _redoStack.pop();
+    if (entry) {
+      _undoStack.push({ nodes: nodesRef.current, edges: edgesRef.current });
+      setNodes(entry.nodes);
+      setEdges(entry.edges);
+      nodesRef.current = entry.nodes;
+      edgesRef.current = entry.edges;
+    }
+  };
+
   // Batch generate: iterate agent-created nodes, generate images from prompt
   // Uses BatchProgressBar for global progress + per-node retry support
   const handleBatchGenerateShots = useCallback(
     async (nodeIds: string[]) => {
       if (!nodeIds.length) return;
 
+      // Mark agent node as generating (prevents double-click)
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.data._childNodeIds ? { ...n, data: { ...n.data, _batchProgress: "starting" } } : n,
+        ),
+      );
+
       // Start global progress bar
       batchProgressRef.current?.start(nodeIds.length);
 
-      for (const nodeId of nodeIds) {
-        const node = nodesRef.current.find((n) => n.id === nodeId);
-        const prompt = node?.data?.prompt ?? "";
-        if (!prompt.trim()) continue;
+      // Filter to only nodes with valid prompts
+      const validNodes = nodeIds
+        .map((id) => nodesRef.current.find((n) => n.id === id))
+        .filter((n): n is NonNullable<typeof n> => Boolean(n?.data?.prompt?.trim()));
+
+      async function generateSingleShot(
+        node: NonNullable<typeof validNodes[number]>,
+      ): Promise<void> {
+        const nodeId = node.id;
+        const prompt = node.data.prompt!;
 
         // Mark as running
         setNodes((nds) =>
@@ -2591,17 +2654,17 @@ function StarCanvasInner() {
           });
 
           const imageNodeId = generateId();
-          const nodeWidth = typeof node?.width === "number" ? node.width : 320;
+          const nodeWidth = typeof node.width === "number" ? node.width : 320;
 
           const imageNode: Node<CanvasNodeData> = {
             id: imageNodeId,
             type: "image",
             position: {
-              x: (node?.position.x ?? 0) + nodeWidth + 80,
-              y: node?.position.y ?? 0,
+              x: (node.position.x ?? 0) + nodeWidth + 80,
+              y: node.position.y ?? 0,
             },
             data: {
-              title: node?.data?.title ? `${node.data.title} 图` : "分镜图",
+              title: node.data.title ? `${node.data.title} 图` : "分镜图",
               imageUrl: result.imageUrl,
               assetId: result.assetId,
               nodeKind: "ai-generated-image",
@@ -2650,7 +2713,6 @@ function StarCanvasInner() {
 
           batchProgressRef.current?.tick();
         } catch (err: any) {
-          // Mark node as failed with retry metadata
           setNodes((nds) =>
             nds.map((n) =>
               n.id === nodeId
@@ -2659,7 +2721,7 @@ function StarCanvasInner() {
                     data: {
                       ...n.data,
                       generationStatus: "failed" as const,
-                      errorMessage: err?.message || "图片生成失败",
+                      errorMessage: friendlyErrorMessage(err?.message || ""),
                       _retryCount: ((n.data as any)._retryCount ?? 0) + 1,
                     },
                   }
@@ -2669,6 +2731,9 @@ function StarCanvasInner() {
           batchProgressRef.current?.fail();
         }
       }
+
+      // Run with concurrency pool (max 3 parallel)
+      await runWithConcurrency(validNodes, 3, generateSingleShot);
     },
     [setNodes, setEdges],
   );
@@ -2755,7 +2820,7 @@ function StarCanvasInner() {
                   data: {
                     ...n.data,
                     generationStatus: "failed" as const,
-                    errorMessage: err?.message || "重试失败",
+                    errorMessage: friendlyErrorMessage(err?.message || ""),
                     _retryCount: ((n.data as any)._retryCount ?? 0) + 1,
                   },
                 }
@@ -2763,6 +2828,13 @@ function StarCanvasInner() {
           ),
         );
       }
+
+      // Batch complete — re-enable the batch button
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.data._childNodeIds ? { ...n, data: { ...n.data, _batchProgress: undefined } } : n,
+        ),
+      );
     },
     [setNodes, setEdges],
   );
@@ -3078,6 +3150,8 @@ function StarCanvasInner() {
   // ========================================================================
   const onSelectionChange = useCallback(
     ({ nodes: selectedNodes }: { nodes: Node<CanvasNodeData>[] }) => {
+      setShowPropertyPanel(selectedNodes.length === 1);
+      setSelectionCount(selectedNodes.length);
       setNodes((nds) => {
         const selectedIds = new Set(selectedNodes.map((node) => node.id));
         return nds.map((node) => ({
@@ -4783,14 +4857,7 @@ function StarCanvasInner() {
       // Ctrl+Z: undo
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === "z") {
         e.preventDefault();
-        const entry = _undoStack.pop();
-        if (entry) {
-          _redoStack.push({ nodes: nodesRef.current, edges: edgesRef.current });
-          setNodes(entry.nodes);
-          setEdges(entry.edges);
-          nodesRef.current = entry.nodes;
-          edgesRef.current = entry.edges;
-        }
+        tryUndo();
       }
 
       // Ctrl+Shift+Z or Ctrl+Y: redo
@@ -4799,14 +4866,7 @@ function StarCanvasInner() {
         ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === "y")
       ) {
         e.preventDefault();
-        const entry = _redoStack.pop();
-        if (entry) {
-          _undoStack.push({ nodes: nodesRef.current, edges: edgesRef.current });
-          setNodes(entry.nodes);
-          setEdges(entry.edges);
-          nodesRef.current = entry.nodes;
-          edgesRef.current = entry.edges;
-        }
+        tryRedo();
       }
 
       if (e.key === "Escape") {
@@ -4847,12 +4907,70 @@ function StarCanvasInner() {
     return () => el.removeEventListener("contextmenu", suppress);
   }, []);
 
+  // Open property panel when a node is selected
+  const handlePropertyUpdate = useCallback(
+    (nodeId: string, patch: Partial<CanvasNodeData>) => {
+      setNodes((nds) =>
+        nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, ...patch } } : n)),
+      );
+    },
+    [setNodes],
+  );
+
   // ========================================================================
   // RENDER
   // ========================================================================
   return (
     <>
       <BatchProgressBar ref={batchProgressRef} />
+      <SelectionToolbar
+        selectedCount={selectionCount}
+        onBatchGenerate={() => {
+          const ids = nodes.filter((n) => n.selected).map((n) => n.id);
+          handleBatchGenerateShots(ids);
+        }}
+        onMergeText={() => {
+          const selected = nodes.filter((n) => n.selected);
+          const merged = selected.map((n) => n.data?.content ?? "").filter(Boolean).join("\n\n---\n\n");
+          if (merged) {
+            setSelectedNodeId(null);
+            handleAddNode("content", { x: 400, y: 400 }, "text");
+            setNodes((nds) =>
+              nds.map((n) =>
+                n.data?.content === undefined && n.type === "content"
+                  ? { ...n, data: { ...n.data, content: merged } }
+                  : n,
+              ),
+            );
+          }
+        }}
+        onAutoLayout={() => {
+          const selected = nodes.filter((n) => n.selected);
+          if (selected.length > 0) {
+            const layouted = quickLayout(selected, [], 3);
+            setNodes((nds) =>
+              nds.map((n) => {
+                const laid = layouted.find((l: any) => l.id === n.id);
+                return laid ? { ...n, position: laid.position } : n;
+              }),
+            );
+          }
+        }}
+      />
+      <style>{`
+        .react-flow__node.selected {
+          box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.5), 0 0 20px rgba(168, 85, 247, 0.2);
+          border-radius: 12px;
+        }
+        .react-flow__node.selected .nodrag {
+          border-color: rgba(168, 85, 247, 0.5) !important;
+        }
+      `}</style>
+      <PropertyPanel
+        node={showPropertyPanel ? selectedNode : null}
+        onClose={() => setShowPropertyPanel(false)}
+        onUpdateData={handlePropertyUpdate}
+      />
       <div className="relative h-screen w-screen overflow-hidden startrails-flow">
       <div className="fixed left-20 top-3 z-20 flex items-center gap-2">
         <div
@@ -5171,6 +5289,8 @@ function StarCanvasInner() {
           onEdgeContextMenu={handleEdgeContextMenu}
           onPaneClick={() => {
             setSelectedNodeId(null);
+            setShowPropertyPanel(false);
+            setSelectionCount(0);
             closeContextMenu();
             closeFloatingToolbar();
           }}
@@ -5202,6 +5322,14 @@ function StarCanvasInner() {
               color="rgba(255,255,255,0.06)"
             />
           )}
+          <MiniMap
+            nodeStrokeColor="rgba(168, 85, 247, 0.3)"
+            nodeColor="rgba(168, 85, 247, 0.1)"
+            maskColor="rgba(0,0,0,0.5)"
+            style={{ background: "rgba(18,18,24,0.85)" }}
+            pannable
+            zoomable
+          />
         </ReactFlow>
       </div>
 
@@ -5541,6 +5669,26 @@ function StarCanvasInner() {
           title="适应窗口"
         >
           <Minimize2 size={14} strokeWidth={1.5} />
+        </button>
+        <div
+          className="mx-1 h-3 w-px"
+          style={{ backgroundColor: DESIGN_TOKENS.border }}
+        />
+        <button
+          onClick={() => _doUndo?.()}
+          className="flex h-7 w-7 items-center justify-center rounded-full transition-colors hover:bg-white/10"
+          style={{ color: DESIGN_TOKENS.textMuted }}
+          title="撤销 (Ctrl+Z)"
+        >
+          <ArrowLeft size={14} strokeWidth={1.5} />
+        </button>
+        <button
+          onClick={() => _doRedo?.()}
+          className="flex h-7 w-7 items-center justify-center rounded-full transition-colors hover:bg-white/10"
+          style={{ color: DESIGN_TOKENS.textMuted }}
+          title="重做 (Ctrl+Shift+Z)"
+        >
+          <ArrowRight size={14} strokeWidth={1.5} />
         </button>
         <div
           className="mx-1 h-3 w-px"
