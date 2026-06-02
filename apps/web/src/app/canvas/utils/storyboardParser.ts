@@ -1,4 +1,5 @@
-import type { StoryboardShotData } from "../components/canvas/types"
+import type { CharacterIdentityAsset, StoryboardShotData } from "../components/canvas/types"
+import type { CinematicShot, ContinuityWarning, SceneAnalysis } from "@/types/cinematic"
 
 const FIELD_ALIASES = {
   title: ["标题", "镜头标题", "title"],
@@ -104,6 +105,34 @@ function readField(block: string, aliases: readonly string[]) {
   return ""
 }
 
+function parseDirectorMeta(notes: string): Pick<StoryboardShotData, "cinematicShot" | "sceneAnalysis" | "continuityWarnings" | "characterIdentities"> {
+  const marker = "DirectorMeta："
+  const start = notes.indexOf(marker)
+  if (start < 0) return {}
+
+  const jsonText = notes.slice(start + marker.length).trim()
+  try {
+    const parsed = JSON.parse(jsonText) as {
+      cinematicShot?: CinematicShot
+      sceneAnalysis?: SceneAnalysis
+      continuityWarnings?: ContinuityWarning[]
+      characterIdentities?: CharacterIdentityAsset[]
+    }
+    return {
+      cinematicShot: parsed.cinematicShot,
+      sceneAnalysis: parsed.sceneAnalysis,
+      continuityWarnings: Array.isArray(parsed.continuityWarnings) ? parsed.continuityWarnings : undefined,
+      characterIdentities: Array.isArray(parsed.characterIdentities) ? parsed.characterIdentities : undefined,
+    }
+  } catch {
+    return {}
+  }
+}
+
+function stripDirectorMeta(notes: string) {
+  return notes.replace(/\n?DirectorMeta：\{[\s\S]*$/u, "").trim()
+}
+
 function parseStructuredShots(text: string, sourceStoryboardNodeId?: string): StoryboardShotData[] {
   const pattern = /(?:^|\n)\s*(?:【\s*)?(?:镜头|Shot)\s*(?:第)?\s*(\d+)\s*(?:】|[：:.)、-])?/gi
   const matches = Array.from(text.matchAll(pattern))
@@ -116,6 +145,8 @@ function parseStructuredShots(text: string, sourceStoryboardNodeId?: string): St
     const order = normalizeOrder(match[1], index + 1)
     const description = readField(block, FIELD_ALIASES.description) || block.replace(match[0], "").trim().slice(0, 500)
     const visualPrompt = readField(block, FIELD_ALIASES.visualPrompt) || description
+    const rawNotes = readField(block, FIELD_ALIASES.notes)
+    const directorMeta = parseDirectorMeta(rawNotes)
 
     return {
       id: `shot-${Date.now()}-${index}`,
@@ -128,7 +159,8 @@ function parseStructuredShots(text: string, sourceStoryboardNodeId?: string): St
       visualPrompt,
       negativePrompt: readField(block, FIELD_ALIASES.negativePrompt),
       dialogue: readField(block, FIELD_ALIASES.dialogue),
-      notes: readField(block, FIELD_ALIASES.notes),
+      notes: stripDirectorMeta(rawNotes),
+      ...directorMeta,
       sourceStoryboardNodeId,
       status: "ready" as const,
     }

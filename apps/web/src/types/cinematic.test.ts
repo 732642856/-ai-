@@ -10,7 +10,6 @@
  * These are type-level tests: they validate that the type module
  * can be imported and that the constant maps are correct.
  */
-
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 

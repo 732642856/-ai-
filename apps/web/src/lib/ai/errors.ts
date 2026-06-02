@@ -85,6 +85,16 @@ export function normalizeUpstreamError(
         raw: parsed,
       }
 
+    case 504:
+    case 524:
+      return {
+        code: "upstream_timeout",
+        message: `AI 代理服务响应超时 (${upstreamStatus})。可能是上游模型生成太慢或中转站超时，请稍后重试、缩短输入，或换用更快模型。`,
+        status: upstreamStatus,
+        provider,
+        raw: parsed,
+      }
+
     default:
       if (upstreamStatus >= 400) {
         return {

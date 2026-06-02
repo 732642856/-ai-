@@ -114,7 +114,7 @@ export const ContentNode = memo(function ContentNode({ id, data, selected, width
   const hasStoryboardSeedText = editContent.trim().length > 0
   const storyboardRunMeta = data.runMeta
   const hasStoryboardProcessNodes = Boolean(data.generatedShotNodeIds?.length || data.generatedStoryboardGridNodeId)
-  const isStoryboardProcessVisible = data.storyboardProcessVisible === true
+  const isStoryboardProcessVisible = data.storyboardProcessVisible !== false
   const hasStoryboardFinalOutput = Boolean(data.storyboardOutputImageUrl || data.storyboardOutputImageNodeId)
   const shouldSuppressStaleStoryboardFailure = hasStoryboardFinalOutput && storyboardRunMeta?.runStatus === "failed"
   const effectiveStoryboardRunMeta = shouldSuppressStaleStoryboardFailure ? undefined : storyboardRunMeta
@@ -378,10 +378,16 @@ export const ContentNode = memo(function ContentNode({ id, data, selected, width
     setAiError(null)
     setIsGenerating(true)
 
+    // 按实际内容重新检测阶段，避免因上一步超时导致 stage 字段未更新的问题
+    const effectiveStage = getStoryboardAssistantStage({
+      stage: data.storyboardAssistantStage,
+      content: sourceText,
+    })
+
     try {
       await runStoryboardAssistantCommand({
         text: sourceText,
-        stage: storyboardStage,
+        stage: effectiveStage,
         nodeId: id,
         nodeWidth,
         updateNode: (next) => {
@@ -419,11 +425,14 @@ export const ContentNode = memo(function ContentNode({ id, data, selected, width
       const message = error?.message || "故事分镜执行失败"
       setSlashError(message)
       setAiError(message)
-      updateContent(currentText)
+      // 只在 AI 调用前内容没有变更时才回滚（避免超时后清空已有分镜内容）
+      if (editContent === currentText) {
+        updateContent(currentText)
+      }
     } finally {
       setIsGenerating(false)
     }
-  }, [editContent, id, nodeWidth, setNodes, storyboardStage, triggerSplitStoryboard, updateContent])
+  }, [data.storyboardAssistantStage, editContent, id, nodeWidth, setNodes, triggerSplitStoryboard, updateContent])
 
   const executeSlashCommand = useCallback(async (command: SlashCommand) => {
     const currentQuery = slashQuery
@@ -798,7 +807,7 @@ export const ContentNode = memo(function ContentNode({ id, data, selected, width
                   backgroundColor: "#ffffff",
                   color: "#0f172a",
                 }}
-                title={editContent.trim() ? "使用生图模式：自动拆分镜头并生成镜头图片；单镜头直接作为最终结果，多镜头再合成分镜图" : "请先输入故事、剧本或文字分镜"}
+                title={editContent.trim() ? "一次生成一张多格分镜图；不会逐张生成镜头图，避免浪费算力" : "请先输入故事、剧本或文字分镜"}
               >
                 <Grid3X3 size={14} />
                 <span>一键生成分镜图</span>

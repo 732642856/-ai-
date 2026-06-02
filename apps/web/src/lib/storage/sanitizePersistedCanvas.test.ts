@@ -114,7 +114,7 @@ describe("sanitizePersistedCanvas", () => {
     assert.equal(clean.generationOutput.nested.outputImageUrl, undefined);
   });
 
-  it("keeps shot image lineage metadata while removing runtime image urls", () => {
+  it("keeps shot image lineage and character identity metadata while removing runtime image urls", () => {
     const clean = sanitizePersistedNodeData({
       imageUrl: "blob:http://localhost/shot-image",
       assetId: "asset-kept",
@@ -131,6 +131,17 @@ describe("sanitizePersistedCanvas", () => {
         visualPrompt: "prompt",
         generatedImageUrl: "blob:http://localhost/generated-shot",
         generatedImageAssetId: "shot-asset-kept",
+        characterIdentities: [
+          {
+            id: "local-linxia",
+            referenceAssetId: "character-linxia-library",
+            name: "女主林夏",
+            role: "protagonist",
+            visualSignature: "global edit: exact oval face and black bob haircut",
+            costume: "global edit: same red wool coat with brass buttons",
+            props: ["silver locket", "black umbrella"],
+          },
+        ],
       },
     } as CanvasNodeData);
 
@@ -143,6 +154,10 @@ describe("sanitizePersistedCanvas", () => {
     assert.equal(clean.generatedAt, "2026-05-25T10:00:00.000Z");
     assert.equal(clean.shot?.generatedImageUrl, undefined);
     assert.equal(clean.shot?.generatedImageAssetId, "shot-asset-kept");
+    assert.equal(clean.shot?.characterIdentities?.[0]?.referenceAssetId, "character-linxia-library");
+    assert.equal(clean.shot?.characterIdentities?.[0]?.visualSignature, "global edit: exact oval face and black bob haircut");
+    assert.equal(clean.shot?.characterIdentities?.[0]?.costume, "global edit: same red wool coat with brass buttons");
+    assert.deepEqual(clean.shot?.characterIdentities?.[0]?.props, ["silver locket", "black umbrella"]);
   });
 
   it("keeps storyboard composite lineage metadata while removing runtime image urls", () => {

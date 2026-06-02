@@ -13,7 +13,14 @@ import {
   type SlashQuery,
 } from "@/lib/slashCommands/slashCommands"
 import { runSlashTextCommand } from "@/lib/slashCommands/runSlashTextCommand"
+import {
+  appendDefaultCharacterIdentity,
+  formatCharacterIdentityListInput,
+  summarizeCharacterIdentities,
+  updateCharacterIdentityField,
+} from "@/lib/storyboard/characterIdentitySummary"
 import { InlineSlashCommandMenu } from "../menus/InlineSlashCommandMenu"
+import { VoicePanel } from "./VoicePanel"
 
 interface ShotNodeProps extends NodeProps {
   data: CanvasNodeData
@@ -24,6 +31,7 @@ export const ShotNode = memo(function ShotNode({ id, data, selected, width, heig
   const [slashQuery, setSlashQuery] = useState<SlashQuery | null>(null)
   const [slashActiveIndex, setSlashActiveIndex] = useState(0)
   const [slashError, setSlashError] = useState<string | null>(null)
+  const [isEditingCharacters, setIsEditingCharacters] = useState(false)
   const shot = data.shot
   const nodeWidth = typeof width === "number" ? width : data.displayWidth || 340
   const nodeHeight = typeof height === "number" ? height : data.displayHeight || 360
@@ -33,6 +41,13 @@ export const ShotNode = memo(function ShotNode({ id, data, selected, width, heig
   const canRetry = shot?.generationRetryable !== false
   const hasVisualPrompt = Boolean(shot?.visualPrompt?.trim())
   const showPromptEditor = selected || hasVisualPrompt || Boolean(generationError)
+  const cinematicShot = shot?.cinematicShot
+  const continuityWarnings = shot?.continuityWarnings ?? []
+  const characterSummaries = useMemo(
+    () => summarizeCharacterIdentities(shot?.characterIdentities),
+    [shot?.characterIdentities],
+  )
+  const hiddenCharacterCount = Math.max((shot?.characterIdentities?.length ?? 0) - characterSummaries.length, 0)
   const slashCommands = useMemo(
     () => getSlashCommandsForTarget("shot", slashQuery?.query ?? ""),
     [slashQuery],
@@ -100,6 +115,27 @@ export const ShotNode = memo(function ShotNode({ id, data, selected, width, heig
     }
   }, [id, shot?.description, shot?.generationStatus, shot?.status, slashQuery, updateShot])
 
+  const updateCharacterIdentity = useCallback((
+    index: number,
+    field: "name" | "role" | "visualSignature" | "costume" | "props",
+    value: string,
+  ) => {
+    updateShot({
+      characterIdentities: updateCharacterIdentityField(shot?.characterIdentities, index, field, value),
+    })
+  }, [shot?.characterIdentities, updateShot])
+
+  const addCharacterIdentity = useCallback(() => {
+    updateShot({ characterIdentities: appendDefaultCharacterIdentity(shot?.characterIdentities) })
+    setIsEditingCharacters(true)
+  }, [shot?.characterIdentities, updateShot])
+
+  const removeCharacterIdentity = useCallback((index: number) => {
+    const next = [...(shot?.characterIdentities ?? [])]
+    next.splice(index, 1)
+    updateShot({ characterIdentities: next.length > 0 ? next : undefined })
+  }, [shot?.characterIdentities, updateShot])
+
   const handleDescriptionKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (!slashQuery || slashCommands.length === 0) return
 
@@ -166,6 +202,140 @@ export const ShotNode = memo(function ShotNode({ id, data, selected, width, heig
             {shot?.cameraMovement && <span className="rounded-md bg-white/5 px-1.5 py-0.5">{shot.cameraMovement}</span>}
             {shot?.duration && <span className="rounded-md bg-white/5 px-1.5 py-0.5">{shot.duration}</span>}
           </div>
+
+          {(characterSummaries.length > 0 || selected) && (
+            <section data-testid="shot-character-identities" className="space-y-2 rounded-xl border p-2" style={{ borderColor: "rgba(168, 85, 247, 0.24)", backgroundColor: "rgba(168, 85, 247, 0.07)" }}>
+              <div className="flex items-center justify-between gap-2 text-[10px]" style={{ color: DESIGN_TOKENS.textMuted }}>
+                <span>角色一致性</span>
+                <div className="flex items-center gap-2">
+                  <span>{characterSummaries.length}{hiddenCharacterCount > 0 ? ` +${hiddenCharacterCount}` : ""} 个资产</span>
+                  {selected && (
+                    <button
+                      type="button"
+                      data-testid="shot-character-edit-toggle"
+                      className="nodrag nopan rounded-md border border-purple-200/20 px-1.5 py-0.5 text-[10px] text-purple-100 transition-colors hover:bg-purple-200/10"
+                      onClick={() => setIsEditingCharacters((editing) => !editing)}
+                    >
+                      {isEditingCharacters ? "收起" : "编辑"}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {characterSummaries.length > 0 ? (
+                <div className="space-y-1.5">
+                  {characterSummaries.map((character) => (
+                    <div key={character.id} className="rounded-lg px-2 py-1.5" style={{ backgroundColor: "rgba(255,255,255,0.04)" }}>
+                      <div data-testid="shot-character-identity-name" className="text-[11px] font-medium" style={{ color: DESIGN_TOKENS.textSecondary }}>
+                        {character.headline}
+                      </div>
+                      {character.details.length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {character.details.map((detail) => (
+                            <span key={detail} className="rounded-md px-1.5 py-0.5 text-[10px]" style={{ color: "rgba(233, 213, 255, 0.82)", backgroundColor: "rgba(168, 85, 247, 0.12)" }}>
+                              {detail}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-lg px-2 py-1.5 text-[11px]" style={{ color: DESIGN_TOKENS.textMuted, backgroundColor: "rgba(255,255,255,0.04)" }}>
+                  尚未绑定角色资产。添加后会进入多格图角色一致性约束。
+                </div>
+              )}
+
+              {selected && isEditingCharacters && (
+                <div data-testid="shot-character-editor" className="space-y-2 rounded-lg border p-2" style={{ borderColor: "rgba(168, 85, 247, 0.18)", backgroundColor: "rgba(15, 23, 42, 0.35)" }}>
+                  {(shot?.characterIdentities ?? []).map((identity, index) => (
+                    <div key={identity.id || index} className="space-y-1.5 rounded-lg p-2" style={{ backgroundColor: "rgba(255,255,255,0.035)" }}>
+                      <div className="flex items-center justify-between gap-2 text-[10px]" style={{ color: DESIGN_TOKENS.textMuted }}>
+                        <span>角色 {index + 1}</span>
+                        <button
+                          type="button"
+                          className="nodrag nopan rounded-md px-1.5 py-0.5 text-[10px] text-red-200/80 transition-colors hover:bg-red-300/10"
+                          onClick={() => removeCharacterIdentity(index)}
+                        >
+                          移除
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <input
+                          data-testid="shot-character-name-input"
+                          value={identity.name || ""}
+                          onChange={(e) => updateCharacterIdentity(index, "name", e.target.value)}
+                          className="nodrag nopan rounded-lg border bg-transparent px-2 py-1 text-[11px] text-white/80 placeholder:text-white/25 focus:outline-none"
+                          style={{ borderColor: DESIGN_TOKENS.border }}
+                          placeholder="角色名"
+                        />
+                        <input
+                          value={identity.role || ""}
+                          onChange={(e) => updateCharacterIdentity(index, "role", e.target.value)}
+                          className="nodrag nopan rounded-lg border bg-transparent px-2 py-1 text-[11px] text-white/80 placeholder:text-white/25 focus:outline-none"
+                          style={{ borderColor: DESIGN_TOKENS.border }}
+                          placeholder="角色定位"
+                        />
+                      </div>
+                      <textarea
+                        value={identity.visualSignature || ""}
+                        onChange={(e) => updateCharacterIdentity(index, "visualSignature", e.target.value)}
+                        className="nodrag nopan nowheel w-full resize-none rounded-lg border bg-transparent px-2 py-1 text-[11px] leading-relaxed text-white/75 placeholder:text-white/25 focus:outline-none"
+                        style={{ borderColor: DESIGN_TOKENS.border, minHeight: 52 }}
+                        placeholder="脸型、发型、身形、标志性特征"
+                      />
+                      <input
+                        value={identity.costume || ""}
+                        onChange={(e) => updateCharacterIdentity(index, "costume", e.target.value)}
+                        className="nodrag nopan w-full rounded-lg border bg-transparent px-2 py-1 text-[11px] text-white/75 placeholder:text-white/25 focus:outline-none"
+                        style={{ borderColor: DESIGN_TOKENS.border }}
+                        placeholder="服装 / 造型"
+                      />
+                      <input
+                        value={formatCharacterIdentityListInput(identity.props)}
+                        onChange={(e) => updateCharacterIdentity(index, "props", e.target.value)}
+                        className="nodrag nopan w-full rounded-lg border bg-transparent px-2 py-1 text-[11px] text-white/75 placeholder:text-white/25 focus:outline-none"
+                        style={{ borderColor: DESIGN_TOKENS.border }}
+                        placeholder="道具，用顿号或逗号分隔"
+                      />
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    data-testid="shot-character-add"
+                    className="nodrag nopan w-full rounded-lg border border-purple-200/20 px-2 py-1 text-[11px] text-purple-100 transition-colors hover:bg-purple-200/10"
+                    onClick={addCharacterIdentity}
+                  >
+                    添加角色资产
+                  </button>
+                </div>
+              )}
+            </section>
+          )}
+
+          {cinematicShot && (
+            <section className="space-y-2 rounded-xl border p-2" style={{ borderColor: "rgba(56, 189, 248, 0.22)", backgroundColor: "rgba(14, 165, 233, 0.06)" }}>
+              <div className="flex items-center justify-between gap-2 text-[10px]" style={{ color: DESIGN_TOKENS.textMuted }}>
+                <span>导演层</span>
+                <span>{cinematicShot.emotionalState} · 权重 {cinematicShot.dramaticWeight}</span>
+              </div>
+              <div className="text-[11px] leading-5" style={{ color: DESIGN_TOKENS.textSecondary }}>
+                <div><span className="text-white/45">节拍：</span>{cinematicShot.dramaticBeat}</div>
+                <div><span className="text-white/45">动机：</span>{cinematicShot.shotPurpose}</div>
+                <div><span className="text-white/45">构图：</span>{cinematicShot.composition}</div>
+                <div><span className="text-white/45">调度：</span>{cinematicShot.blocking}</div>
+                {cinematicShot.voiceIntent && <div><span className="text-white/45">声画：</span>{cinematicShot.voiceIntent}</div>}
+              </div>
+              {continuityWarnings.length > 0 && (
+                <div className="space-y-1 rounded-lg px-2 py-1.5 text-[10px]" style={{ color: "rgba(253, 230, 138, 0.88)", backgroundColor: "rgba(245, 158, 11, 0.1)" }}>
+                  {continuityWarnings.slice(0, 2).map((warning, index) => (
+                    <div key={`${warning.type}-${index}`}>{warning.severity}：{warning.message}</div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
 
           <section className="relative space-y-1 rounded-xl border p-2" style={{ borderColor: DESIGN_TOKENS.border, backgroundColor: "rgba(255,255,255,0.02)" }}>
             <div className="flex items-center justify-between text-[10px]" style={{ color: DESIGN_TOKENS.textMuted }}>
@@ -278,6 +448,18 @@ export const ShotNode = memo(function ShotNode({ id, data, selected, width, heig
               </div>
             )}
           </section>
+
+          {/* AI 配音面板 */}
+          <VoicePanel
+            nodeId={id}
+            shot={shot}
+            dialogue={shot?.dialogue}
+            voiceConfig={shot?.voiceConfig}
+            voiceAudioUrl={shot?.voiceAudioUrl}
+            voiceGenerationStatus={shot?.voiceGenerationStatus}
+            voiceGenerationError={shot?.voiceGenerationError}
+            onUpdateShot={updateShot}
+          />
         </div>
 
         <div className="shrink-0 flex items-center justify-end border-t px-3 py-2" style={{ borderColor: DESIGN_TOKENS.border }}>

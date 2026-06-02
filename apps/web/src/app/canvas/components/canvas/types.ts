@@ -3,6 +3,7 @@
 // ============================================================================
 import type { Node, Edge } from '@xyflow/react'
 import type { ReactNode } from 'react'
+import type { CinematicShot, ContinuityWarning, SceneAnalysis } from '@/types/cinematic'
 
 // ============================================================================
 // Node Types
@@ -17,6 +18,42 @@ export type VideoWorkflowNodeKind =
   | "composition"
   | "video-result"
 export type StoryboardResultQuality = "composed-grid" | "single-shot" | "fallback-shot"
+
+export type BatchGenerationJobStatus =
+  | "queued"
+  | "preparing"
+  | "generating"
+  | "completed"
+  | "failed"
+
+export type BatchGenerationShotStatus =
+  | "queued"
+  | "generating"
+  | "completed"
+  | "failed"
+
+export type BatchGenerationJob = {
+  id: string
+  sourceNodeId: string
+  targetShotIds: string[]
+  status: BatchGenerationJobStatus
+  total: number
+  completed: number
+  failed: number
+  progress: number
+  activeShotId?: string
+  message?: string
+  shots: Record<string, {
+    shotNodeId: string
+    title?: string
+    status: BatchGenerationShotStatus
+    imageNodeId?: string
+    error?: string
+  }>
+  startedAt: number
+  updatedAt: number
+  finishedAt?: number
+}
 
 export type CanvasNodeKind =
   | AgentNodeType
@@ -122,6 +159,42 @@ export interface NodeRunMeta {
 // @deprecated 旧五态模型，保留仅用于兼容读取，新代码请使用 NodeRunStatus
 export type WorkflowNodeStatus = "draft" | "ready" | "running" | "done" | "error"
 
+/** AI 配音配置 */
+export type VoiceConfig = {
+  mode: "design" | "clone" | "auto"
+  text: string
+  /** 语音设计模式：属性描述（如 "female, young adult, low pitch, american accent"） */
+  instruct?: string
+  /** 克隆模式：参考音频存储 ID */
+  refAudioId?: string
+  /** 克隆模式：参考音频转写文本 */
+  refText?: string
+  /** 语速倍率（默认 1.0） */
+  speed?: number
+  /** 推理步数（默认 32，16 可加速） */
+  numStep?: number
+}
+
+/** AI 配音状态 */
+export type VoiceGenerationStatus = "idle" | "generating" | "succeeded" | "failed"
+
+export type CharacterIdentityAsset = {
+  id: string
+  name: string
+  aliases?: string[]
+  role?: string
+  /** Stable actor-like identity: face, age range, build, hairstyle, silhouette, distinctive marks */
+  visualSignature?: string
+  /** Costume or wardrobe that must stay recognizable across panels */
+  costume?: string
+  /** Identifying props that should persist when the character appears */
+  props?: string[]
+  physicalTraits?: string[]
+  colorPalette?: string[]
+  referenceAssetId?: string
+  notes?: string
+}
+
 export type StoryboardShotData = {
   id: string
   order: number
@@ -134,6 +207,12 @@ export type StoryboardShotData = {
   negativePrompt?: string
   dialogue?: string
   notes?: string
+  /** 角色一致性资产：用于跨镜头保持同一角色的脸、发型、服装、道具和轮廓稳定 */
+  characterIdentities?: CharacterIdentityAsset[]
+  /** 专业分镜导演层输出：保留镜头动机、构图、调度、连续性等成熟镜头语言信息 */
+  cinematicShot?: CinematicShot
+  sceneAnalysis?: SceneAnalysis
+  continuityWarnings?: ContinuityWarning[]
   sourceStoryboardNodeId?: string
   generatedImageNodeId?: string
   generatedImageUrl?: string
@@ -149,6 +228,13 @@ export type StoryboardShotData = {
   lastGeneratedAt?: string
   status?: "draft" | "ready" | "generating" | "done" | "error"
   errorMessage?: string
+
+  // --- AI 配音 ---
+  voiceConfig?: VoiceConfig
+  voiceAudioUrl?: string
+  voiceAudioAssetId?: string
+  voiceGenerationStatus?: VoiceGenerationStatus
+  voiceGenerationError?: string
 }
 
 export type StoryboardGridData = {
@@ -271,6 +357,7 @@ export type CanvasNodeData = {
   storyboardOutputImageNodeId?: string
   storyboardOutputImageUrl?: string
   storyboardOutputAssetId?: string
+  storyboardBatchJob?: BatchGenerationJob
   storyboardResultQuality?: StoryboardResultQuality
   storyboardWarning?: string
   storyboardError?: string

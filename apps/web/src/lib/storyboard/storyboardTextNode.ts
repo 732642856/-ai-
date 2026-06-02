@@ -37,17 +37,19 @@ export function getStoryboardAssistantStage(input: {
   stage?: string;
   content?: string;
 }): StoryboardAssistantStage {
+  // 内容优先：当内容明确符合分镜格式时，无论 stage 字段是什么都返回 storyboard-text。
+  // 这样可以正确处理"生成文字分镜"步骤因超时未能更新 stage 字段的情况。
+  const text = input.content?.trim() ?? "";
+  if (/镜头\s*\d+[：:]/.test(text) && /画面描述|生图提示词|生图 Prompt/i.test(text)) {
+    return "storyboard-text";
+  }
+
   if (
     input.stage === "idea" ||
     input.stage === "story" ||
     input.stage === "storyboard-text"
   ) {
     return input.stage;
-  }
-
-  const text = input.content?.trim() ?? "";
-  if (/镜头\s*\d+[：:]/.test(text) && /画面描述|生图提示词|生图 Prompt/i.test(text)) {
-    return "storyboard-text";
   }
 
   return "idea";
@@ -103,16 +105,27 @@ export function buildFullStoryPrompt(seedText: string): string {
 
 export function buildStoryToStoryboardPrompt(storyText: string): string {
   const sourceText = storyText.trim();
+  const compactSourceText = sourceText.length > 2400
+    ? `${sourceText.slice(0, 1400)}\n\n……\n\n${sourceText.slice(-800)}`
+    : sourceText;
   return [
-    "请根据以下完整故事，生成一份已经拆分好的文字分镜。",
+    "请根据以下完整故事，生成一份已经拆分好的文字分镜，并让它具有成熟镜头语言。",
     "要求：",
-    "1. 输出 6-12 个镜头，覆盖故事主要情节，不要只改写开头。",
-    "2. 严格使用以下格式，方便后续解析成 Shot 节点：",
+    "1. 输出 6-9 个关键镜头；兼容旧流程时至少满足 4-6 个关键镜头，覆盖故事的开端、发展、转折、高潮和结尾，不要只改写开头。",
+    "2. 每个镜头必须有明确的戏剧功能，不能为了凑数；镜头变化要服务人物关系、情绪推进和信息释放。",
+    "3. 镜头语言必须成熟：场景开头优先用远景/全景建立空间；情绪推进时有远景→中景→近景/特写的节奏；冲突和恐惧可使用推近、手持、遮挡；亲密场景使用近景、平视和视线匹配。",
+    "4. 避免连续多个镜头使用相同景别；对话/反打要注意轴线和视线方向；必要时用空镜、插入镜头或反应镜头控制节奏。",
+    "5. 严格使用以下格式，方便后续解析成 Shot 节点：",
     "镜头 1：一句简短标题",
-    "画面描述：写清画面、人物动作、情绪、环境和镜头调度。",
-    "生图提示词：写成适合文生图的中文提示词，包含景别、构图、光线、风格。",
-    "3. 每个镜头之间空一行。",
-    "4. 不要输出解释、前言或 Markdown 代码块。",
-    sourceText || "请基于一个完整故事生成文字分镜。",
+    "景别：远景/全景/中景/近景/特写/过肩/插入镜头",
+    "镜头运动：固定/推入/拉出/摇/移/跟拍/手持/升降",
+    "时长：预估秒数",
+    "画面描述：不超过 120 字，写清画面、人物动作、情绪、环境、调度和镜头动机。",
+    "对白：如无对白可写无",
+    "生图提示词：英文 prompt，不超过 120 字，包含景别、构图、光线、角色动作、氛围和风格。",
+    "备注：写明这个镜头的剧情节拍、潜台词、声画关系或连续性注意事项。",
+    "6. 每个镜头之间空一行。",
+    "7. 不要输出解释、前言或 Markdown 代码块。",
+    compactSourceText || "请基于一个完整故事生成专业文字分镜。",
   ].join("\n\n");
 }

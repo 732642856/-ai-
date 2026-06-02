@@ -1,3 +1,4 @@
+import { callAiChat } from "../ai/client.ts";
 import {
   buildSlashCommandPrompt,
   type SlashCommandId,
@@ -8,34 +9,27 @@ export async function runSlashTextCommand(input: {
   nodeText: string;
   model?: string;
 }): Promise<string> {
+  const nodeText = input.nodeText.trim();
+  if (!nodeText) throw new Error("请先输入内容后再执行 AI 命令");
+
   const prompt = buildSlashCommandPrompt({
     commandId: input.commandId,
-    nodeText: input.nodeText,
+    nodeText,
   });
 
-  const response = await fetch("/api/ai/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: input.model || "gpt-5.5",
-      temperature: 0.6,
-      messages: [
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-    }),
+  const data = await callAiChat({
+    model: input.model || "gpt-5.5",
+    temperature: 0.6,
+    timeoutMs: 60000,
+    messages: [
+      {
+        role: "user",
+        content: prompt,
+      },
+    ],
   });
 
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const message =
-      data?.error?.message || data?.error || `Slash command failed: ${response.status}`;
-    throw new Error(message);
-  }
-
-  const content = typeof data.content === "string" ? data.content.trim() : "";
+  const content = data.content.trim();
   if (!content) throw new Error("Slash command returned empty content");
   return content;
 }

@@ -8,7 +8,12 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "NODE_OPTIONS='' node --test --experimental-strip-types 'src/**/*.test.ts'"
+    "test": "NODE_OPTIONS='' node --test --experimental-strip-types 'src/**/*.test.ts'",
+    "test:e2e": "pnpm dlx @playwright/test@1.58.0 test --config=playwright.config.ts",
+    "test:e2e:storyboard": "pnpm dlx @playwright/test@1.58.0 test --config=playwright.config.ts e2e/storyboard-direct-only.spec.ts",
+    "test:vitest": "vitest run",
+    "test:vitest:watch": "vitest",
+    "test:all": "npm run test && npm run test:vitest"
   },
   "dependencies": {
     "@creative-canvas/canvas": "workspace:*",

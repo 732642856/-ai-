@@ -21,9 +21,11 @@ import {
   type Node,
   type ReactFlowInstance,
   type Viewport,
+  type XYPosition,
   type EdgeProps,
   type EdgeMouseHandler,
 } from "@xyflow/react";
+import { useReactFlow } from "@xyflow/react";
 import {
   memo,
   type ChangeEvent,
@@ -68,6 +70,9 @@ import type {
   CanvasNodeKind,
   AssetItem,
   StoryboardResultQuality,
+  BatchGenerationJob,
+  BatchGenerationJobStatus,
+  BatchGenerationShotStatus,
 } from "./components/canvas/types";
 
 // ============================================================================
@@ -84,6 +89,8 @@ import type { ChatAttachment } from "./hooks/useChatAttachments";
 import { EmptyCanvasGuide } from "./components/canvas/EmptyCanvasGuide";
 import { CanvasDropOverlay } from "./components/canvas/CanvasDropOverlay";
 import { AssetLibraryPanel } from "./components/canvas/AssetLibraryPanel";
+import { CharacterAssetLibraryPanel } from "./components/canvas/CharacterAssetLibraryPanel";
+import { StoryboardBatchProgressOverlay } from "./components/canvas/StoryboardBatchProgressOverlay";
 import { CanvasContextMenu } from "./components/menus/CanvasContextMenu";
 import PropertyPanel from "./components/panels/PropertyPanel";
 import { NodeContextMenu } from "./components/menus/NodeContextMenu";
@@ -170,6 +177,12 @@ import {
   type StoryboardCompositeLayout,
   type StoryboardCompositeSettings,
 } from "@/lib/storyboard/storyboardComposite";
+import {
+  applyCharacterAssetLibraryPatchToShots,
+  collectCharacterAssetLibraryItemsFromShots,
+  type CharacterAssetLibraryPatch,
+} from "@/lib/storyboard/characterAssetLibrary";
+import { buildStoryboardImagePrompt } from "@/lib/storyboard/storyboardImagePrompt";
 import type {
   ChatCanvasAction,
   ApplyActionsReport,
@@ -223,6 +236,7 @@ const SHOT_GENERATION_WATCHDOG_TIMEOUT_MS = 90_000;
 const SHOT_GENERATION_WATCHDOG_INTERVAL_MS = 10_000;
 const SHOT_GENERATION_BATCH_CONCURRENCY = 1;
 const STORYBOARD_FINAL_OUTPUT_OFFSET_X = 420;
+const STORYBOARD_FINAL_OUTPUT_VIEW_PADDING = 80;
 const STORYBOARD_PROCESS_NODE_OFFSET_X = 860;
 const STORYBOARD_PROCESS_IMAGE_OFFSET_X = STORYBOARD_PROCESS_NODE_OFFSET_X + STORYBOARD_SHOT_LAYOUT.shotWidth + 72;
 const STORYBOARD_PROCESS_GRID_OFFSET_X = STORYBOARD_PROCESS_IMAGE_OFFSET_X + 400;
@@ -254,6 +268,18 @@ function getStoryboardFinalOutputPosition(sourceNode?: Node<CanvasNodeData>) {
     : { x: 0, y: 0 };
 }
 
+function getViewportForNodePosition(
+  position: XYPosition,
+  currentViewport: Viewport,
+  padding = STORYBOARD_FINAL_OUTPUT_VIEW_PADDING,
+) {
+  return {
+    x: -(position.x - padding) * currentViewport.zoom,
+    y: -(position.y - padding) * currentViewport.zoom,
+    zoom: currentViewport.zoom,
+  };
+}
+
 function isStoryboardProcessNode(node: Node<CanvasNodeData>, sourceNodeId: string) {
   const data = node.data;
   return Boolean(
@@ -281,16 +307,9 @@ function getVisibleCanvasNodes(nodes: Node<CanvasNodeData>[]) {
 }
 
 function shouldRecoverHiddenCanvasNode(node: Node<CanvasNodeData>) {
-  const data = node.data;
-  const isStoryboardProcess =
-    data.role === "storyboard-process" ||
-    data.role === "shot-image" ||
-    data.isStoryboardProcessNode === true ||
-    data.hiddenByStoryboardProcessMode === true ||
-    node.type === "shot" ||
-    node.type === "storyboardGrid";
-
-  return !isStoryboardProcess;
+  // 所有 hidden 节点都应该可以被恢复
+  // 之前排除 Storyboard process 节点会导致画布全空时无法恢复
+  return true;
 }
 
 function applyFallbackCanvasLayout(nodes: Node<CanvasNodeData>[]) {
@@ -548,6 +567,8 @@ function StarCanvasInner() {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [reactFlowInstance, setReactFlowInstance] =
     useState<ReactFlowInstance | null>(null);
+  // ★ nodesRef.current 是同步更新的节点快照，_rfGetNodes() 读取 ReactFlow 内部异步状态可能拿到旧值
+  // 所有读节点操作统一用 nodesRef.current，不再使用 useReactFlow 的 getNodes/getEdges
   const fileInputRef = useRef<HTMLInputElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
   const pendingDocumentUploadPositionRef = useRef<{ x: number; y: number } | null>(null);
@@ -623,8 +644,13 @@ function StarCanvasInner() {
   useEffect(() => {
     const timer = window.setInterval(() => {
       const now = Date.now();
-      setNodes((nds) =>
-        nds.map((node) => {
+      setNodes((nds) => {
+        const hasGenerating = nds.some(
+          (n) => n.data.shot?.generationStatus === "generating",
+        );
+        if (!hasGenerating) return nds;
+
+        return nds.map((node) => {
           const shot = node.data.shot;
           if (!shot || shot.generationStatus !== "generating") return node;
 
@@ -662,8 +688,8 @@ function StarCanvasInner() {
               },
             },
           };
-        }),
-      );
+        });
+      });
     }, SHOT_GENERATION_WATCHDOG_INTERVAL_MS);
 
     return () => window.clearInterval(timer);
@@ -681,6 +707,7 @@ function StarCanvasInner() {
   const [showSettings, setShowSettings] = useState(false);
   const [showAddNodePanel, setShowAddNodePanel] = useState(false);
   const [showNodeHistory, setShowNodeHistory] = useState(false);
+  const [showCharacterLibrary, setShowCharacterLibrary] = useState(false);
   const [historyNodeId, setHistoryNodeId] = useState<string | null>(null);
   const [isComposingSelectedShots, setIsComposingSelectedShots] = useState(false);
   const [showStoryboardCompositeSettings, setShowStoryboardCompositeSettings] =
@@ -689,6 +716,12 @@ function StarCanvasInner() {
     useState<StoryboardCompositeSettings>(DEFAULT_STORYBOARD_COMPOSITE_SETTINGS);
   const [draftStoryboardCompositeSettings, setDraftStoryboardCompositeSettings] =
     useState<StoryboardCompositeSettings>(DEFAULT_STORYBOARD_COMPOSITE_SETTINGS);
+  const [storyboardBatchJob, setStoryboardBatchJob] =
+    useState<BatchGenerationJob | null>(null);
+
+  const handleDismissStoryboardBatchJob = useCallback(() => {
+    setStoryboardBatchJob(null);
+  }, []);
 
   // SourceTracePanel state
   const [showSourceTrace, setShowSourceTrace] = useState(false);
@@ -710,6 +743,42 @@ function StarCanvasInner() {
     },
     [appendWorkspaceHistory],
   );
+
+  const characterLibraryItems = useMemo(
+    () => collectCharacterAssetLibraryItemsFromShots(
+      nodes.map((node) => node.data.shot).filter((shot): shot is NonNullable<CanvasNodeData["shot"]> => Boolean(shot)),
+    ),
+    [nodes],
+  );
+
+  const handleApplyCharacterAssetPatch = useCallback((assetKey: string, patch: CharacterAssetLibraryPatch) => {
+    pushUndo({ nodes: nodesRef.current, edges: edgesRef.current });
+    setNodes((nds) => {
+      const shotNodeIndexes: number[] = [];
+      const shots = nds.flatMap((node, index) => {
+        if (!node.data.shot) return [];
+        shotNodeIndexes.push(index);
+        return [node.data.shot];
+      });
+      const syncedShots = applyCharacterAssetLibraryPatchToShots(shots, assetKey, patch);
+      let shotIndex = 0;
+      const updated = nds.map((node, index) => {
+        if (!shotNodeIndexes.includes(index)) return node;
+        const nextShot = syncedShots[shotIndex];
+        shotIndex += 1;
+        if (!nextShot || nextShot === node.data.shot) return node;
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            shot: nextShot,
+          },
+        };
+      });
+      nodesRef.current = updated;
+      return updated;
+    });
+  }, [setNodes]);
 
   const createDocumentDerivedNode = useCallback(
     (nodeId: string, target: "inspiration" | "storyboard") => {
@@ -923,8 +992,34 @@ function StarCanvasInner() {
       createGrid = true,
       options: { processVisible?: boolean } = {},
     ): { shotNodeIds: string[]; gridNodeId?: string } => {
-      const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
+      // ★ 用 nodesRef.current 替代 _rfGetNodes()：setNodes 异步，ref 同步
+      const currentNodes = nodesRef.current as Node<CanvasNodeData>[];
+      const sourceNode = currentNodes.find((node) => node.id === nodeId);
       if (!sourceNode) return { shotNodeIds: [] };
+
+      // 去重：清理所有关联此源节点的旧 Shot/Grid 节点
+      // 不仅按 generatedShotNodeIds 匹配，也按 sourceStoryboardNodeId 匹配
+      // 解决 persisted state 中 generatedShotNodeIds 丢失导致旧节点残留的问题
+      const explicitIds = new Set<string>([
+        ...(sourceNode.data.generatedShotNodeIds ?? []),
+        ...(sourceNode.data.generatedStoryboardGridNodeId ? [sourceNode.data.generatedStoryboardGridNodeId] : []),
+      ]);
+      const idsToRemove = new Set<string>([
+        ...explicitIds,
+        // 扫描 currentNodes（ReactFlow 内部状态），找出引用此源节点的孤儿 Shot/Grid 节点
+        ...currentNodes
+          .filter((n) => {
+            const d = n.data;
+            return n.type === "shot" || n.type === "storyboardGrid" || d?.role === "storyboard-process" || d?.isStoryboardProcessNode;
+          })
+          .filter((n) => {
+            const d = n.data;
+            return d?.sourceStoryboardNodeId === nodeId ||
+                   d?.shot?.sourceStoryboardNodeId === nodeId ||
+                   d?.storyboardGrid?.sourceStoryboardNodeId === nodeId;
+          })
+          .map((n) => n.id),
+      ]);
 
       const sourceTextParts = [
         sourceNode.data.content,
@@ -968,7 +1063,7 @@ function StarCanvasInner() {
         return { shotNodeIds: [] };
       }
 
-      const processVisible = options.processVisible ?? sourceNode.data.storyboardProcessVisible === true;
+      const processVisible = options.processVisible !== false;
       const shotNodes: Node<CanvasNodeData>[] = shots.map((shot, index) => {
         const normalizedTitle = createNormalizedShotTitle(shot);
         const normalizedShot: typeof shot = {
@@ -1051,40 +1146,42 @@ function StarCanvasInner() {
           }
         : null;
 
-      const visibleProcessNodeIds = new Set([
-        ...shotNodes.map((node) => node.id),
-        ...(gridNode ? [gridNode.id] : []),
-      ]);
-      const nextNodes = [
-        ...nodesRef.current.map((node) =>
-          node.id === nodeId
-            ? {
-                ...node,
-                data: {
-                  ...node.data,
-                  title: node.data.title || "分镜剧本 Source",
-                  nodeKind: node.data.nodeKind || "text",
-                  errorMessage: undefined,
-                  generatedShotNodeIds: shotNodes.map((shotNode) => shotNode.id),
-                  generatedStoryboardGridNodeId: gridNode?.id,
-                  storyboardProcessVisible: processVisible,
-                },
-              }
-            : visibleProcessNodeIds.has(node.id)
-              ? { ...node, hidden: !processVisible }
+      // Flowise 模式：用函数式更新器，保证状态一致性
+      const newShotIds = shotNodes.map((shotNode) => shotNode.id);
+      const newGridId = gridNode?.id;
+
+      // 更新源节点数据 + 插入新节点
+      setNodes((nds) => {
+        const existing = nds.filter((n) => !idsToRemove.has(n.id));
+        return [
+          ...existing.map((node) =>
+            node.id === nodeId
+              ? {
+                  ...node,
+                  hidden: node.hidden === true ? false : node.hidden,
+                  data: {
+                    ...node.data,
+                    title: node.data.title || "分镜剧本 Source",
+                    nodeKind: node.data.nodeKind || "text",
+                    errorMessage: undefined,
+                    generatedShotNodeIds: newShotIds,
+                    generatedStoryboardGridNodeId: newGridId,
+                    storyboardProcessVisible: processVisible,
+                  },
+                }
               : node,
-        ),
-        ...shotNodes,
-        ...(gridNode ? [gridNode] : []),
-      ];
+          ),
+          ...shotNodes,
+          ...(gridNode ? [gridNode] : []),
+        ];
+      });
+
       const storyboardEdges = shotNodes.map((shotNode) => ({
         ...createStoryboardSourceEdge(nodeId, shotNode.id),
-        hidden: !processVisible,
         style: { stroke: DESIGN_TOKENS.nodeEdge, strokeWidth: 1.5 },
       }));
       const gridEdges = gridNode
         ? shotNodes.slice(0, 9).map((shotNode) => ({
-            hidden: !processVisible,
             id: `edge-${shotNode.id}-${gridNode.id}`,
             source: shotNode.id,
             target: gridNode.id,
@@ -1093,11 +1190,59 @@ function StarCanvasInner() {
             style: { stroke: DESIGN_TOKENS.nodeEdge, strokeWidth: 1.5 },
           }))
         : [];
-      const nextEdges = [...edgesRef.current, ...storyboardEdges, ...gridEdges];
-      nodesRef.current = nextNodes;
-      edgesRef.current = nextEdges;
-      setNodes(nextNodes);
-      setEdges(nextEdges);
+
+      setEdges((eds) => {
+        const existing = eds.filter(
+          (e) => !idsToRemove.has(e.source) && !idsToRemove.has(e.target),
+        );
+        return [...existing, ...storyboardEdges, ...gridEdges];
+      });
+
+      // 同步 ref（保持向后兼容）
+      // ★ 重要：必须同步 setNodes 中对源节点的修改（storyboardProcessVisible 等），
+      // 否则后续代码用 nodesRef.current 读取时拿不到这些字段
+      const sourceNodeUpdate = {
+        hidden: false,
+        data: {
+          ...sourceNode.data,
+          title: sourceNode.data.title || "分镜剧本 Source",
+          nodeKind: sourceNode.data.nodeKind || "text",
+          errorMessage: undefined,
+          generatedShotNodeIds: newShotIds,
+          generatedStoryboardGridNodeId: newGridId,
+          storyboardProcessVisible: processVisible,
+        },
+      };
+      nodesRef.current = nodesRef.current
+        .filter((n) => !idsToRemove.has(n.id))
+        .map((n) => n.id === nodeId ? { ...n, ...sourceNodeUpdate } : n)
+        .concat(shotNodes)
+        .concat(gridNode ? [gridNode] : []);
+      edgesRef.current = edgesRef.current
+        .filter((e) => !idsToRemove.has(e.source) && !idsToRemove.has(e.target))
+        .concat(storyboardEdges)
+        .concat(gridEdges);
+
+      // 轻量平移：向右露出 Shot 节点，但确保源节点不推出屏幕
+      if (shotNodes.length > 0 && reactFlowInstance) {
+        const sourceX = sourceNode.position.x;
+        const firstShotX = shotNodes[0].position.x;
+        const currentViewport = reactFlowInstance.getViewport();
+        const viewportWidth = window.innerWidth / currentViewport.zoom;
+        const viewportRight = -currentViewport.x / currentViewport.zoom + viewportWidth;
+
+        if (firstShotX > viewportRight - 100) {
+          // 目标视口：Shot 节点在左侧 200px 处，但源节点至少离左侧 50px
+          const targetX = -(firstShotX - 200);
+          const minX = -(sourceX - 50);
+          const clampedX = Math.max(targetX, minX);
+          reactFlowInstance.setViewport(
+            { x: clampedX, y: currentViewport.y, zoom: currentViewport.zoom },
+            { duration: 400 },
+          );
+        }
+      }
+
       addWorkspaceHistoryEvent({
         id: generateId(),
         type: "shots-split",
@@ -1112,24 +1257,25 @@ function StarCanvasInner() {
         gridNodeId: gridNode?.id,
       };
     },
-    [setNodes, setEdges, addWorkspaceHistoryEvent],
+    [setNodes, setEdges, addWorkspaceHistoryEvent, reactFlowInstance],
   );
 
   const handleGenerateShotImage = useCallback(
-    async (nodeId: string): Promise<boolean> => {
-      const shotNode = nodesRef.current.find((node) => node.id === nodeId);
+    async (nodeId: string, options?: { processVisibleOverride?: boolean }): Promise<boolean> => {
+      const currentNodes = nodesRef.current as Node<CanvasNodeData>[];
+      const shotNode = currentNodes.find((node) => node.id === nodeId);
       const shot = shotNode?.data.shot;
       if (!shotNode || !shot) return false;
 
       const prompt = (shot.visualPrompt || shot.description || "").trim();
       const sourceStoryboardNode = shot.sourceStoryboardNodeId
-        ? nodesRef.current.find((node) => node.id === shot.sourceStoryboardNodeId)
+        ? currentNodes.find((node) => node.id === shot.sourceStoryboardNodeId)
         : undefined;
       const startedAt = Date.now();
       if (!prompt) {
         const message = "请先填写生图 Prompt 或镜头描述";
-        setNodes((nds) =>
-          nds.map((node) =>
+        setNodes((nds) => {
+          const updated = nds.map((node) =>
             node.id === nodeId && node.data.shot
               ? {
                   ...node,
@@ -1149,8 +1295,10 @@ function StarCanvasInner() {
                   },
                 }
               : node,
-          ),
-        );
+          );
+          nodesRef.current = updated;
+          return updated;
+        });
         return false;
       }
 
@@ -1216,18 +1364,21 @@ function StarCanvasInner() {
           status: "succeeded" as const,
           completedAt: generatedAt,
         };
-        const latestShotNode = nodesRef.current.find((node) => node.id === nodeId) ?? shotNode;
+        const latestNodesForShot = nodesRef.current as Node<CanvasNodeData>[];
+        const latestShotNode = latestNodesForShot.find((node) => node.id === nodeId) ?? shotNode;
         const latestShot = latestShotNode.data.shot ?? shot;
         const latestSourceStoryboardNode = latestShot.sourceStoryboardNodeId
-          ? nodesRef.current.find((node) => node.id === latestShot.sourceStoryboardNodeId)
+          ? latestNodesForShot.find((node) => node.id === latestShot.sourceStoryboardNodeId)
           : sourceStoryboardNode;
         const sourceStoryboardNodeId = latestSourceStoryboardNode?.id ?? latestShot.sourceStoryboardNodeId;
-        const latestProcessVisible = latestSourceStoryboardNode?.data.storyboardProcessVisible === true;
+        const latestProcessVisible = options?.processVisibleOverride !== undefined
+          ? options.processVisibleOverride
+          : latestSourceStoryboardNode?.data.storyboardProcessVisible !== false;
         const shotOrderIndex = Math.max(0, (latestShot.order ?? 1) - 1);
         const imageNodeId = latestShot.generatedImageNodeId || generateId();
         const { imageNode, edge } = createShotImageNode({
           shotNode: latestShotNode,
-          existingNodes: nodesRef.current,
+          existingNodes: nodesRef.current as Node<CanvasNodeData>[],
           existingEdges: edgesRef.current,
           generationResult: {
             imageUrl: result.imageUrl,
@@ -1422,7 +1573,9 @@ function StarCanvasInner() {
       message: string;
       relatedProcessNodeIds?: string[];
     }) => {
-      const sourceNode = nodesRef.current.find((node) => node.id === params.sourceNodeId);
+      // ★ 用 nodesRef.current 替代 _rfGetNodes()
+      const currentNodes = nodesRef.current as Node<CanvasNodeData>[];
+      const sourceNode = currentNodes.find((node) => node.id === params.sourceNodeId);
       const finalImageNodeId = params.imageNodeId || params.shotImageNodeId || generateId();
       const outputPosition = getStoryboardFinalOutputPosition(sourceNode);
       let nextNodes: Node<CanvasNodeData>[] = [];
@@ -1444,7 +1597,8 @@ function StarCanvasInner() {
                 storyboardWarning: params.warning,
                 storyboardError: undefined,
                 storyboardErrorPhase: undefined,
-                storyboardProcessVisible: false,
+                // 不再强制 storyboardProcessVisible: false
+                // 保留当前可见性，避免第二次一键生图时所有过程节点被隐藏
               },
             };
           }
@@ -1509,18 +1663,43 @@ function StarCanvasInner() {
           ];
         }
 
-        const visibility = applyStoryboardProcessVisibility({
-          nodes: nextNodes,
-          edges: edgesRef.current,
-          sourceNodeId: params.sourceNodeId,
-          showProcess: false,
+        // 不再强制 applyStoryboardProcessVisibility({ showProcess: false })
+        // 最终图片生成后，保留过程节点当前可见性（用户可通过"隐藏过程"按钮手动隐藏）
+        // 只确保最终图片节点和源→最终图的边是可见的
+        nextNodes = nextNodes.map((node) => {
+          if (node.id === finalImageNodeId || node.id === params.shotImageNodeId) {
+            return { ...node, hidden: false };
+          }
+          // 源节点保持可见
+          if (node.id === params.sourceNodeId) {
+            return { ...node, hidden: node.hidden === true ? false : node.hidden };
+          }
+          return node;
         });
-        nextNodes = visibility.nodes;
+
+        // 诊断日志：一键生图完成后打印所有节点状态
+        if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
+          console.log("[finalizeStoryboardResult] nodes after visibility apply:", nextNodes.map(n => ({
+            id: n.id,
+            type: n.type,
+            hidden: n.hidden,
+            role: n.data?.role,
+            isProcess: n.data?.isStoryboardProcessNode,
+            isFinal: n.data?.isStoryboardFinalOutput,
+          })));
+        }
+
         nodesRef.current = nextNodes;
-        edgesRef.current = visibility.edges;
-        setEdges(visibility.edges);
+        setEdges(edgesRef.current);
         return nextNodes;
       });
+
+      if (reactFlowInstance) {
+        reactFlowInstance.setViewport(
+          getViewportForNodePosition(outputPosition, reactFlowInstance.getViewport()),
+          { duration: 400 },
+        );
+      }
 
       setEdges((eds) => {
         const sourceToFinalEdgeId = `edge-storyboard-final-${params.sourceNodeId}-${finalImageNodeId}`;
@@ -1543,27 +1722,29 @@ function StarCanvasInner() {
                 style: { stroke: DESIGN_TOKENS.nodeEdge, strokeWidth: 1.5 },
               },
             ];
-        const visibility = applyStoryboardProcessVisibility({
-          nodes: nodesRef.current,
-          edges: withFinalEdge,
-          sourceNodeId: params.sourceNodeId,
-          showProcess: false,
+        // 不再强制 applyStoryboardProcessVisibility({ showProcess: false })
+        // 只确保源→最终图的边可见
+        const result = withFinalEdge.map((edge) => {
+          if (edge.id === sourceToFinalEdgeId) return { ...edge, hidden: false };
+          return edge;
         });
-        edgesRef.current = visibility.edges;
-        return visibility.edges;
+        edgesRef.current = result;
+        return result;
       });
     },
-    [setNodes, setEdges],
+    [setNodes, setEdges, reactFlowInstance],
   );
 
   const handleGenerateStoryboardGrid = useCallback(
     async (nodeId: string): Promise<boolean> => {
-      const gridNode = nodesRef.current.find((node) => node.id === nodeId);
+      // ★ 用 nodesRef.current 替代 _rfGetNodes()：setNodes 后状态同步在 ref 中
+      const currentNodes = nodesRef.current as Node<CanvasNodeData>[];
+      const gridNode = currentNodes.find((node) => node.id === nodeId);
       const grid = gridNode?.data.storyboardGrid;
       if (!gridNode || !grid) return false;
 
       const shotNodes = grid.shotNodeIds
-        .map((shotId) => nodesRef.current.find((node) => node.id === shotId))
+        .map((shotId) => currentNodes.find((node) => node.id === shotId))
         .filter((node): node is Node<CanvasNodeData> => Boolean(node));
       const shotStates = shotNodes.map((node) => {
         const shot = node.data.shot;
@@ -1619,9 +1800,11 @@ function StarCanvasInner() {
         const persisted = await persistImageDataUrl(dataUrl, {
           fileName: `storyboard-grid-${Date.now()}.png`,
         });
+        // ★ 用 nodesRef.current 替代 _rfGetNodes()
+        const latestNodes = nodesRef.current as Node<CanvasNodeData>[];
         const imageNodeId = grid.outputImageNodeId || generateId();
         const sourceNodeForOutput = grid.sourceStoryboardNodeId
-          ? nodesRef.current.find((node) => node.id === grid.sourceStoryboardNodeId)
+          ? latestNodes.find((node) => node.id === grid.sourceStoryboardNodeId)
           : undefined;
         const outputPosition = sourceNodeForOutput
           ? getStoryboardFinalOutputPosition(sourceNodeForOutput)
@@ -1630,6 +1813,7 @@ function StarCanvasInner() {
           id: imageNodeId,
           type: "image",
           position: outputPosition,
+          hidden: false,
           data: {
             title: "最终分镜图",
             imageUrl: persisted.objectUrl,
@@ -1701,6 +1885,12 @@ function StarCanvasInner() {
           nodesRef.current = updated;
           return updated;
         });
+        if (reactFlowInstance) {
+          reactFlowInstance.setViewport(
+            getViewportForNodePosition(outputPosition, reactFlowInstance.getViewport()),
+            { duration: 400 },
+          );
+        }
         setEdges((eds) => {
           const finalEdgeId = `edge-storyboard-final-${grid.sourceStoryboardNodeId || nodeId}-${imageNodeId}`;
           const updated = eds.some((edge) => edge.id === finalEdgeId)
@@ -1746,11 +1936,13 @@ function StarCanvasInner() {
         return false;
       }
     },
-    [setNodes, setEdges],
+    [setNodes, setEdges, reactFlowInstance],
   );
 
   const getStoryboardShotNodes = useCallback((sourceNodeId: string) => {
-    const directShotNodes = nodesRef.current.filter(
+    // ★ 用 nodesRef.current 替代 _rfGetNodes()：ref 始终同步
+    const currentNodes = nodesRef.current as Node<CanvasNodeData>[];
+    const directShotNodes = currentNodes.filter(
       (node) =>
         node.type === "shot" &&
         node.data.shot &&
@@ -1759,21 +1951,22 @@ function StarCanvasInner() {
     );
     if (directShotNodes.length > 0) return directShotNodes;
 
-    const gridNode = nodesRef.current.find(
+    const gridNode = currentNodes.find(
       (node) =>
         node.type === "storyboardGrid" &&
         node.data.storyboardGrid?.sourceStoryboardNodeId === sourceNodeId,
     );
     const gridShotIds = gridNode?.data.storyboardGrid?.shotNodeIds ?? [];
     return gridShotIds
-      .map((shotId) => nodesRef.current.find((node) => node.id === shotId))
+      .map((shotId) => currentNodes.find((node) => node.id === shotId))
       .filter((node): node is Node<CanvasNodeData> =>
         Boolean(node?.type === "shot" && node.data.shot),
       );
   }, []);
 
   const getStoryboardGridNode = useCallback((sourceNodeId: string) => {
-    const bySource = nodesRef.current.find(
+    const currentNodes = nodesRef.current as Node<CanvasNodeData>[];
+    const bySource = currentNodes.find(
       (node) =>
         node.type === "storyboardGrid" &&
         node.data.storyboardGrid?.sourceStoryboardNodeId === sourceNodeId,
@@ -1781,7 +1974,7 @@ function StarCanvasInner() {
     if (bySource) return bySource;
 
     const shotIds = getStoryboardShotNodes(sourceNodeId).map((node) => node.id);
-    return nodesRef.current.find(
+    return currentNodes.find(
       (node) =>
         node.type === "storyboardGrid" &&
         node.data.storyboardGrid?.shotNodeIds?.some((shotId) =>
@@ -1790,17 +1983,92 @@ function StarCanvasInner() {
     );
   }, [getStoryboardShotNodes]);
 
+  const createStoryboardBatchJob = useCallback(
+    (params: {
+      sourceNodeId: string;
+      shotNodes: Node<CanvasNodeData>[];
+      status?: BatchGenerationJobStatus;
+      message?: string;
+    }): BatchGenerationJob => {
+      const now = Date.now();
+      const shots = Object.fromEntries(
+        params.shotNodes.map((shotNode) => [
+          shotNode.id,
+          {
+            shotNodeId: shotNode.id,
+            title: shotNode.data.shot?.title || shotNode.data.title,
+            status: "queued" as BatchGenerationShotStatus,
+          },
+        ]),
+      );
+      return {
+        id: generateId(),
+        sourceNodeId: params.sourceNodeId,
+        targetShotIds: params.shotNodes.map((shotNode) => shotNode.id),
+        status: params.status ?? "queued",
+        total: params.shotNodes.length,
+        completed: 0,
+        failed: 0,
+        progress: 0,
+        message: params.message,
+        shots,
+        startedAt: now,
+        updatedAt: now,
+      };
+    },
+    [],
+  );
+
+  const syncStoryboardBatchJobToSource = useCallback(
+    (job: BatchGenerationJob) => {
+      setStoryboardBatchJob(job);
+      setNodes((nds) => {
+        const updated = nds.map((node) =>
+          node.id === job.sourceNodeId
+            ? { ...node, data: { ...node.data, storyboardBatchJob: job } }
+            : node,
+        );
+        nodesRef.current = updated;
+        return updated;
+      });
+    },
+    [setNodes],
+  );
+
+  const updateStoryboardBatchJob = useCallback(
+    (updater: (job: BatchGenerationJob) => BatchGenerationJob) => {
+      setStoryboardBatchJob((current) => {
+        if (!current) return current;
+        const next = updater({ ...current, shots: { ...current.shots } });
+        setNodes((nds) => {
+          const updated = nds.map((node) =>
+            node.id === next.sourceNodeId
+              ? { ...node, data: { ...node.data, storyboardBatchJob: next } }
+              : node,
+          );
+          nodesRef.current = updated;
+          return updated;
+        });
+        return next;
+      });
+    },
+    [setNodes],
+  );
+
   const getSelectedShotNodes = useCallback(
-    () =>
-      nodesRef.current.filter(
+    () => {
+      const currentNodes = nodesRef.current as Node<CanvasNodeData>[];
+      return currentNodes.filter(
         (n) => n.selected && n.type === "shot" && n.data.shot,
-      ),
+      );
+    },
     [],
   );
 
   const handleGenerateStoryboardImageFromSource = useCallback(
     async (nodeId: string) => {
-      const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
+      const currentNodes = nodesRef.current as Node<CanvasNodeData>[];
+      const sourceNode = currentNodes.find((node) => node.id === nodeId);
       if (!sourceNode) return;
 
       const sourceKind = sourceNode.data.nodeKind;
@@ -1818,8 +2086,8 @@ function StarCanvasInner() {
         status?: "pending" | "running" | "succeeded" | "failed";
         error?: string;
       }) => {
-        setNodes((nds) =>
-          nds.map((node) => {
+        setNodes((nds) => {
+          const updated: Node<CanvasNodeData>[] = nds.map((node): Node<CanvasNodeData> => {
             if (node.id !== nodeId) return node;
 
             const runMeta =
@@ -1843,19 +2111,41 @@ function StarCanvasInner() {
                 },
               },
             };
-          }),
-        );
+          });
+          nodesRef.current = updated;
+          return updated;
+        });
       };
 
       updateSourceRunMeta({
         status: "pending",
         progress: 8,
-        message: "准备生成分镜图：先拆镜头，再生成镜头图；单镜头会直接作为最终结果，多镜头再合成分镜图",
+        message: "准备生成分镜图：多镜头只调用一次生图模型，直接输出一张多格分镜图",
       });
 
-      const processVisible = sourceNode.data.storyboardProcessVisible === true;
+      // 一键生图时过程节点默认隐藏，只显示最终合成图
+      // 用户可通过"显示过程"按钮查看/编辑 Shot 节点
+      const processVisible = false;
+
       let shotNodes = getStoryboardShotNodes(nodeId);
       let gridNode = getStoryboardGridNode(nodeId);
+
+      // ★ 如果已有过程节点（不是首次拆分），立即设为 hidden + 写入 storyboardProcessVisible
+      // 如果没有过程节点，会走 split 分支，handleSplitStoryboardNode 内部会处理
+      if (shotNodes.length > 0) {
+        // ★ 同步更新 nodesRef，确保后续代码读到一致的状态
+        const updatedNodes = nodesRef.current.map((node) => {
+          if (node.id === nodeId) {
+            return { ...node, data: { ...node.data, storyboardProcessVisible: false } };
+          }
+          if (isStoryboardProcessNode(node, nodeId)) {
+            return { ...node, hidden: true, data: { ...node.data, hiddenByStoryboardProcessMode: true } };
+          }
+          return node;
+        });
+        setNodes(() => updatedNodes);
+        nodesRef.current = updatedNodes;
+      }
       if (shotNodes.length === 0) {
         updateSourceRunMeta({
           status: "running",
@@ -1863,13 +2153,18 @@ function StarCanvasInner() {
           message: "正在拆分镜头：系统会创建可编辑的镜头卡片",
         });
         const created = handleSplitStoryboardNode(nodeId, true, { processVisible });
+        // ★ 用 nodesRef.current 而非 _rfGetNodes()：setNodes 是异步的，
+        // _rfGetNodes() 读的是 ReactFlow 内部状态，可能还没同步新节点。
+        // nodesRef.current 在 handleSplitStoryboardNode 末尾被同步更新，
+        // 调用返回后已包含新创建的 shot/grid 节点。
+        const latestNodesAfterSplit = nodesRef.current as Node<CanvasNodeData>[];
         shotNodes = created.shotNodeIds
-          .map((shotId) => nodesRef.current.find((node) => node.id === shotId))
+          .map((shotId) => latestNodesAfterSplit.find((node) => node.id === shotId))
           .filter((node): node is Node<CanvasNodeData> =>
             Boolean(node?.type === "shot" && node.data.shot),
           );
         gridNode = created.gridNodeId
-          ? nodesRef.current.find((node) => node.id === created.gridNodeId)
+          ? latestNodesAfterSplit.find((node) => node.id === created.gridNodeId)
           : getStoryboardGridNode(nodeId);
       }
 
@@ -1879,7 +2174,8 @@ function StarCanvasInner() {
         return;
       }
 
-      const existingProcessImageNodeIds = nodesRef.current
+      const latestNodesForProcess = nodesRef.current as Node<CanvasNodeData>[];
+      const existingProcessImageNodeIds = latestNodesForProcess
         .filter(
           (node) =>
             node.data.sourceStoryboardNodeId === nodeId &&
@@ -1891,37 +2187,256 @@ function StarCanvasInner() {
         ...existingProcessImageNodeIds,
         ...(gridNode ? [gridNode.id] : []),
       ]);
-      if (!processVisible && processNodeIds.size > 0) {
-        setNodes((nds) =>
-          nds.map((node) =>
-            processNodeIds.has(node.id)
-              ? {
-                  ...node,
-                  hidden: true,
-                  data: {
-                    ...node.data,
-                    hiddenByStoryboardProcessMode: true,
-                  },
-                }
-              : node,
-          ),
-        );
-      }
+      // 一键分镜图入口遵循开源画布常见模式：最终产物任务与过程节点任务隔离。
+      // 多镜头只触发一次最终图生成，不隐式级联到每个 shot 的独立生图任务。
 
       const candidateShotNodes = shotNodes.slice(0, 9);
+
+      // === 多镜头：一次 AI 调用直接生成多格分镜图，禁止回退到逐镜头生图 ===
+      if (candidateShotNodes.length > 1) {
+        const batchJob = createStoryboardBatchJob({
+          sourceNodeId: nodeId,
+          shotNodes: candidateShotNodes,
+          status: "preparing",
+          message: `准备生成 ${candidateShotNodes.length} 个镜头的多格分镜图`,
+        });
+        syncStoryboardBatchJobToSource(batchJob);
+
+        updateSourceRunMeta({
+          status: "running",
+          progress: 35,
+          message: `正在生成多格分镜图：${candidateShotNodes.length} 个镜头一次合成`,
+        });
+
+        const storyboardPrompt = buildStoryboardImagePrompt(candidateShotNodes);
+        const directRequestId = generateId();
+        const model = await getDefaultImageModel() || "gpt-image-2";
+
+        try {
+          syncStoryboardBatchJobToSource({
+            ...batchJob,
+            status: "generating",
+            progress: 35,
+            activeShotId: candidateShotNodes[0]?.id,
+            message: "正在调用生图模型生成一张多格分镜图",
+            updatedAt: Date.now(),
+            shots: Object.fromEntries(
+              Object.entries(batchJob.shots).map(([shotId, shot]) => [
+                shotId,
+                { ...shot, status: "generating" as BatchGenerationShotStatus },
+              ]),
+            ),
+          });
+
+          const result = await generateImageFromPrompt({
+            prompt: storyboardPrompt,
+            model,
+            size: "1792x1024",
+            requestId: directRequestId,
+          });
+
+          updateSourceRunMeta({
+            status: "running",
+            progress: 85,
+            message: "分镜图已生成，正在保存...",
+          });
+
+          syncStoryboardBatchJobToSource({
+            ...batchJob,
+            status: "generating",
+            completed: 0,
+            failed: 0,
+            progress: 85,
+            activeShotId: undefined,
+            message: "分镜图已生成，正在保存到画布",
+            updatedAt: Date.now(),
+            shots: Object.fromEntries(
+              Object.entries(batchJob.shots).map(([shotId, shot]) => [
+                shotId,
+                { ...shot, status: "generating" as BatchGenerationShotStatus },
+              ]),
+            ),
+          });
+
+          const persisted = await persistImageDataUrl(result.imageUrl, {
+            fileName: `storyboard-direct-${Date.now()}.png`,
+          });
+
+          const imageNodeId = generateId();
+          const latestNodes = nodesRef.current as Node<CanvasNodeData>[];
+          const sourceNodeForOutput = latestNodes.find((node) => node.id === nodeId);
+          const outputPosition = sourceNodeForOutput
+            ? getStoryboardFinalOutputPosition(sourceNodeForOutput)
+            : { x: 0, y: 0 };
+
+          const newImageNode: Node<CanvasNodeData> = {
+            id: imageNodeId,
+            type: "image",
+            position: outputPosition,
+            hidden: false,
+            data: {
+              title: "分镜图",
+              imageUrl: persisted.objectUrl,
+              assetId: persisted.assetId,
+              nodeKind: "ai-generated-image",
+              sourcePromptId: nodeId,
+              sourceStoryboardNodeId: nodeId,
+              sourceType: "storyboard",
+              role: "storyboard-final-output",
+              isStoryboardFinalOutput: true,
+              isStoryboardProcessNode: false,
+              hiddenByStoryboardProcessMode: false,
+              source: "generated",
+              persistence: "indexeddb",
+              displayWidth: 380,
+              displayHeight: 214,
+              createdAt: Date.now(),
+            },
+          };
+
+          setNodes((nds) => [...nds, newImageNode]);
+          nodesRef.current = [...nodesRef.current, newImageNode];
+
+          // 更新源节点记录输出
+          setNodes((nds) => {
+            const updated = nds.map((node) =>
+              node.id === nodeId
+                ? {
+                    ...node,
+                    data: {
+                      ...node.data,
+                      storyboardOutputImageNodeId: imageNodeId,
+                      storyboardOutputImageUrl: persisted.objectUrl,
+                      storyboardError: undefined,
+                      storyboardErrorPhase: undefined,
+                    },
+                  }
+                : node,
+            );
+            nodesRef.current = updated;
+            return updated;
+          });
+
+          // 创建源→最终图的边
+          const sourceToFinalEdgeId = `edge-${nodeId}-${imageNodeId}`;
+          setEdges((eds) => {
+            const filtered = eds.filter(
+              (e) =>
+                e.id !== sourceToFinalEdgeId &&
+                !((e.data as Record<string, unknown> | undefined)?.isStoryboardProcessEdge as boolean),
+            );
+            const nextEdges = [
+              ...filtered,
+              {
+                id: sourceToFinalEdgeId,
+                source: nodeId,
+                target: imageNodeId,
+                type: "creative",
+                animated: false,
+                hidden: false,
+                style: { stroke: DESIGN_TOKENS.nodeEdge, strokeWidth: 1.5 },
+                data: { relation: "generated-image", isStoryboardFinalEdge: true },
+              } as Edge,
+            ];
+            edgesRef.current = nextEdges;
+            return nextEdges;
+          });
+
+          // 视口移动到最终图
+          if (reactFlowInstance) {
+            reactFlowInstance.setViewport(
+              getViewportForNodePosition(outputPosition, reactFlowInstance.getViewport()),
+              { duration: 400 },
+            );
+          }
+
+          const summary = `分镜图已生成：已合成 ${candidateShotNodes.length} 个镜头。`;
+          const completedBatchJob: BatchGenerationJob = {
+            ...batchJob,
+            status: "completed",
+            completed: candidateShotNodes.length,
+            failed: 0,
+            progress: 100,
+            activeShotId: undefined,
+            message: summary,
+            updatedAt: Date.now(),
+            finishedAt: Date.now(),
+            shots: Object.fromEntries(
+              Object.entries(batchJob.shots).map(([shotId, shot]) => [
+                shotId,
+                { ...shot, status: "completed" as BatchGenerationShotStatus, imageNodeId },
+              ]),
+            ),
+          };
+          syncStoryboardBatchJobToSource(completedBatchJob);
+          updateSourceRunMeta({ status: "succeeded", progress: 100, message: summary });
+
+          addWorkspaceHistoryEvent({
+            id: generateId(),
+            type: "image-generated",
+            title: "一键生成分镜图",
+            summary,
+            nodeId: imageNodeId,
+            relatedNodeIds: [nodeId, ...candidateShotNodes.map((node) => node.id), imageNodeId].filter(
+              (id): id is string => Boolean(id),
+            ),
+            createdAt: new Date().toISOString(),
+          });
+          return;
+        } catch (error: any) {
+          const message = error?.message || "分镜图生成失败";
+          const finalMessage = `多格分镜图生成失败：${message}。已停止，不会继续逐张生成镜头图以避免浪费算力。`;
+          const failedBatchJob: BatchGenerationJob = {
+            ...batchJob,
+            status: "failed",
+            completed: 0,
+            failed: candidateShotNodes.length,
+            progress: 100,
+            activeShotId: undefined,
+            message: finalMessage,
+            updatedAt: Date.now(),
+            finishedAt: Date.now(),
+            shots: Object.fromEntries(
+              Object.entries(batchJob.shots).map(([shotId, shot]) => [
+                shotId,
+                { ...shot, status: "failed" as BatchGenerationShotStatus, error: finalMessage },
+              ]),
+            ),
+          };
+          syncStoryboardBatchJobToSource(failedBatchJob);
+          updateSourceRunMeta({ status: "failed", progress: 100, message: finalMessage, error: finalMessage });
+          setNodes((nds) => {
+            const updated = nds.map((node) =>
+              node.id === nodeId
+                ? {
+                    ...node,
+                    data: {
+                      ...node.data,
+                      storyboardError: finalMessage,
+                      storyboardErrorPhase: "direct-storyboard-generation",
+                    },
+                  }
+                : node,
+            );
+            nodesRef.current = updated;
+            return updated;
+          });
+          return;
+        }
+      }
+
+      // === 单镜头：生成一张镜头图作为最终结果 ===
+      const latestNodesBeforeGeneration = nodesRef.current as Node<CanvasNodeData>[];
       const missingShotNodes = candidateShotNodes.filter(
-        (shotNode) => !getShotImageUrlFromCanvas({ shotId: shotNode.id, nodes: nodesRef.current }),
+        (shotNode) => !getShotImageUrlFromCanvas({ shotId: shotNode.id, nodes: latestNodesBeforeGeneration }),
       );
 
       updateSourceRunMeta({
         status: "running",
         progress: missingShotNodes.length > 0 ? 35 : 70,
-        message:
-          missingShotNodes.length > 0
-            ? `正在生成镜头图：0/${missingShotNodes.length}，每个镜头会独立成功或失败`
-            : candidateShotNodes.length <= 1
-              ? "镜头图已存在，正在准备最终分镜图"
-              : "镜头图已存在，正在准备合成最终分镜图",
+        message: missingShotNodes.length > 0
+          ? "正在生成单镜头分镜图"
+          : "镜头图已存在，正在准备最终结果",
       });
 
       await runWithConcurrency(
@@ -1931,9 +2446,9 @@ function StarCanvasInner() {
           updateSourceRunMeta({
             status: "running",
             progress: Math.min(65, 35 + Math.round((index / Math.max(1, missingShotNodes.length)) * 30)),
-            message: `正在生成镜头图：${index + 1}/${missingShotNodes.length}，生成过程节点会在右侧更新`,
+            message: "正在生成单镜头分镜图",
           });
-          return handleGenerateShotImage(shotNode.id);
+          return handleGenerateShotImage(shotNode.id, { processVisibleOverride: processVisible });
         },
       );
       const validShotImages: Array<{
@@ -1942,14 +2457,16 @@ function StarCanvasInner() {
         imageNodeId?: string;
         assetId?: string;
       }> = [];
+      // ★ 用 nodesRef.current 替代 _rfGetNodes()
+      const latestNodesAfterGeneration = nodesRef.current as Node<CanvasNodeData>[];
       candidateShotNodes.forEach((shotNode) => {
-        const latestShotNode = nodesRef.current.find((node) => node.id === shotNode.id) ?? shotNode;
-        const imageUrl = getShotImageUrlFromCanvas({ shotId: latestShotNode.id, nodes: nodesRef.current });
+        const latestShotNode = latestNodesAfterGeneration.find((node) => node.id === shotNode.id) ?? shotNode;
+        const imageUrl = getShotImageUrlFromCanvas({ shotId: latestShotNode.id, nodes: latestNodesAfterGeneration });
         if (!imageUrl) return;
         const imageNodeId = latestShotNode.data.shot?.generatedImageNodeId;
         const imageNode = imageNodeId
-          ? nodesRef.current.find((node) => node.id === imageNodeId)
-          : nodesRef.current.find(
+          ? latestNodesAfterGeneration.find((node) => node.id === imageNodeId)
+          : latestNodesAfterGeneration.find(
               (node) =>
                 node.type === "image" &&
                 (node.data.sourceShotId === latestShotNode.id ||
@@ -1995,7 +2512,8 @@ function StarCanvasInner() {
             nodes: updated,
             edges: edgesRef.current,
             sourceNodeId: nodeId,
-            showProcess: processVisible,
+            // 错误路径中不强制隐藏过程节点——用户可能需要查看来诊断问题
+            showProcess: true,
           });
           nodesRef.current = visibility.nodes;
           edgesRef.current = visibility.edges;
@@ -2006,8 +2524,9 @@ function StarCanvasInner() {
       }
 
       if (validShotImages.length === 0) {
+        const latestNodesForFailure = nodesRef.current as Node<CanvasNodeData>[];
         const latestCandidateShotNodes = candidateShotNodes
-          .map((shotNode) => nodesRef.current.find((node) => node.id === shotNode.id) ?? shotNode)
+          .map((shotNode) => latestNodesForFailure.find((node) => node.id === shotNode.id) ?? shotNode)
           .filter((shotNode): shotNode is Node<CanvasNodeData> => Boolean(shotNode.data.shot));
         const firstFailedShot = latestCandidateShotNodes.find((shotNode) => {
           const status = shotNode.data.shot?.generationStatus;
@@ -2038,7 +2557,8 @@ function StarCanvasInner() {
             nodes: updated,
             edges: edgesRef.current,
             sourceNodeId: nodeId,
-            showProcess: processVisible,
+            // 错误路径中不强制隐藏过程节点——用户可能需要查看来诊断问题
+            showProcess: true,
           });
           nodesRef.current = visibility.nodes;
           edgesRef.current = visibility.edges;
@@ -2076,7 +2596,7 @@ function StarCanvasInner() {
 
       gridNode = gridNode ?? getStoryboardGridNode(nodeId);
       if (!gridNode) {
-        const freshSourceNode = nodesRef.current.find((node) => node.id === nodeId) ?? sourceNode;
+        const freshSourceNode = (nodesRef.current as Node<CanvasNodeData>[]).find((node) => node.id === nodeId) ?? sourceNode;
         const gridNodeId = generateId();
         const gridCols = candidateShotNodes.length <= 2 ? 2 : 3;
         const newGridNode: Node<CanvasNodeData> = {
@@ -2089,6 +2609,7 @@ function StarCanvasInner() {
             nodeKind: "storyboard-grid",
             role: "storyboard-process",
             isStoryboardProcessNode: true,
+            hiddenByStoryboardProcessMode: !processVisible,
             storyboardGrid: {
               id: generateId(),
               title: "分镜合成预览",
@@ -2100,7 +2621,7 @@ function StarCanvasInner() {
                 shotNodeId: node.id,
                 order: node.data.shot?.order,
                 title: node.data.shot?.title,
-                status: getShotImageUrlFromCanvas({ shotId: node.id, nodes: nodesRef.current })
+                status: getShotImageUrlFromCanvas({ shotId: node.id, nodes: nodesRef.current as Node<CanvasNodeData>[] })
                   ? ("ready" as const)
                   : ("missing" as const),
               })),
@@ -2136,11 +2657,13 @@ function StarCanvasInner() {
         message: "正在合成最终分镜图：过程面板默认隐藏，最终会输出一张图片节点",
       });
       const composed = await handleGenerateStoryboardGrid(gridNode.id);
-      const latestGridNode = nodesRef.current.find((node) => node.id === gridNode.id);
+      // ★ 用 nodesRef.current 替代 _rfGetNodes()
+      const latestNodesAfterCompose = nodesRef.current as Node<CanvasNodeData>[];
+      const latestGridNode = latestNodesAfterCompose.find((node) => node.id === gridNode.id);
       const outputImageNodeId = latestGridNode?.data.storyboardGrid?.outputImageNodeId;
       const outputImageUrl = latestGridNode?.data.storyboardGrid?.outputImageUrl;
       const outputAssetId = outputImageNodeId
-        ? nodesRef.current.find((node) => node.id === outputImageNodeId)?.data.assetId
+        ? latestNodesAfterCompose.find((node) => node.id === outputImageNodeId)?.data.assetId
         : undefined;
 
       if (composed && outputImageUrl) {
@@ -2198,9 +2721,14 @@ function StarCanvasInner() {
       handleGenerateShotImage,
       handleGenerateStoryboardGrid,
       finalizeStoryboardResult,
+      createStoryboardBatchJob,
+      syncStoryboardBatchJobToSource,
+      buildStoryboardImagePrompt,
+      generateImageFromPrompt,
       setNodes,
       setEdges,
       addWorkspaceHistoryEvent,
+      reactFlowInstance,
     ],
   );
 
@@ -3154,10 +3682,14 @@ function StarCanvasInner() {
       setSelectionCount(selectedNodes.length);
       setNodes((nds) => {
         const selectedIds = new Set(selectedNodes.map((node) => node.id));
-        return nds.map((node) => ({
-          ...node,
-          selected: selectedIds.has(node.id),
-        }));
+        let changed = false;
+        const updated = nds.map((node) => {
+          const shouldBeSelected = selectedIds.has(node.id);
+          if (node.selected === shouldBeSelected) return node;
+          changed = true;
+          return { ...node, selected: shouldBeSelected };
+        });
+        return changed ? updated : nds;
       });
 
       if (selectedNodes.length === 1) {
@@ -3483,7 +4015,7 @@ function StarCanvasInner() {
       });
       setShowWorkspaceHistory(false);
     },
-    [reactFlowInstance, setEdges, setFitViewOnce, setNodes, setSelectedNodeId, addWorkspaceHistoryEvent],
+    [setEdges, setFitViewOnce, setNodes, setSelectedNodeId, addWorkspaceHistoryEvent],
   );
 
   const handleDocumentFileChange = useCallback(
@@ -4923,6 +5455,10 @@ function StarCanvasInner() {
   return (
     <>
       <BatchProgressBar ref={batchProgressRef} />
+      <StoryboardBatchProgressOverlay
+        job={storyboardBatchJob}
+        onDismiss={handleDismissStoryboardBatchJob}
+      />
       <SelectionToolbar
         selectedCount={selectionCount}
         onBatchGenerate={() => {
@@ -5004,6 +5540,21 @@ function StarCanvasInner() {
         >
           <Download size={14} strokeWidth={1.7} />
           <span>导出项目包</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowCharacterLibrary((value) => !value)}
+          className="flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-medium backdrop-blur-xl transition hover:bg-white/10"
+          style={{
+            borderColor: showCharacterLibrary ? "rgba(168, 85, 247, 0.5)" : DESIGN_TOKENS.border,
+            backgroundColor: showCharacterLibrary ? "rgba(168, 85, 247, 0.18)" : "rgba(18,18,24,0.7)",
+            color: DESIGN_TOKENS.textSecondary,
+          }}
+          title="查看当前画布从 ShotNode 汇总出的全局角色一致性资产"
+          data-testid="character-asset-library-toggle"
+        >
+          <Sparkles size={14} strokeWidth={1.7} />
+          <span>角色库 {characterLibraryItems.length}</span>
         </button>
       </div>
 
@@ -5957,6 +6508,18 @@ function StarCanvasInner() {
                 closeFloatingToolbar();
               }
             }}
+          />,
+          document.body,
+        )}
+
+      {/* Character Asset Library Panel */}
+      {showCharacterLibrary &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <CharacterAssetLibraryPanel
+            items={characterLibraryItems}
+            onApplyAssetPatch={handleApplyCharacterAssetPatch}
+            onClose={() => setShowCharacterLibrary(false)}
           />,
           document.body,
         )}

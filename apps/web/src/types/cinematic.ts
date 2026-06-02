@@ -213,6 +213,182 @@ export interface PromptAnalysisResult {
 }
 
 // ============================================================================
+// Storyboard Director Types
+// ============================================================================
+
+// ─── 成熟分镜景别 ───
+export type ShotSize =
+  | "extreme-wide" // 大远景
+  | "wide" // 远景/全景
+  | "medium" // 中景
+  | "close-up" // 近景
+  | "extreme-close-up" // 特写
+
+// ─── 机位角度 ───
+export type CameraAngle =
+  | "eye-level" // 平视
+  | "low-angle" // 仰拍
+  | "high-angle" // 俯拍
+  | "over-shoulder" // 过肩
+  | "top-shot" // 顶拍
+  | "dutch-angle" // 倾斜，不安感
+
+// ─── 运镜方式 ───
+export type CameraMovement =
+  | "static" // 固定
+  | "push-in" // 推入
+  | "pull-out" // 拉出
+  | "pan" // 水平摇
+  | "tilt" // 垂直摇
+  | "tracking" // 跟拍
+  | "handheld" // 手持
+  | "dolly" // 移轨
+  | "crane" // 升降
+  | "zoom" // 变焦推拉
+
+// ─── 转场方式 ───
+export type Transition =
+  | "cut"
+  | "dissolve"
+  | "fade-in"
+  | "fade-out"
+  | "smash-cut"
+  | "match-cut"
+  | "whip-pan"
+  | "j-cut"
+  | "l-cut"
+  | "jump-cut"
+
+// ─── 情绪状态，用于规则引擎映射 ───
+export type EmotionalState =
+  | "calm"
+  | "tense"
+  | "fear"
+  | "anger"
+  | "joy"
+  | "sadness"
+  | "intimacy"
+  | "isolation"
+  | "suspense"
+  | "revelation"
+  | "confusion"
+  | "hope"
+  | "despair"
+  | "power"
+  | "vulnerability"
+
+// ─── 场景功能类型 ───
+export type SceneFunction =
+  | "establishing" // 建立空间/人物状态
+  | "confrontation" // 对抗
+  | "turning-point" // 转折
+  | "climax" // 高潮
+  | "resolution" // 收束
+  | "transition" // 过渡
+  | "exposition" // 交代信息
+  | "montage" // 蒙太奇
+
+export type ScreenDirection =
+  | "left-to-right"
+  | "right-to-left"
+  | "toward-camera"
+  | "away-from-camera"
+
+export type ContinuityWarningType =
+  | "axis"
+  | "eyeline"
+  | "shot-rhythm"
+  | "emotional-flat"
+  | "info-leak"
+  | "redundant"
+  | "action-break"
+
+export type ContinuitySeverity = "critical" | "warning" | "info"
+
+// ─── 核心类型：专业镜头 ───
+export type CinematicShot = {
+  order: number
+  sceneId: string
+  shotId: string
+
+  // 剧情功能
+  dramaticBeat: string
+  shotPurpose: string
+  emotionalState: EmotionalState
+  subtext?: string
+  dramaticWeight: number
+
+  // 镜头语言
+  shotSize: ShotSize
+  cameraAngle: CameraAngle
+  cameraMovement: CameraMovement
+  lens?: string
+  composition: string
+  blocking: string
+  durationEstimate: number
+
+  // 连续性
+  screenDirection?: ScreenDirection
+  eyeline?: string
+  axisNote?: string
+  transitionIn?: Transition
+  transitionOut?: Transition
+
+  // 声画关系
+  dialogue?: string
+  soundCue?: string
+  voiceIntent?: string
+  musicMood?: string
+
+  // 生成提示
+  visualPrompt: string
+  negativePrompt?: string
+  referenceTags?: string[]
+
+  // 审查
+  qualityScore?: number
+  riskFlags?: string[]
+}
+
+export type SceneAnalysis = {
+  sceneId: string
+  sceneNumber: number
+  location: string
+  timeOfDay: string
+  characters: string[]
+  sceneFunction: SceneFunction
+  emotionalArc: {
+    start: EmotionalState
+    peak: EmotionalState
+    end: EmotionalState
+  }
+  dramaticTension: number
+  summary: string
+}
+
+export type ContinuityWarning = {
+  type: ContinuityWarningType
+  severity: ContinuitySeverity
+  shotIds: [string, string]
+  message: string
+  suggestion?: string
+}
+
+export type StoryboardPlan = {
+  projectId: string
+  title: string
+  genre: string
+  style: string
+  targetPlatform: "short-drama" | "film" | "interactive" | "commercial"
+  shotDensity: "sparse" | "normal" | "dense"
+  scenes: SceneAnalysis[]
+  shots: CinematicShot[]
+  emotionalCurve: number[]
+  continuityReport: ContinuityWarning[]
+  overallDuration: number
+}
+
+// ============================================================================
 // Prompt Analysis Mappers (Cinema-only — not in V2)
 // ============================================================================
 

@@ -24,6 +24,8 @@ export interface AiChatRequest {
   temperature?: number
   /** OpenAI 兼容的 response_format */
   response_format?: { type: string }
+  /** 前端请求超时时间，避免非流式请求长时间悬挂 */
+  timeoutMs?: number
 }
 
 export interface AiChatResponse {
@@ -63,23 +65,50 @@ export interface AiHealthResponse {
  */
 export async function callAiChat(request: AiChatRequest): Promise<AiChatResponse> {
   const overrides = getLocalProviderOverrides()
-  const body: Record<string, unknown> = { ...request }
+  const { timeoutMs, ...chatRequest } = request
+  const body: Record<string, unknown> = { ...chatRequest }
   if (overrides) {
     body._providerOverrides = overrides
   }
 
-  const res = await fetch("/api/ai/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  })
+  const controller = new AbortController()
+  const timeout = Math.max(1, timeoutMs ?? overrides?.timeoutMs ?? 60000)
+  const timer = setTimeout(() => controller.abort(), timeout)
+
+  let res: Response
+  try {
+    res = await fetch("/api/ai/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw Object.assign(
+        new Error("AI 请求超时，请稍后重试、缩短输入，或换用更快模型。"),
+        {
+          aiError: {
+            code: "timeout",
+            message: "AI 请求超时，请稍后重试、缩短输入，或换用更快模型。",
+          } satisfies NormalizedAiError,
+        },
+      )
+    }
+    throw error
+  } finally {
+    clearTimeout(timer)
+  }
 
   const text = await res.text()
 
   if (!res.ok) {
     let error: NormalizedAiError
     try {
-      error = JSON.parse(text)
+      const parsed = JSON.parse(text)
+      error = parsed?.error && typeof parsed.error === "object"
+        ? parsed.error
+        : parsed
     } catch {
       error = {
         code: `http_${res.status}`,

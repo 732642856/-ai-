@@ -20,6 +20,25 @@ describe("storyboardTextNode", () => {
     assert.equal(getStoryboardAssistantStage({ content: "一个雨夜故事想法" }), "idea");
   });
 
+  it("content takes priority over stage field when content matches storyboard format", () => {
+    // 关键行为：即使 stage 字段是 "story"，只要内容符合分镜格式就应返回 storyboard-text
+    // 这解决了"生成文字分镜"步骤超时后 stage 字段未更新，导致"拆成 Shot"走错路径的问题
+    const storyboardContent = "镜头 1：清晨巷口\n\n画面描述：薄雾老巷，豆豆叼红球\n\n生图提示词：中景，巷口纵深构图";
+    assert.equal(
+      getStoryboardAssistantStage({ stage: "story", content: storyboardContent }),
+      "storyboard-text",
+      "内容符合分镜格式时应覆盖 stage=story",
+    );
+    assert.equal(
+      getStoryboardAssistantStage({ stage: "idea", content: storyboardContent }),
+      "storyboard-text",
+      "内容符合分镜格式时应覆盖 stage=idea",
+    );
+    // 无内容时仍然尊重 stage 字段
+    assert.equal(getStoryboardAssistantStage({ stage: "story", content: "" }), "story");
+    assert.equal(getStoryboardAssistantStage({ stage: "idea", content: "" }), "idea");
+  });
+
   it("advances stages without skipping storyboard text review", () => {
     assert.equal(getNextStoryboardAssistantStage("idea"), "story");
     assert.equal(getNextStoryboardAssistantStage("story"), "storyboard-text");
@@ -52,9 +71,21 @@ describe("storyboardTextNode", () => {
 
     const storyboardPrompt = buildStoryToStoryboardPrompt("完整故事正文");
     assert.match(storyboardPrompt, /已经拆分好的文字分镜/);
+    assert.match(storyboardPrompt, /4-6 个关键镜头/);
     assert.match(storyboardPrompt, /镜头 1/);
     assert.match(storyboardPrompt, /画面描述/);
     assert.match(storyboardPrompt, /生图提示词/);
     assert.match(storyboardPrompt, /完整故事正文/);
+  });
+
+  it("compacts long story text before building storyboard prompt", () => {
+    const longStory = ["开端".repeat(800), "中段".repeat(800), "结尾".repeat(800)].join("\n");
+    const storyboardPrompt = buildStoryToStoryboardPrompt(longStory);
+
+    assert.match(storyboardPrompt, /开端/);
+    assert.match(storyboardPrompt, /结尾/);
+    assert.match(storyboardPrompt, /……/);
+    assert.ok(!storyboardPrompt.includes("中段".repeat(100)));
+    assert.ok(storyboardPrompt.length < longStory.length);
   });
 });

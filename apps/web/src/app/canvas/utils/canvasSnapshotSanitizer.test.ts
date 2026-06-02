@@ -80,6 +80,52 @@ describe("canvasSnapshotSanitizer", () => {
     assert.equal(clean.nodes[1].data.content, "Once upon a time");
   });
 
+  it("keeps globally synced shot character identities in sanitized snapshots", () => {
+    const clean = sanitizeCanvasSnapshot(createSnapshot({
+      nodes: [
+        {
+          id: "shot-node-1",
+          type: "shot",
+          position: { x: 10, y: 20 },
+          data: {
+            nodeKind: "shot",
+            title: "Shot 1",
+            imageUrl: "blob:http://localhost/shot-preview",
+            shot: {
+              id: "shot-1",
+              order: 1,
+              title: "Shot 1",
+              description: "林夏走进雨夜街口",
+              visualPrompt: "rainy night street, cinematic frame",
+              generatedImageUrl: "data:image/png;base64,SHOT_RUNTIME_IMAGE",
+              characterIdentities: [
+                {
+                  id: "local-linxia",
+                  referenceAssetId: "character-linxia-library",
+                  name: "女主林夏",
+                  role: "protagonist",
+                  visualSignature: "global snapshot edit: exact oval face and black bob haircut",
+                  costume: "global snapshot edit: same red wool coat with brass buttons",
+                  props: ["silver locket", "black umbrella"],
+                },
+              ],
+            },
+          },
+        },
+      ],
+      edges: [],
+    }));
+
+    const shotData = clean.nodes[0].data.shot;
+    assert.equal(clean.nodes[0].data.imageUrl, undefined);
+    assert.equal(shotData?.generatedImageUrl, undefined);
+    assert.equal(shotData?.characterIdentities?.[0]?.referenceAssetId, "character-linxia-library");
+    assert.equal(shotData?.characterIdentities?.[0]?.visualSignature, "global snapshot edit: exact oval face and black bob haircut");
+    assert.equal(shotData?.characterIdentities?.[0]?.costume, "global snapshot edit: same red wool coat with brass buttons");
+    assert.deepEqual(shotData?.characterIdentities?.[0]?.props, ["silver locket", "black umbrella"]);
+    assert.equal(validateCanvasSnapshot(clean), true);
+  });
+
   it("sets schemaVersion and recalculates node and edge counts", () => {
     const dirty = createSnapshot({
       schemaVersion: undefined as unknown as 1,
