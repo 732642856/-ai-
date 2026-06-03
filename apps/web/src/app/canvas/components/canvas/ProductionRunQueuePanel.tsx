@@ -1,7 +1,8 @@
 "use client";
 
-import { Play, CheckCircle2, XCircle, AlertTriangle, Clock, Loader2, X, GripVertical } from "lucide-react";
+import { Play, CheckCircle2, XCircle, AlertTriangle, Clock, Loader2, X, GripVertical, RotateCcw, ChevronRight } from "lucide-react";
 import type { ProductionRunQueue, ProductionRunQueueTask } from "@/lib/storyboard/productionRunQueue";
+import type { TaskExecState } from "@/app/canvas/hooks/useProductionRunExecutor";
 
 // ============================================================================
 // DESIGN TOKENS (与 StarCanvas designSystem 对齐)
@@ -98,9 +99,15 @@ export type ProductionRunQueuePanelProps = {
   isRunning?: boolean;
   /** 点击"开始生产"回调（Step 2 新增） */
   onStart?: () => void;
+  /** 实时任务执行状态（Step 4 新增） */
+  execState?: Record<string, TaskExecState>;
+  /** 重试失败任务（Step 4 新增） */
+  onRetryTask?: (taskId: string) => void;
+  /** 跳过失败任务（Step 4 新增） */
+  onSkipTask?: (taskId: string) => void;
 };
 
-export function ProductionRunQueuePanel({ queue, onClose, isRunning, onStart }: ProductionRunQueuePanelProps) {
+export function ProductionRunQueuePanel({ queue, onClose, isRunning, onStart, execState, onRetryTask, onSkipTask }: ProductionRunQueuePanelProps) {
   const statusLabel = STATUS_LABEL[queue.status] ?? queue.status;
   const statusColor = STATUS_COLOR[queue.status] ?? PANEL.accent;
   const hasContent = queue.tasks.length > 0 || queue.blockedActions.length > 0;
@@ -239,43 +246,82 @@ export function ProductionRunQueuePanel({ queue, onClose, isRunning, onStart }: 
             任务列表
           </div>
           <div className="space-y-1">
-            {queue.tasks.map((task) => (
-              <div
-                key={task.id}
-                data-testid="production-run-queue-task"
-                className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs transition"
-                style={{
-                  backgroundColor: task.status === "running" ? PANEL.runningSoft : "transparent",
-                }}
-              >
-                <TaskStatusIcon status={task.status} />
-                <span style={{ color: PANEL.textSecondary }}>#{task.order}</span>
-                <span
-                  className="flex-1 truncate"
+            {queue.tasks.map((task) => {
+              const liveStatus = execState?.[task.id]?.status ?? task.status;
+              const liveError = execState?.[task.id]?.error;
+              const isFailed = liveStatus === "failed";
+
+              return (
+                <div
+                  key={task.id}
+                  data-testid="production-run-queue-task"
+                  className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs transition"
                   style={{
-                    color: task.status === "failed" ? "#ef4444" : PANEL.text,
-                    textDecoration: task.status === "failed" ? "line-through" : undefined,
+                    backgroundColor: liveStatus === "running" ? PANEL.runningSoft : "transparent",
                   }}
                 >
-                  {task.title || "—"} · {TASK_ACTION_LABEL[task.action] ?? task.action}
-                </span>
-                <span
-                  className="text-[10px]"
-                  style={{
-                    color:
-                      task.status === "running"
-                        ? "#3b82f6"
-                        : task.status === "failed"
-                          ? "#ef4444"
-                          : task.status === "completed"
-                            ? "#22c55e"
-                            : PANEL.textMuted,
-                  }}
-                >
-                  {TASK_STATUS_LABEL[task.status] ?? task.status}
-                </span>
-              </div>
-            ))}
+                  <TaskStatusIcon status={liveStatus as ProductionRunQueueTask["status"]} />
+                  <span style={{ color: PANEL.textSecondary }}>#{task.order}</span>
+                  <span
+                    className="flex-1 truncate"
+                    style={{
+                      color: isFailed ? "#ef4444" : PANEL.text,
+                      textDecoration: isFailed ? "line-through" : undefined,
+                    }}
+                  >
+                    {task.title || "—"} · {TASK_ACTION_LABEL[task.action] ?? task.action}
+                  </span>
+                  {/* ── Failure reason (Step 4) ── */}
+                  {isFailed && liveError && (
+                    <span
+                      className="max-w-[80px] truncate text-[10px]"
+                      style={{ color: "#ef4444" }}
+                      title={liveError}
+                    >
+                      {liveError}
+                    </span>
+                  )}
+                  <span
+                    className="text-[10px]"
+                    style={{
+                      color:
+                        liveStatus === "running"
+                          ? "#3b82f6"
+                          : isFailed
+                            ? "#ef4444"
+                            : liveStatus === "completed"
+                              ? "#22c55e"
+                              : PANEL.textMuted,
+                    }}
+                  >
+                    {TASK_STATUS_LABEL[liveStatus] ?? liveStatus}
+                  </span>
+                  {/* ── Retry / Skip buttons (Step 4) ── */}
+                  {isFailed && !isRunning && onRetryTask && onSkipTask && (
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); onRetryTask(task.id); }}
+                        className="rounded p-1 transition hover:bg-white/10"
+                        title="重试"
+                        data-testid="production-run-queue-retry"
+                      >
+                        <RotateCcw size={11} strokeWidth={1.8} style={{ color: "#60a5fa" }} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); onSkipTask(task.id); }}
+                        className="rounded p-1 transition hover:bg-white/10"
+                        title="跳过"
+                        data-testid="production-run-queue-skip"
+                      >
+                        <ChevronRight size={11} strokeWidth={1.8} style={{ color: PANEL.textMuted }} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

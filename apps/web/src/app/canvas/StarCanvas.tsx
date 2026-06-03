@@ -6820,6 +6820,9 @@ function StarCanvasInner() {
             onClose={() => setShowProductionQueue(false)}
             isRunning={productionExecutor.isRunning}
             onStart={productionExecutor.start}
+            execState={productionExecutor.execState}
+            onRetryTask={productionExecutor.retryTask}
+            onSkipTask={productionExecutor.skipTask}
           />,
           document.body,
         )}
