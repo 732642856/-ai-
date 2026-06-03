@@ -127,6 +127,7 @@ import BatchProgressBar, {
   type BatchProgressHandle,
 } from "./components/nodes/BatchProgressBar";
 import { generateImageFromPrompt, friendlyErrorMessage } from "./utils/imageGeneration";
+import { generateTtsAudio, type TtsGenerateInput } from "./utils/ttsService";
 import { composeStoryboardGrid } from "./utils/storyboardGridComposer";
 import { buildVideoWorkflowTemplate } from "./utils/videoWorkflowTemplate";
 import { useWorkflowRunner } from "./hooks/useWorkflowRunner";
@@ -766,21 +767,246 @@ function StarCanvasInner() {
     return buildProductionRunQueue(manifest, { jobId: "canvas-production-run" });
   }, [nodes]);
 
-  // ── Production Run Executor (Step 2: entry point, placeholder mode) ──
+  // ── Production Run Executor (Step 3: real executor mapping) ──
   const productionExecutor = useProductionRunExecutor({
     queue: productionRunQueue,
     onExecuteTask: useCallback(
-      async (_task, _signal) => {
-        // Step 2 placeholder: 模拟每次任务执行 0.5s 延迟
-        await new Promise<void>((resolve, reject) => {
-          const timer = setTimeout(resolve, 500);
-          _signal.addEventListener("abort", () => {
-            clearTimeout(timer);
-            reject(new DOMException("Aborted", "AbortError"));
-          }, { once: true });
-        });
+      async (task, signal) => {
+        // 找到包含该 shot 的 canvas node
+        const shotNode = nodesRef.current.find(
+          (n) => n.data.shot?.id === task.shotId,
+        );
+        if (!shotNode) {
+          throw new Error(`找不到 shotId=${task.shotId} 对应的画布节点`);
+        }
+
+        switch (task.action) {
+          case "generate-storyboard-image": {
+            // 使用 shotNode.data.prompt 或 shot.visualPrompt 作为生成提示词
+            const prompt =
+              shotNode.data.prompt?.trim() ||
+              shotNode.data.shot?.visualPrompt?.trim() ||
+              "";
+            if (!prompt) {
+              throw new Error("缺少视觉提示词，无法生成分镜图");
+            }
+
+            // 标记 shotNode 为 generating
+            setNodes((nds) =>
+              nds.map((n) =>
+                n.id === shotNode.id
+                  ? { ...n, data: { ...n.data, generationStatus: "generating" as const } }
+                  : n,
+              ),
+            );
+
+            try {
+              const model = await getDefaultImageModel();
+              const result = await generateImageFromPrompt({
+                prompt,
+                model,
+                size: "1792x1024",
+              });
+
+              const imageNodeId = generateId();
+              const nodeWidth =
+                typeof shotNode.width === "number" ? shotNode.width : 320;
+
+              setNodes((nds) => [
+                ...nds.map((n) =>
+                  n.id === shotNode.id
+                    ? {
+                        ...n,
+                        data: {
+                          ...n.data,
+                          generationStatus: "succeeded" as const,
+                          imageUrl: result.imageUrl,
+                          generatedImageUrl: result.imageUrl,
+                          errorMessage: undefined,
+                        },
+                      }
+                    : n,
+                ),
+                {
+                  id: imageNodeId,
+                  type: "image",
+                  position: {
+                    x: (shotNode.position.x ?? 0) + nodeWidth + 80,
+                    y: shotNode.position.y ?? 0,
+                  },
+                  data: {
+                    title: shotNode.data.title
+                      ? `${shotNode.data.title} 图`
+                      : "分镜图",
+                    imageUrl: result.imageUrl,
+                    assetId: result.assetId,
+                    nodeKind: "ai-generated-image",
+                    sourceShotId: shotNode.id,
+                    sourcePromptId: shotNode.id,
+                    sourceType: "shot",
+                    prompt,
+                    model,
+                    source: "generated",
+                    persistence: result.assetId ? "indexeddb" : undefined,
+                    displayWidth: 320,
+                    displayHeight: 180,
+                    createdAt: Date.now(),
+                  },
+                } as any,
+              ]);
+
+              setEdges((eds) => [
+                ...eds,
+                {
+                  id: `edge-gen-${shotNode.id}-${imageNodeId}`,
+                  source: shotNode.id,
+                  target: imageNodeId,
+                  type: "creative",
+                  animated: true,
+                  style: { stroke: "rgba(168, 85, 247, 0.3)", strokeWidth: 1.5 },
+                },
+              ]);
+            } catch (err: any) {
+              setNodes((nds) =>
+                nds.map((n) =>
+                  n.id === shotNode.id
+                    ? {
+                        ...n,
+                        data: {
+                          ...n.data,
+                          generationStatus: "failed" as const,
+                          errorMessage: friendlyErrorMessage(err?.message || ""),
+                        },
+                      }
+                    : n,
+                ),
+              );
+              throw err;
+            }
+            break;
+          }
+
+          case "generate-voice-track": {
+            const dialogue = shotNode.data.shot?.dialogue?.trim() || "";
+            if (!dialogue) {
+              // 无台词，跳过此任务（标记完成）
+              return;
+            }
+
+            const voiceConfig = shotNode.data.shot?.voiceConfig || {
+              mode: "auto" as const,
+              text: "",
+            };
+
+            try {
+              const ttsResult = await generateTtsAudio({
+                text: dialogue,
+                voiceConfig,
+              });
+
+              const audioNodeId = generateId();
+              const nodeWidth =
+                typeof shotNode.width === "number" ? shotNode.width : 320;
+
+              setNodes((nds) => [
+                ...nds,
+                {
+                  id: audioNodeId,
+                  type: "audio",
+                  position: {
+                    x: (shotNode.position.x ?? 0) + nodeWidth + 80,
+                    y: (shotNode.position.y ?? 0) + 100,
+                  },
+                  data: {
+                    title: shotNode.data.title
+                      ? `${shotNode.data.title} 配音`
+                      : "配音",
+                    audioUrl: ttsResult.audioUrl,
+                    durationSeconds: ttsResult.durationSeconds,
+                    nodeKind: "tts-audio",
+                    sourceShotId: shotNode.id,
+                    sourceType: "shot",
+                    dialogue,
+                    voiceConfig,
+                    createdAt: Date.now(),
+                  },
+                } as any,
+              ]);
+
+              setEdges((eds) => [
+                ...eds,
+                {
+                  id: `edge-tts-${shotNode.id}-${audioNodeId}`,
+                  source: shotNode.id,
+                  target: audioNodeId,
+                  type: "creative",
+                  animated: true,
+                  style: { stroke: "rgba(34, 197, 94, 0.3)", strokeWidth: 1.5 },
+                },
+              ]);
+            } catch (err: any) {
+              throw new Error(`配音生成失败: ${err?.message || "未知错误"}`);
+            }
+            break;
+          }
+
+          case "create-subtitle-track": {
+            const dialogue = shotNode.data.shot?.dialogue?.trim() || "";
+            if (!dialogue) {
+              // 无台词，跳过
+              return;
+            }
+
+            const subtitleNodeId = generateId();
+            const nodeWidth =
+              typeof shotNode.width === "number" ? shotNode.width : 320;
+
+            setNodes((nds) => [
+              ...nds,
+              {
+                id: subtitleNodeId,
+                type: "text",
+                position: {
+                  x: (shotNode.position.x ?? 0) + nodeWidth + 80,
+                  y: (shotNode.position.y ?? 0) + 200,
+                },
+                data: {
+                  title: shotNode.data.title
+                    ? `${shotNode.data.title} 字幕`
+                    : "字幕",
+                  text: dialogue,
+                  nodeKind: "subtitle-text",
+                  sourceShotId: shotNode.id,
+                  sourceType: "shot",
+                  createdAt: Date.now(),
+                },
+              } as any,
+            ]);
+
+            setEdges((eds) => [
+              ...eds,
+              {
+                id: `edge-sub-${shotNode.id}-${subtitleNodeId}`,
+                source: shotNode.id,
+                target: subtitleNodeId,
+                type: "creative",
+                animated: true,
+                style: { stroke: "rgba(59, 130, 246, 0.3)", strokeWidth: 1.5 },
+              },
+            ]);
+            break;
+          }
+
+          case "review-handoff-warnings": {
+            // 无需执行操作，警告已在 ProductionRunQueuePanel 中显示
+            break;
+          }
+
+          default:
+            throw new Error(`未知的生产任务动作: ${(task as any).action}`);
+        }
       },
-      [],
+      [setNodes, setEdges],
     ),
   });
 
