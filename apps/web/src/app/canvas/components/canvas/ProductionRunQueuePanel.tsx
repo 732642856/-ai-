@@ -94,9 +94,13 @@ function ProgressBar({ value, color }: { value: number; color?: string }) {
 export type ProductionRunQueuePanelProps = {
   queue: ProductionRunQueue;
   onClose?: () => void;
+  /** 是否正在执行中（Step 2 新增） */
+  isRunning?: boolean;
+  /** 点击"开始生产"回调（Step 2 新增） */
+  onStart?: () => void;
 };
 
-export function ProductionRunQueuePanel({ queue, onClose }: ProductionRunQueuePanelProps) {
+export function ProductionRunQueuePanel({ queue, onClose, isRunning, onStart }: ProductionRunQueuePanelProps) {
   const statusLabel = STATUS_LABEL[queue.status] ?? queue.status;
   const statusColor = STATUS_COLOR[queue.status] ?? PANEL.accent;
   const hasContent = queue.tasks.length > 0 || queue.blockedActions.length > 0;
@@ -331,6 +335,36 @@ export function ProductionRunQueuePanel({ queue, onClose }: ProductionRunQueuePa
           </span>
         )}
       </div>
+
+      {/* ── Execution Controls (Step 2) ── */}
+      {onStart && (
+        <div className="mt-3 border-t pt-3" style={{ borderColor: PANEL.border }}>
+          {isRunning ? (
+            <div
+              className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-xs"
+              style={{ backgroundColor: PANEL.accentSoft, color: PANEL.textSecondary }}
+            >
+              <Loader2 size={13} strokeWidth={1.8} className="animate-spin" />
+              生产任务执行中…
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={onStart}
+              disabled={queue.status === "completed"}
+              data-testid="production-run-queue-start"
+              className="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-xs font-medium transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-30"
+              style={{
+                backgroundColor: "#3b82f6",
+                color: "#fff",
+              }}
+            >
+              <Play size={13} strokeWidth={2} fill="currentColor" />
+              一键开始生产
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

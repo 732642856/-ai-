@@ -93,6 +93,7 @@ import { CanvasDropOverlay } from "./components/canvas/CanvasDropOverlay";
 import { AssetLibraryPanel } from "./components/canvas/AssetLibraryPanel";
 import { CharacterAssetLibraryPanel } from "./components/canvas/CharacterAssetLibraryPanel";
 import { ProductionRunQueuePanel } from "./components/canvas/ProductionRunQueuePanel";
+import { useProductionRunExecutor } from "./hooks/useProductionRunExecutor";
 import { StoryboardBatchProgressOverlay } from "./components/canvas/StoryboardBatchProgressOverlay";
 import { CanvasContextMenu } from "./components/menus/CanvasContextMenu";
 import PropertyPanel from "./components/panels/PropertyPanel";
@@ -764,6 +765,24 @@ function StarCanvasInner() {
     const manifest = buildProjectPackageManifest({ shots: briefs.map((b) => ({ id: b.shotId, order: b.order, title: b.title })), productionBriefs: briefs });
     return buildProductionRunQueue(manifest, { jobId: "canvas-production-run" });
   }, [nodes]);
+
+  // ── Production Run Executor (Step 2: entry point, placeholder mode) ──
+  const productionExecutor = useProductionRunExecutor({
+    queue: productionRunQueue,
+    onExecuteTask: useCallback(
+      async (_task, _signal) => {
+        // Step 2 placeholder: 模拟每次任务执行 0.5s 延迟
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(resolve, 500);
+          _signal.addEventListener("abort", () => {
+            clearTimeout(timer);
+            reject(new DOMException("Aborted", "AbortError"));
+          }, { once: true });
+        });
+      },
+      [],
+    ),
+  });
 
   const handleApplyCharacterAssetPatch = useCallback((assetKey: string, patch: CharacterAssetLibraryPatch) => {
     pushUndo({ nodes: nodesRef.current, edges: edgesRef.current });
@@ -6573,6 +6592,8 @@ function StarCanvasInner() {
           <ProductionRunQueuePanel
             queue={productionRunQueue}
             onClose={() => setShowProductionQueue(false)}
+            isRunning={productionExecutor.isRunning}
+            onStart={productionExecutor.start}
           />,
           document.body,
         )}
