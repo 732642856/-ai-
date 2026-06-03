@@ -183,6 +183,8 @@ import {
   type CharacterAssetLibraryPatch,
 } from "@/lib/storyboard/characterAssetLibrary";
 import { buildStoryboardImagePrompt } from "@/lib/storyboard/storyboardImagePrompt";
+import { buildShotProductionBriefs } from "@/lib/storyboard/shotProductionBrief";
+import { buildProjectPackageManifest } from "@/lib/storyboard/projectPackageManifest";
 import type {
   ChatCanvasAction,
   ApplyActionsReport,
@@ -4169,6 +4171,15 @@ function StarCanvasInner() {
         note: getNodeText(node),
       }));
 
+    const productionBriefs = buildShotProductionBriefs(nodes);
+    const productionRunManifest = buildProjectPackageManifest({
+      shots,
+      productionBriefs,
+      visualReferences,
+      audioIntent,
+      handoffNotes,
+    });
+
     return {
       schema: "startrails-project-package/v1",
       source: "星轨画布（前期）",
@@ -4185,6 +4196,8 @@ function StarCanvasInner() {
         audioIntent: audioIntent.length,
       },
       shots,
+      productionBriefs,
+      productionRunManifest,
       visualReferences,
       audioIntent,
       handoffNotes,
