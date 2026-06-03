@@ -54,6 +54,8 @@ import {
   Eye,
   ArrowLeft,
   ArrowRight,
+  Play,
+  ListChecks,
   type LucideIcon,
 } from "lucide-react";
 
@@ -90,6 +92,7 @@ import { EmptyCanvasGuide } from "./components/canvas/EmptyCanvasGuide";
 import { CanvasDropOverlay } from "./components/canvas/CanvasDropOverlay";
 import { AssetLibraryPanel } from "./components/canvas/AssetLibraryPanel";
 import { CharacterAssetLibraryPanel } from "./components/canvas/CharacterAssetLibraryPanel";
+import { ProductionRunQueuePanel } from "./components/canvas/ProductionRunQueuePanel";
 import { StoryboardBatchProgressOverlay } from "./components/canvas/StoryboardBatchProgressOverlay";
 import { CanvasContextMenu } from "./components/menus/CanvasContextMenu";
 import PropertyPanel from "./components/panels/PropertyPanel";
@@ -185,6 +188,7 @@ import {
 import { buildStoryboardImagePrompt } from "@/lib/storyboard/storyboardImagePrompt";
 import { buildShotProductionBriefs } from "@/lib/storyboard/shotProductionBrief";
 import { buildProjectPackageManifest } from "@/lib/storyboard/projectPackageManifest";
+import { buildProductionRunQueue } from "@/lib/storyboard/productionRunQueue";
 import type {
   ChatCanvasAction,
   ApplyActionsReport,
@@ -710,6 +714,7 @@ function StarCanvasInner() {
   const [showAddNodePanel, setShowAddNodePanel] = useState(false);
   const [showNodeHistory, setShowNodeHistory] = useState(false);
   const [showCharacterLibrary, setShowCharacterLibrary] = useState(false);
+  const [showProductionQueue, setShowProductionQueue] = useState(false);
   const [historyNodeId, setHistoryNodeId] = useState<string | null>(null);
   const [isComposingSelectedShots, setIsComposingSelectedShots] = useState(false);
   const [showStoryboardCompositeSettings, setShowStoryboardCompositeSettings] =
@@ -752,6 +757,13 @@ function StarCanvasInner() {
     ),
     [nodes],
   );
+
+  const productionRunQueue = useMemo(() => {
+    const briefs = buildShotProductionBriefs(nodes);
+    if (briefs.length === 0) return null;
+    const manifest = buildProjectPackageManifest({ shots: briefs.map((b) => ({ id: b.shotId, order: b.order, title: b.title })), productionBriefs: briefs });
+    return buildProductionRunQueue(manifest, { jobId: "canvas-production-run" });
+  }, [nodes]);
 
   const handleApplyCharacterAssetPatch = useCallback((assetKey: string, patch: CharacterAssetLibraryPatch) => {
     pushUndo({ nodes: nodesRef.current, edges: edgesRef.current });
@@ -5569,6 +5581,23 @@ function StarCanvasInner() {
           <Sparkles size={14} strokeWidth={1.7} />
           <span>角色库 {characterLibraryItems.length}</span>
         </button>
+        {productionRunQueue && (
+          <button
+            type="button"
+            onClick={() => setShowProductionQueue((value) => !value)}
+            className="flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-medium backdrop-blur-xl transition hover:bg-white/10"
+            style={{
+              borderColor: showProductionQueue ? "rgba(59, 130, 246, 0.5)" : DESIGN_TOKENS.border,
+              backgroundColor: showProductionQueue ? "rgba(59, 130, 246, 0.18)" : "rgba(18,18,24,0.7)",
+              color: DESIGN_TOKENS.textSecondary,
+            }}
+            title="查看当前画布的生产运行队列（视觉/配音/字幕）"
+            data-testid="production-run-queue-toggle"
+          >
+            <ListChecks size={14} strokeWidth={1.7} />
+            <span>生产队列 {productionRunQueue.totalTasks}</span>
+          </button>
+        )}
       </div>
 
       {selectedShotCount >= 2 && (
@@ -6533,6 +6562,17 @@ function StarCanvasInner() {
             items={characterLibraryItems}
             onApplyAssetPatch={handleApplyCharacterAssetPatch}
             onClose={() => setShowCharacterLibrary(false)}
+          />,
+          document.body,
+        )}
+
+      {/* Production Run Queue Panel */}
+      {showProductionQueue && productionRunQueue &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <ProductionRunQueuePanel
+            queue={productionRunQueue}
+            onClose={() => setShowProductionQueue(false)}
           />,
           document.body,
         )}
