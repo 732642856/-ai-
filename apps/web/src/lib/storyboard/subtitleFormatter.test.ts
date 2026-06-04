@@ -5,6 +5,7 @@ import {
   formatDialogueAsSrt,
   formatSrtTimecode,
   parseDurationToSeconds,
+  convertSrtToVtt,
 } from "./subtitleFormatter.ts";
 
 void describe("formatSrtTimecode", () => {
@@ -137,5 +138,37 @@ void describe("parseDurationToSeconds", () => {
     assert.equal(parseDurationToSeconds(undefined), undefined);
     assert.equal(parseDurationToSeconds(""), undefined);
     assert.equal(parseDurationToSeconds("abc"), undefined);
+  });
+});
+
+void describe("convertSrtToVtt", () => {
+  void it("adds WEBVTT header", () => {
+    const srt = "1\n00:00:00,000 --> 00:00:02,000\n你好。\n";
+    const vtt = convertSrtToVtt(srt);
+    assert.ok(vtt.startsWith("WEBVTT\n\n"), "should start with WEBVTT header");
+  });
+
+  void it("converts comma timecodes to period timecodes", () => {
+    const srt = "1\n00:00:00,000 --> 00:00:02,500\n你好。\n";
+    const vtt = convertSrtToVtt(srt);
+    assert.ok(vtt.includes("00:00:00.000 --> 00:00:02.500"), "timecodes should use periods");
+    assert.ok(!vtt.includes(",000"), "should not contain comma timecodes");
+  });
+
+  void it("preserves subtitle text and index numbers", () => {
+    const srt = "1\n00:00:00,000 --> 00:00:02,000\n第一句。\n\n2\n00:00:02,000 --> 00:00:04,000\n第二句。\n";
+    const vtt = convertSrtToVtt(srt);
+    assert.ok(vtt.includes("第一句。"), "should preserve first subtitle");
+    assert.ok(vtt.includes("第二句。"), "should preserve second subtitle");
+    assert.ok(vtt.includes("1\n"), "should preserve index 1");
+    assert.ok(vtt.includes("2\n"), "should preserve index 2");
+  });
+
+  void it("round-trips correctly from formatDialogueAsSrt", () => {
+    const result = formatDialogueAsSrt("你好。再见。", { durationSeconds: 4 });
+    const vtt = convertSrtToVtt(result.srt);
+    assert.ok(vtt.startsWith("WEBVTT\n\n"));
+    assert.ok(vtt.includes("你好。"));
+    assert.ok(vtt.includes("再见。"));
   });
 });

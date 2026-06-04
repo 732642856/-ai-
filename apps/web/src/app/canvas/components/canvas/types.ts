@@ -297,6 +297,8 @@ export type CanvasNodeData = {
   summary?: string
   prompt?: string
   content?: string
+  /** 文本内容（非 markdown 类型节点的纯文本展示，兼容旧数据） */
+  text?: string
   negativePrompt?: string
   instruction?: string
   inputs?: Array<{ id?: string; label: string; type?: string }>
@@ -385,6 +387,20 @@ export type CanvasNodeData = {
   source?: "upload" | "generated" | "remote"
   /** @internal Error identifier when image asset is not found on restore */
   loadError?: string
+
+  // --- Subtitle / Handoff node fields ---
+  /** SRT 字幕原始内容 */
+  srtContent?: string
+  /** 字幕分段信息 */
+  segments?: Array<{ index: number; start: number; end: number; text: string }>
+  /** 字幕总时长（秒） */
+  totalDurationSeconds?: number
+  /** 字幕格式标识 */
+  format?: string
+  /** 交接报告元数据 */
+  totalWarnings?: number
+  affectedShotCount?: number
+  affectedShotIds?: string[]
 
   // --- Persistence internal marker (deprecated, kept for reading old data) ---
   /** @deprecated Use `persistence` field instead */

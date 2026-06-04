@@ -536,6 +536,7 @@ function tryRedo() {
 const nodeTypes = {
   image: ImageNode,
   content: ContentNode,
+  text: ContentNode,
   workflow: WorkflowNode,
   shot: ShotNode,
   storyboardGrid: StoryboardGridNode,

@@ -16,6 +16,7 @@ import {
   Grid3X3,
   MessageSquareText,
   Image,
+  Download,
 } from "lucide-react"
 import { Handle, Position, NodeResizer, type NodeProps, useReactFlow } from "@xyflow/react"
 import { DESIGN_TOKENS } from "../../styles/designSystem"
@@ -39,6 +40,7 @@ import {
 import { InlineSlashCommandMenu } from "../menus/InlineSlashCommandMenu"
 import { getCachedDefaultImageModel } from "@/lib/ai/client"
 import { getModelOptions } from "@/lib/ai/imageProviderCapabilities"
+import { convertSrtToVtt } from "@/lib/storyboard/subtitleFormatter"
 
 interface ContentNodeProps extends NodeProps {
   data: CanvasNodeData
@@ -104,7 +106,10 @@ export const ContentNode = memo(function ContentNode({ id, data, selected, width
   const content = data.content || data.prompt || ""
   const isStoryboardNode = data.nodeKind === "storyboard"
   const isDocumentNode = data.nodeKind === "document"
+  const isSubtitleSrtNode = data.nodeKind === "subtitle-srt"
+  const isHandoffReportNode = data.nodeKind === "handoff-report"
   const isWritingSourceNode = isStoryboardNode || isDocumentNode || data.nodeKind === "text" || data.nodeKind === "prompt"
+  const isReadonlyContentNode = isSubtitleSrtNode || isHandoffReportNode
   const isFocusWritingMode = data.writingMode === "focus"
   const storyboardStage = getStoryboardAssistantStage({
     stage: data.storyboardAssistantStage,
@@ -128,15 +133,19 @@ export const ContentNode = memo(function ContentNode({ id, data, selected, width
         : data.storyboardResultQuality === "composed-grid"
           ? "已合成多镜头分镜图。"
           : undefined
-  const contentNodeBadge = data.nodeKind === "prompt"
-    ? data.storyboardOutputImageUrl || data.storyboardAssistantStage
-      ? "故事分镜"
-      : "写作文本"
-    : isStoryboardNode
-      ? storyboardLabels.badge
-      : isDocumentNode
-        ? "创作文档"
-        : "写作文本"
+  const contentNodeBadge = isSubtitleSrtNode
+    ? "字幕文件"
+    : isHandoffReportNode
+      ? "交接报告"
+      : data.nodeKind === "prompt"
+        ? data.storyboardOutputImageUrl || data.storyboardAssistantStage
+          ? "故事分镜"
+          : "写作文本"
+        : isStoryboardNode
+          ? storyboardLabels.badge
+          : isDocumentNode
+            ? "创作文档"
+            : "写作文本"
   const isStoryboardRunVisible =
     isWritingSourceNode &&
     effectiveStoryboardRunMeta?.message &&
@@ -370,6 +379,42 @@ export const ContentNode = memo(function ContentNode({ id, data, selected, width
       ),
     )
   }, [id, isDocumentNode, isFocusWritingMode, isStoryboardNode, setNodes])
+
+  const handleDownloadSubtitle = useCallback((format: "srt" | "vtt") => {
+    const srtContent = data.srtContent || content
+    if (!srtContent) return
+
+    const fileContent = format === "vtt" ? convertSrtToVtt(srtContent) : srtContent
+    const ext = format === "vtt" ? ".vtt" : ".srt"
+    const mimeType = format === "vtt" ? "text/vtt" : "text/plain"
+    const baseName = (data.title || "subtitle").replace(/\.[^.]+$/, "")
+
+    const blob = new Blob([fileContent], { type: `${mimeType};charset=utf-8` })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `${baseName}${ext}`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }, [content, data.srtContent, data.title])
+
+  const handleDownloadHandoffReport = useCallback(() => {
+    const reportContent = data.content || data.text || content
+    if (!reportContent) return
+
+    const baseName = (data.title || "handoff-report").replace(/\.[^.]+$/, "")
+    const blob = new Blob([reportContent], { type: "text/markdown;charset=utf-8" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `${baseName}.md`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }, [content, data.content, data.text, data.title])
 
   const handleContinueStoryboardAssistant = useCallback(async (sourceText: string) => {
     const currentText = editContent
@@ -650,6 +695,42 @@ export const ContentNode = memo(function ContentNode({ id, data, selected, width
               {isFocusWritingMode ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
               <span>{isFocusWritingMode ? "恢复" : "大屏"}</span>
             </button>
+            {isSubtitleSrtNode && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleDownloadSubtitle("srt")}
+                  className="nodrag nopan flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] transition-colors hover:bg-white/10"
+                  style={{ color: DESIGN_TOKENS.accent }}
+                  title="下载 SRT 字幕文件"
+                >
+                  <Download size={12} />
+                  <span>SRT</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDownloadSubtitle("vtt")}
+                  className="nodrag nopan flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] transition-colors hover:bg-white/10"
+                  style={{ color: DESIGN_TOKENS.accentHover }}
+                  title="下载 WebVTT 字幕文件（兼容网页播放器）"
+                >
+                  <Download size={12} />
+                  <span>VTT</span>
+                </button>
+              </>
+            )}
+            {isHandoffReportNode && (
+              <button
+                type="button"
+                onClick={handleDownloadHandoffReport}
+                className="nodrag nopan flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] transition-colors hover:bg-white/10"
+                style={{ color: DESIGN_TOKENS.accent }}
+                title="下载交接报告 (Markdown)"
+              >
+                <Download size={12} />
+                <span>导出</span>
+              </button>
+            )}
             <NodeRunStatusIndicator data={data} variant="dot" />
           </div>
         </div>
@@ -775,6 +856,7 @@ export const ContentNode = memo(function ContentNode({ id, data, selected, width
           </div>
         </div>
 
+        {!isReadonlyContentNode && (
         <div
           className="shrink-0 border-t px-3 py-2.5"
           style={{ borderColor: DESIGN_TOKENS.border }}
@@ -958,6 +1040,7 @@ export const ContentNode = memo(function ContentNode({ id, data, selected, width
             </div>
           )}
         </div>
+        )}
       </div>
     </>
   )

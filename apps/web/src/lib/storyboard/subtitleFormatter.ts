@@ -18,6 +18,9 @@ export type FormattedSubtitle = {
   totalDurationSeconds: number;
 };
 
+/** Supported subtitle export formats. */
+export type SubtitleExportFormat = "srt" | "vtt";
+
 /** Options for subtitle formatting. */
 export type SubtitleFormatOptions = {
   /** Duration of the shot in seconds (default 5). */
@@ -163,4 +166,27 @@ export function parseDurationToSeconds(raw?: string): number | undefined {
   if (numericMatch) return parseFloat(numericMatch[1]!);
 
   return undefined;
+}
+
+/**
+ * Convert SRT-formatted subtitles to WebVTT format.
+ */
+export function convertSrtToVtt(srtContent: string): string {
+  // VTT header
+  let vtt = "WEBVTT\n\n";
+
+  // Replace comma timecodes with period timecodes (SRT uses "," VTT uses ".")
+  const lines = srtContent.split("\n");
+  for (const line of lines) {
+    const timecodeMatch = line.match(
+      /^(\d{2}:\d{2}:\d{2}),(\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}),(\d{3})$/,
+    );
+    if (timecodeMatch) {
+      vtt += `${timecodeMatch[1]}.${timecodeMatch[2]} --> ${timecodeMatch[3]}.${timecodeMatch[4]}\n`;
+    } else {
+      vtt += `${line}\n`;
+    }
+  }
+
+  return vtt;
 }
