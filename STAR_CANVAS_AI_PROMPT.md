@@ -1,7 +1,7 @@
 # 🌌 星轨画布（StarCanvas）—— AI 开发平台工程提示词
 
 > 用户提供的完整技术规格 + 竞品差距分析。2026-05-31 版本。
-> 测试基线：**372 tests / 372 pass / 0 fail**
+> 测试基线：**440 tests / 440 pass / 0 fail**
 
 ---
 
@@ -10,7 +10,7 @@
 ```
 项目名称：星轨画布 / StarCanvas
 仓库路径：/Users/wuyongnaren/Projects/StarCanvas/01_MAIN_主干/starcanvas
-技术栈：Next.js 14 App Router · TypeScript · ReactFlow (@xyflow/react) · TailwindCSS · Zustand
+技术栈：Next.js 16 App Router · TypeScript · ReactFlow (@xyflow/react) · TailwindCSS · Zustand
 项目类型：AI 原生可视化创作工具
 核心价值链：剧本/故事 → AI 自动拆解为角色+分镜 → 批量 AI 生图 → 组装绘本/故事板
 对标产品：TapNow（AI 原生创意画布，含视频生成、Agent 侧栏、全局资产库等完整能力）
@@ -45,7 +45,7 @@ apps/web/src/app/canvas/
 │
 └── utils/
     ├── imageGeneration.ts                 # 图片生成工具函数
-    ├── imageGeneration.test.ts            # 372 tests
+    ├── imageGeneration.test.ts            # 440 tests (38 test files)
     ├── storyboardGridComposer.ts          # 分镜合成核心
     ├── storyboardGridComposer.test.ts     # 14 tests
     ├── graph-traversal.ts                 # 图遍历算法
@@ -368,7 +368,7 @@ scope: agent | workflow | image | canvas | ui | infra | storyboard
 
 ```
 tsc --noEmit       # TypeScript 零错误
-pnpm --filter web test  # 372 tests / 372 pass / 0 fail
+pnpm --filter web test  # 440 tests / 440 pass / 0 fail
 
 仓库：/Users/wuyongnaren/Projects/StarCanvas/01_MAIN_主干/starcanvas
 ```

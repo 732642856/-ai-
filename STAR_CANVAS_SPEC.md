@@ -9,7 +9,7 @@
 ```
 项目名称：星轨画布 / StarCanvas
 仓库路径：/Users/wuyongnaren/Projects/StarCanvas/01_MAIN_主干/starcanvas
-技术栈：Next.js 14 App Router · TypeScript · ReactFlow (@xyflow/react) · TailwindCSS · Zustand
+技术栈：Next.js 16 App Router · TypeScript · ReactFlow (@xyflow/react) · TailwindCSS · Zustand
 项目类型：AI 原生可视化创作工具
 核心价值链：剧本/故事 → AI 自动拆解为角色+分镜 → 批量 AI 生图 → 组装绘本/故事板
 ```
@@ -44,7 +44,7 @@ apps/web/src/app/canvas/
 │
 └── utils/
     ├── imageGeneration.ts                 # 图片生成工具函数
-    ├── imageGeneration.test.ts            # 372 tests
+    ├── imageGeneration.test.ts            # 440 tests (38 test files)
     ├── storyboardGridComposer.ts          # 分镜合成核心
     ├── storyboardGridComposer.test.ts     # 14 tests
     ├── graph-traversal.ts                 # 图遍历算法
@@ -353,7 +353,7 @@ scope: agent | workflow | image | canvas | ui | infra | storyboard
 ```
 提交前必须通过：
   tsc                    # TypeScript 类型检查零错误
-  372 tests / 372 pass   # 全量测试通过
+  440 tests / 440 pass   # 全量测试通过
 
 仓库根目录：
   /Users/wuyongnaren/Projects/StarCanvas/01_MAIN_主干/starcanvas
@@ -426,7 +426,7 @@ Agent 主题色：紫色（rgba(168, 85, 247, ...)）
 - 不破坏现有闭环
 - 快捷键 Ctrl+Z 撤销 / Ctrl+Y 重做
 - 工具栏增加 undo/redo 按钮
-- tsc 零错误 + 372 tests 全通过
+- tsc 零错误 + 440 tests 全通过
 验收标准：
 - 画布操作（拖拽/创建/删除节点）后 Ctrl+Z 可撤销
 - 撤销后 Ctrl+Y 可重做
