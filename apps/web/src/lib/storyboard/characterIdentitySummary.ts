@@ -108,3 +108,47 @@ export function summarizeCharacterIdentities(
       };
     });
 }
+
+/**
+ * 为图像生成构建角色一致性提示词片段（英文，用于注入 Stable Diffusion / DALL·E 提示词）
+ * 对标 TapNow NBP 一致性 + 小云雀资产联动
+ */
+export function buildCharacterConsistencyPrompt(
+  identities: CharacterIdentityAsset[] | undefined,
+): string {
+  if (!identities?.length) return "";
+
+  const chars = identities
+    .filter((id) => cleanText(id.name))
+    .slice(0, 5); // 最多 5 个角色避免提示词过长
+
+  if (chars.length === 0) return "";
+
+  const lines: string[] = [];
+  for (const char of chars) {
+    const name = cleanText(char.name);
+    const role = cleanText(char.role);
+    const signature = cleanText(char.visualSignature);
+    const costume = cleanText(char.costume);
+    const props = unique(char.props ?? []);
+    const traits = unique(char.physicalTraits ?? []);
+    const palette = unique(char.colorPalette ?? []);
+
+    const parts: string[] = [];
+    if (signature) parts.push(signature);
+    if (costume) parts.push(`wearing ${costume}`);
+    if (props.length) parts.push(`with ${props.slice(0, 2).join(", ")}`);
+    if (traits.length) parts.push(traits.slice(0, 2).join(", "));
+    if (palette.length) parts.push(`color palette: ${palette.slice(0, 2).join(", ")}`);
+
+    if (parts.length === 0) continue;
+
+    const label = role ? `${name} (${role})` : name;
+    lines.push(`${label}: ${parts.join(". ")}`);
+  }
+
+  if (lines.length === 0) return "";
+
+  // 用方括号包裹让 AI 理解这是角色约束而非场景描述
+  return `[Character consistency requirements: ${lines.join("; ")}]`;
+}

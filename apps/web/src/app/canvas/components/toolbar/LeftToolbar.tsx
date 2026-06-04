@@ -4,7 +4,7 @@
  * - 底部保留素材库、聊天、用户
  */
 
-import { Plus, Library, MessageCircle, Clock3 } from "lucide-react"
+import { Plus, Library, MessageCircle, Clock3, Save } from "lucide-react"
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 
 interface LeftToolbarProps {
@@ -14,6 +14,7 @@ interface LeftToolbarProps {
   onToggleChat: () => void
   isChatOpen: boolean
   onOpenWorkspaceHistory?: () => void
+  onOpenTemplates?: () => void
   onOpenUserMenu: () => void
 }
 
@@ -24,6 +25,7 @@ export function LeftToolbar({
   onToggleChat,
   isChatOpen,
   onOpenWorkspaceHistory,
+  onOpenTemplates,
   onOpenUserMenu,
 }: LeftToolbarProps) {
   return (
@@ -87,6 +89,28 @@ export function LeftToolbar({
       >
         <MessageCircle size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />
       </button>
+
+      {/* 分隔线 */}
+      <div
+        className="my-1.5 h-px w-6"
+        style={{ backgroundColor: DESIGN_TOKENS.border }}
+      />
+
+      {/* 工作流模板 —— 对标 TapNow 克隆 / LibTV 打组保存 */}
+      <button
+        onClick={onOpenTemplates}
+        className="flex h-9 w-9 items-center justify-center rounded-full transition-all hover:bg-white/10"
+        style={{ color: DESIGN_TOKENS.textMuted }}
+        title="工作流模板（保存/加载）"
+      >
+        <Save size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />
+      </button>
+
+      {/* 分隔线 */}
+      <div
+        className="my-1.5 h-px w-6"
+        style={{ backgroundColor: DESIGN_TOKENS.border }}
+      />
 
       {/* 工作记录 */}
       <button

@@ -102,6 +102,8 @@ import { EdgeContextMenu } from "./components/menus/EdgeContextMenu";
 import { ImageHoverToolbar } from "./components/toolbar/ImageHoverToolbar";
 import SelectionToolbar from "./components/toolbar/SelectionToolbar";
 import { LeftToolbar } from "./components/toolbar/LeftToolbar";
+import { WorkflowTemplatesDialog } from "./components/toolbar/WorkflowTemplatesDialog";
+import { useWorkflowTemplates, type WorkflowTemplate } from "./hooks/useWorkflowTemplates";
 import { AddNodePanel } from "./components/toolbar/AddNodePanel";
 import { ChatPanel } from "./components/chat/ChatPanel";
 import { SettingsPanel } from "./components/panels/SettingsPanel";
@@ -187,6 +189,7 @@ import {
   collectCharacterAssetLibraryItemsFromShots,
   type CharacterAssetLibraryPatch,
 } from "@/lib/storyboard/characterAssetLibrary";
+import { buildCharacterConsistencyPrompt } from "@/lib/storyboard/characterIdentitySummary";
 import { buildStoryboardImagePrompt } from "@/lib/storyboard/storyboardImagePrompt";
 import { buildShotProductionBriefs, buildShotProductionBrief } from "@/lib/storyboard/shotProductionBrief";
 import { buildProjectPackageManifest } from "@/lib/storyboard/projectPackageManifest";
@@ -711,6 +714,7 @@ function StarCanvasInner() {
   const [chatOpen, setChatOpen] = useState(true);
   const [showHistory, setShowHistory] = useState(false);
   const [showWorkspaceHistory, setShowWorkspaceHistory] = useState(false);
+  const [showTemplatesDialog, setShowTemplatesDialog] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
   const [showHelp, setShowHelp] = useState(false);
@@ -1683,7 +1687,15 @@ function StarCanvasInner() {
       const shot = shotNode?.data.shot;
       if (!shotNode || !shot) return false;
 
-      const prompt = (shot.visualPrompt || shot.description || "").trim();
+      const basePrompt = (shot.visualPrompt || shot.description || "").trim();
+
+      // 注入角色一致性信息到提示词（对标 TapNow NBP + 小云雀资产联动）
+      const characterPrompt = buildCharacterConsistencyPrompt(
+        shot.characterIdentities,
+      );
+      const prompt = characterPrompt
+        ? `${basePrompt} ${characterPrompt}`
+        : basePrompt;
       const sourceStoryboardNode = shot.sourceStoryboardNodeId
         ? currentNodes.find((node) => node.id === shot.sourceStoryboardNodeId)
         : undefined;
@@ -3837,6 +3849,35 @@ function StarCanvasInner() {
     setEdges,
     setFitViewOnce,
   });
+
+  // ========================================================================
+  // WORKFLOW TEMPLATES — save/load/clone canvas state
+  // ========================================================================
+  const workflowTemplates = useWorkflowTemplates();
+
+  const handleSaveTemplate = useCallback(
+    (name: string) => {
+      workflowTemplates.saveAsTemplate(name, nodes, edges);
+      setShowTemplatesDialog(false);
+    },
+    [workflowTemplates, nodes, edges],
+  );
+
+  const handleLoadTemplate = useCallback(
+    async (template: WorkflowTemplate) => {
+      if (nodes.length > 0) {
+        const ok = window.confirm(
+          "加载模板将替换当前画布上的所有节点。是否继续？",
+        );
+        if (!ok) return;
+      }
+      setNodes(template.nodes);
+      setEdges(template.edges);
+      setFitViewOnce(true);
+      setShowTemplatesDialog(false);
+    },
+    [nodes.length, setNodes, setEdges, setFitViewOnce],
+  );
 
   // ========================================================================
   // SETTINGS & RUN-NODE EVENT LISTENERS
@@ -6417,7 +6458,25 @@ function StarCanvasInner() {
         onToggleChat={() => setChatOpen((prev) => !prev)}
         isChatOpen={chatOpen}
         onOpenWorkspaceHistory={() => setShowWorkspaceHistory(true)}
+        onOpenTemplates={() => setShowTemplatesDialog(true)}
         onOpenUserMenu={() => setShowUserMenu((prev) => !prev)}
+      />
+
+      {/* Workflow Templates Dialog */}
+      <WorkflowTemplatesDialog
+        isOpen={showTemplatesDialog}
+        onClose={() => setShowTemplatesDialog(false)}
+        templates={workflowTemplates.templates}
+        onSave={handleSaveTemplate}
+        onLoad={handleLoadTemplate}
+        onDelete={workflowTemplates.deleteTemplate}
+        onExport={workflowTemplates.exportAsJSON}
+        onImport={(json) => {
+          const template = workflowTemplates.importFromJSON(json);
+          if (!template) {
+            alert("导入失败：文件格式无效。请确保使用 StarCanvas 导出的模板文件。");
+          }
+        }}
       />
 
       {/* Add Node Panel (TapNow-style) */}
