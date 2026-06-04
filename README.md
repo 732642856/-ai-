@@ -2,6 +2,8 @@
 
 搭载节点工作流的 AI 驱动多模态资产编排画布。
 
+> **Status**: 440 tests passing · TypeScript strict · Next.js 16 · `main` branch
+
 ## 快速开始
 
 ```bash
