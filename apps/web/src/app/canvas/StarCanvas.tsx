@@ -188,9 +188,10 @@ import {
   type CharacterAssetLibraryPatch,
 } from "@/lib/storyboard/characterAssetLibrary";
 import { buildStoryboardImagePrompt } from "@/lib/storyboard/storyboardImagePrompt";
-import { buildShotProductionBriefs } from "@/lib/storyboard/shotProductionBrief";
+import { buildShotProductionBriefs, buildShotProductionBrief } from "@/lib/storyboard/shotProductionBrief";
 import { buildProjectPackageManifest } from "@/lib/storyboard/projectPackageManifest";
 import { buildProductionRunQueue } from "@/lib/storyboard/productionRunQueue";
+import { formatDialogueAsSrt, parseDurationToSeconds } from "@/lib/storyboard/subtitleFormatter";
 import type {
   ChatCanvasAction,
   ApplyActionsReport,
@@ -957,9 +958,41 @@ function StarCanvasInner() {
               return;
             }
 
+            // 从 shot 中获取时长（优先使用 shot.duration 解析，默认 5 秒）
+            const rawDuration = shotNode.data.shot?.duration;
+            const shotDuration =
+              parseDurationToSeconds(rawDuration) ??
+              (typeof rawDuration === "number" ? rawDuration : 5);
+
+            // 生成 SRT 格式字幕
+            const subtitleResult = formatDialogueAsSrt(dialogue, {
+              durationSeconds: shotDuration,
+              maxCharsPerLine: 40,
+              minSegmentDuration: 1,
+            });
+
             const subtitleNodeId = generateId();
             const nodeWidth =
               typeof shotNode.width === "number" ? shotNode.width : 320;
+
+            // 将 SRT 内容存储为文本节点的内容
+            const subtitleText = [
+              `# 字幕`,
+              ``,
+              `**格式**: SRT`,
+              `**总时长**: ${subtitleResult.totalDurationSeconds}s`,
+              `**段落数**: ${subtitleResult.segments.length}`,
+              ``,
+              `## SRT 内容`,
+              `---`,
+              subtitleResult.srt,
+              `---`,
+              `## 时间轴`,
+              ...subtitleResult.segments.map(
+                (seg) =>
+                  `- ${seg.startSeconds}s → ${seg.endSeconds}s: ${seg.text}`,
+              ),
+            ].join("\n");
 
             setNodes((nds) => [
               ...nds,
@@ -974,10 +1007,14 @@ function StarCanvasInner() {
                   title: shotNode.data.title
                     ? `${shotNode.data.title} 字幕`
                     : "字幕",
-                  text: dialogue,
-                  nodeKind: "subtitle-text",
+                  text: subtitleText,
+                  nodeKind: "subtitle-srt",
                   sourceShotId: shotNode.id,
                   sourceType: "shot",
+                  format: "srt",
+                  srtContent: subtitleResult.srt,
+                  segments: subtitleResult.segments,
+                  totalDurationSeconds: subtitleResult.totalDurationSeconds,
                   createdAt: Date.now(),
                 },
               } as any,
@@ -998,7 +1035,126 @@ function StarCanvasInner() {
           }
 
           case "review-handoff-warnings": {
-            // 无需执行操作，警告已在 ProductionRunQueuePanel 中显示
+            // 幂等性：如果已有交接报告节点，跳过
+            const existingReport = nodesRef.current.find(
+              (n) => n.data.nodeKind === "handoff-report",
+            );
+            if (existingReport) break;
+
+            // 汇总所有 shot 节点的 handoffWarnings
+            const warningsByShot: Array<{
+              shotNode: Node;
+              warnings: string[];
+            }> = [];
+
+            for (const n of nodesRef.current) {
+              const shot = n.data.shot;
+              if (!shot) continue;
+
+              // 使用 buildShotProductionBrief 构建生产简报，提取 handoff.warnings
+              const brief = buildShotProductionBrief(shot);
+              const warnings = brief.handoff.warnings || [];
+
+              if (warnings.length > 0) {
+                warningsByShot.push({ shotNode: n, warnings });
+              }
+            }
+
+            // 生成报告文本
+            const now = new Date().toISOString().slice(0, 19).replace("T", " ");
+            const reportTitle = `交接警告报告`;
+            const totalWarnings = warningsByShot.reduce(
+              (sum, item) => sum + item.warnings.length,
+              0,
+            );
+
+            let reportText = [
+              `# ${reportTitle}`,
+              ``,
+              `**生成时间**: ${now}`,
+              `**涉及镜头数**: ${warningsByShot.length}`,
+              `**警告总数**: ${totalWarnings}`,
+              ``,
+            ];
+
+            if (warningsByShot.length === 0) {
+              reportText.push(`✅ 所有镜头无交接警告。`);
+            } else {
+              reportText.push(`## 逐镜头警告详情`);
+              reportText.push(``);
+
+              for (const { shotNode, warnings } of warningsByShot) {
+                const title =
+                  shotNode.data.title ||
+                  (shotNode.data.shot as any)?.id ||
+                  shotNode.id;
+                reportText.push(`### ${title}`);
+                reportText.push(``);
+                for (let i = 0; i < warnings.length; i++) {
+                  reportText.push(`- **${i + 1}**. ${warnings[i]}`);
+                }
+                reportText.push(``);
+              }
+            }
+
+            const reportTextStr = reportText.join("\n");
+            const reportNodeId = generateId();
+
+            // 找到所有有警告的镜头节点中最左侧和最上侧的位置
+            const xPositions = warningsByShot.map(
+              (item) => item.shotNode.position.x ?? 0,
+            );
+            const avgX =
+              xPositions.length > 0
+                ? xPositions.reduce((a, b) => a + b, 0) / xPositions.length
+                : 0;
+            const minY = warningsByShot.reduce(
+              (min, item) =>
+                Math.min(min, item.shotNode.position.y ?? Infinity),
+              Infinity,
+            );
+
+            setNodes((nds) => [
+              ...nds,
+              {
+                id: reportNodeId,
+                type: "text",
+                position: {
+                  x: avgX,
+                  y: minY !== Infinity ? minY - 220 : 0,
+                },
+                data: {
+                  title: reportTitle,
+                  text: reportTextStr,
+                  nodeKind: "handoff-report",
+                  sourceType: "production-run",
+                  totalWarnings,
+                  affectedShotCount: warningsByShot.length,
+                  affectedShotIds: warningsByShot.map(
+                    (item) => item.shotNode.id,
+                  ),
+                  createdAt: Date.now(),
+                },
+              } as any,
+            ]);
+
+            // 创建从报告节点到每个有警告的镜头节点的引用边
+            const reportEdges = warningsByShot.map(({ shotNode }) => ({
+              id: `edge-handoff-${reportNodeId}-${shotNode.id}`,
+              source: reportNodeId,
+              target: shotNode.id,
+              type: "creative",
+              animated: true,
+              style: {
+                stroke: "rgba(234, 179, 8, 0.4)",
+                strokeWidth: 1.5,
+                strokeDasharray: "6 3",
+              },
+            }));
+
+            if (reportEdges.length > 0) {
+              setEdges((eds) => [...eds, ...reportEdges]);
+            }
             break;
           }
 

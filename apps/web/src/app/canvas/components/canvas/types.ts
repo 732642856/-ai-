@@ -70,6 +70,8 @@ export type CanvasNodeKind =
   | "video-analyze"
   | "video"
   | "agent"
+  | "subtitle-srt"
+  | "handoff-report"
 
 // ============================================================================
 // Node Run Status (P1-3 六态模型)
@@ -813,5 +815,19 @@ export const nodeToneStyles: Record<CanvasNodeKind, {
     meta: "text-amber-300/60",
     border: "1px solid rgba(245, 158, 11, 0.2)",
     background: "rgba(245, 158, 11, 0.1)",
+  },
+  "subtitle-srt": {
+    eyebrow: "text-blue-300",
+    body: "text-blue-200/75",
+    meta: "text-blue-300/60",
+    border: "1px solid rgba(59, 130, 246, 0.2)",
+    background: "rgba(59, 130, 246, 0.1)",
+  },
+  "handoff-report": {
+    eyebrow: "text-yellow-300",
+    body: "text-yellow-200/75",
+    meta: "text-yellow-300/60",
+    border: "1px solid rgba(234, 179, 8, 0.3)",
+    background: "rgba(234, 179, 8, 0.1)",
   },
 }
