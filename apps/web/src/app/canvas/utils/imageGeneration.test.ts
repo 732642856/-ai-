@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
-import { ImageGenerationError, generateImageFromPrompt, IMAGE_GENERATION_CLIENT_TIMEOUT_MS } from "./imageGeneration.ts"
+import { ImageGenerationError, generateImageFromPrompt, IMAGE_GENERATION_CLIENT_TIMEOUT_MS, retryWithBackoff } from "./imageGeneration.ts"
 
 const originalFetch = globalThis.fetch
 
@@ -64,5 +64,133 @@ describe("generateImageFromPrompt", () => {
     assert.equal(requestBody?.sourceImage, "data:image/png;base64,mockref")
     assert.equal(requestBody?.prompt, "a character")
     globalThis.fetch = originalFetch
+  })
+})
+
+describe("retryWithBackoff", () => {
+  it("returns the result on first successful attempt without retrying", async () => {
+    const start = Date.now()
+    const result = await retryWithBackoff(
+      async () => "success",
+      { maxRetries: 2, baseDelayMs: 10, maxDelayMs: 50 },
+    )
+    const elapsed = Date.now() - start
+
+    assert.equal(result, "success")
+    // Should complete almost instantly (no delay on success)
+    assert.ok(elapsed < 100, `Expected <100ms but took ${elapsed}ms`)
+  })
+
+  it("retries on retryable ImageGenerationError", async () => {
+    let calls = 0
+    const result = await retryWithBackoff(
+      async () => {
+        calls++
+        if (calls < 2) {
+          throw new ImageGenerationError({
+            message: "rate limited",
+            code: "PROVIDER_RATE_LIMITED",
+            status: 429,
+            retryable: true,
+          })
+        }
+        return "ok"
+      },
+      { maxRetries: 2, baseDelayMs: 10, maxDelayMs: 50 },
+    )
+
+    assert.equal(result, "ok")
+    assert.equal(calls, 2)
+  })
+
+  it("does NOT retry on non-retryable errors", async () => {
+    let calls = 0
+    try {
+      await retryWithBackoff(
+        async () => {
+          calls++
+          throw new ImageGenerationError({
+            message: "bad prompt",
+            code: "INVALID_PROMPT",
+            status: 400,
+            retryable: false,
+          })
+        },
+        { maxRetries: 2, baseDelayMs: 10, maxDelayMs: 50 },
+      )
+      assert.fail("Expected to throw")
+    } catch (error) {
+      assert.ok(error instanceof ImageGenerationError)
+      assert.equal((error as ImageGenerationError).code, "INVALID_PROMPT")
+    }
+    assert.equal(calls, 1, "Should only attempt once for non-retryable error")
+  })
+
+  it("retries on generic Error (treated as retryable by default)", async () => {
+    let calls = 0
+    try {
+      await retryWithBackoff(
+        async () => {
+          calls++
+          throw new Error("network disconnected")
+        },
+        { maxRetries: 2, baseDelayMs: 10, maxDelayMs: 50 },
+      )
+      assert.fail("Expected to throw after max retries")
+    } catch (error) {
+      assert.ok(error instanceof Error)
+      assert.match((error as Error).message, /network disconnected/)
+    }
+    assert.equal(calls, 3, "Should have 1 initial + 2 retry attempts")
+  })
+
+  it("respects custom shouldRetry predicate", async () => {
+    let calls = 0
+    try {
+      await retryWithBackoff(
+        async () => {
+          calls++
+          throw new Error("always fail")
+        },
+        {
+          maxRetries: 2,
+          baseDelayMs: 10,
+          shouldRetry: () => false, // never retry
+        },
+      )
+      assert.fail("Expected to throw")
+    } catch {
+      // expected
+    }
+    assert.equal(calls, 1, "shouldRetry=false should prevent any retries")
+  })
+
+  it("calls onRetry callback with attempt number and delay", async () => {
+    const retryLogs: Array<{ attempt: number; delay: number }> = []
+    let calls = 0
+    try {
+      await retryWithBackoff(
+        async () => {
+          calls++
+          throw new Error("fail")
+        },
+        {
+          maxRetries: 2,
+          baseDelayMs: 10,
+          maxDelayMs: 50,
+          onRetry: (error, attempt, delay) => {
+            retryLogs.push({ attempt, delay })
+          },
+        },
+      )
+    } catch {
+      // expected after exhausting retries
+    }
+    assert.equal(retryLogs.length, 2, "Should log 2 retry attempts")
+    assert.equal(retryLogs[0]!.attempt, 0)
+    assert.equal(retryLogs[1]!.attempt, 1)
+    // Delays should be positive
+    assert.ok(retryLogs[0]!.delay > 0)
+    assert.ok(retryLogs[1]!.delay > 0)
   })
 })

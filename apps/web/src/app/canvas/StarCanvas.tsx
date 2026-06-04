@@ -629,6 +629,7 @@ function StarCanvasInner() {
 
   const [showPropertyPanel, setShowPropertyPanel] = useState(false);
   const [selectionCount, setSelectionCount] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
 
   // ========================================================================
   // REACT FLOW STATE
@@ -644,6 +645,29 @@ function StarCanvasInner() {
   nodesRef.current = nodes;
   edgesRef.current = edges;
   const batchProgressRef = useRef<BatchProgressHandle>(null);
+
+  // Centralized node/edge update helper — replaces the repeated pattern:
+  //   setNodes((nds) => { const updated = ...; nodesRef.current = updated; return updated; })
+  const applyNodeUpdates = useCallback(
+    (mapper: (nds: Node<CanvasNodeData>[]) => Node<CanvasNodeData>[]) => {
+      setNodes((nds) => {
+        const updated = mapper(nds);
+        nodesRef.current = updated;
+        return updated;
+      });
+    },
+    [setNodes],
+  );
+  const applyEdgeUpdates = useCallback(
+    (mapper: (eds: Edge[]) => Edge[]) => {
+      setEdges((eds) => {
+        const updated = mapper(eds);
+        edgesRef.current = updated;
+        return updated;
+      });
+    },
+    [setEdges],
+  );
 
   useEffect(() => {
     return () => {
@@ -6326,7 +6350,7 @@ function StarCanvasInner() {
       {/* React Flow Canvas */}
       <div
         ref={reactFlowWrapper}
-        className="h-full w-full"
+        className={`h-full w-full ${isDragging ? "workflow-dragging" : ""}`}
         onDragEnter={handleDragEnter}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -6352,6 +6376,8 @@ function StarCanvasInner() {
           }}
           onInit={setReactFlowInstance}
           onMoveEnd={onMoveEnd}
+          onNodeDragStart={() => setIsDragging(true)}
+          onNodeDragStop={() => setIsDragging(false)}
           onSelectionChange={onSelectionChange}
           onPaneContextMenu={handlePaneContextMenu}
           onNodeContextMenu={handleNodeContextMenu}
@@ -6381,6 +6407,9 @@ function StarCanvasInner() {
             style: { stroke: DESIGN_TOKENS.nodeEdge, strokeWidth: 2 },
           }}
           proOptions={{ hideAttribution: true }}
+          onlyRenderVisibleElements
+          elevateEdgesOnSelect
+          nodeDragThreshold={5}
         >
           {/* Background */}
           {showGrid && (

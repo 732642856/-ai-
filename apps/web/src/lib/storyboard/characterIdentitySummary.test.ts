@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   appendDefaultCharacterIdentity,
+  buildCharacterConsistencyPrompt,
   formatCharacterIdentityListInput,
   parseCharacterIdentityListInput,
   summarizeCharacterIdentities,
@@ -73,5 +74,82 @@ void describe("summarizeCharacterIdentities", () => {
     assert.equal(identities.length, 1);
     assert.match(identities[0]?.id ?? "", /^manual-character-/);
     assert.equal(identities[0]?.name, "角色1");
+  });
+});
+
+void describe("buildCharacterConsistencyPrompt", () => {
+  const sampleIdentities = [
+    {
+      id: "char-1",
+      name: "林夏",
+      aliases: [],
+      role: "protagonist" as const,
+      visualSignature: "young woman with sharp oval face, short black bob haircut",
+      costume: "red wool coat with brass buttons",
+      props: ["brass key", "black bag"],
+      physicalTraits: ["slim silhouette", "anxious eyes"],
+      colorPalette: ["deep red", "cold blue"],
+    },
+    {
+      id: "char-2",
+      name: "陈默",
+      aliases: [],
+      role: "antagonist" as const,
+      visualSignature: "tall man with scarred left cheek, military posture",
+      costume: "dark trench coat",
+      props: ["silver lighter"],
+      physicalTraits: ["broad shoulders"],
+      colorPalette: ["dark grey", "crimson"],
+    },
+  ];
+
+  void it("builds prompt with visual details for each character", () => {
+    const prompt = buildCharacterConsistencyPrompt(sampleIdentities);
+
+    assert.ok(prompt.startsWith("[Character consistency requirements:"), `Unexpected start: ${prompt.substring(0, 40)}`);
+    assert.match(prompt, /林夏 \(protagonist\)/);
+    assert.match(prompt, /sharp oval face/);
+    assert.match(prompt, /red wool coat/);
+    assert.match(prompt, /brass key, black bag/);
+    assert.match(prompt, /陈默 \(antagonist\)/);
+    assert.match(prompt, /scarred left cheek/);
+    assert.match(prompt, /dark trench coat/);
+    assert.match(prompt, /deep red, cold blue/);
+    assert.match(prompt, /dark grey, crimson/);
+  });
+
+  void it("returns empty string for undefined or empty array", () => {
+    assert.equal(buildCharacterConsistencyPrompt(undefined), "");
+    assert.equal(buildCharacterConsistencyPrompt([]), "");
+  });
+
+  void it("skips identities with empty name", () => {
+    const prompt = buildCharacterConsistencyPrompt([
+      { id: "bad", name: "", visualSignature: "invisible" },
+      ...sampleIdentities,
+    ]);
+    assert.ok(!prompt.includes("invisible"), "Empty-name identity should be skipped");
+    assert.match(prompt, /林夏/);
+  });
+
+  void it("caps at 5 characters to keep prompt concise", () => {
+    const manyChars = Array.from({ length: 8 }, (_, i) => ({
+      id: `char-${i}`,
+      name: `角色${i + 1}`,
+      visualSignature: `very tall with ${i} features`,
+    }));
+    const prompt = buildCharacterConsistencyPrompt(manyChars);
+    // Only first 5 should appear
+    assert.match(prompt, /角色1/);
+    assert.match(prompt, /角色5/);
+    assert.ok(!prompt.includes("角色6"), "Should cap at 5 characters");
+  });
+
+  void it("still works with minimal identities (name only)", () => {
+    const prompt = buildCharacterConsistencyPrompt([
+      { id: "min", name: "只有名字" },
+    ]);
+    // Should not crash, but also should not include "(角色名)" nonsense
+    assert.equal(prompt, "");
   });
 });
