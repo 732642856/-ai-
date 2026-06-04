@@ -35,7 +35,7 @@ export const ShotNode = memo(function ShotNode({ id, data, selected, width, heig
   const shot = data.shot
   const nodeWidth = typeof width === "number" ? width : data.displayWidth || 340
   const nodeHeight = typeof height === "number" ? height : data.displayHeight || 360
-  const isGenerating = shot?.status === "generating" || shot?.generationStatus === "generating"
+  const isGenerating = shot?.status === "generating" || shot?.generationStatus === "generating" || shot?.generationStatus === "retrying"
   const hasGeneratedImage = Boolean(shot?.generatedImageUrl || shot?.generatedImageAssetId || shot?.generatedImageNodeId)
   const generationError = shot?.errorMessage || shot?.generationError
   const canRetry = shot?.generationRetryable !== false

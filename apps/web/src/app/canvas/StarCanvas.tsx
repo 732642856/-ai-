@@ -126,7 +126,7 @@ import { parseStoryboardTextToShots } from "./utils/storyboardParser";
 import BatchProgressBar, {
   type BatchProgressHandle,
 } from "./components/nodes/BatchProgressBar";
-import { generateImageFromPrompt, friendlyErrorMessage } from "./utils/imageGeneration";
+import { generateImageFromPrompt, friendlyErrorMessage, retryWithBackoff, ImageGenerationError } from "./utils/imageGeneration";
 import { generateTtsAudio, type TtsGenerateInput } from "./utils/ttsService";
 import { composeStoryboardGrid } from "./utils/storyboardGridComposer";
 import { buildVideoWorkflowTemplate } from "./utils/videoWorkflowTemplate";
@@ -243,7 +243,7 @@ const ZOOM_CONSTRAINTS = {
 };
 const SHOT_GENERATION_WATCHDOG_TIMEOUT_MS = 90_000;
 const SHOT_GENERATION_WATCHDOG_INTERVAL_MS = 10_000;
-const SHOT_GENERATION_BATCH_CONCURRENCY = 1;
+const SHOT_GENERATION_BATCH_CONCURRENCY = 3;
 const STORYBOARD_FINAL_OUTPUT_OFFSET_X = 420;
 const STORYBOARD_FINAL_OUTPUT_VIEW_PADDING = 80;
 const STORYBOARD_PROCESS_NODE_OFFSET_X = 860;
@@ -655,14 +655,14 @@ function StarCanvasInner() {
     const timer = window.setInterval(() => {
       const now = Date.now();
       setNodes((nds) => {
-        const hasGenerating = nds.some(
-          (n) => n.data.shot?.generationStatus === "generating",
+        const hasActiveGeneration = nds.some(
+          (n) => n.data.shot?.generationStatus === "generating" || n.data.shot?.generationStatus === "retrying",
         );
-        if (!hasGenerating) return nds;
+        if (!hasActiveGeneration) return nds;
 
         return nds.map((node) => {
           const shot = node.data.shot;
-          if (!shot || shot.generationStatus !== "generating") return node;
+          if (!shot || (shot.generationStatus !== "generating" && shot.generationStatus !== "retrying")) return node;
 
           const startedAt = shot.generationStartedAt ?? 0;
           if (!startedAt || now - startedAt < SHOT_GENERATION_WATCHDOG_TIMEOUT_MS) {
@@ -1763,12 +1763,39 @@ function StarCanvasInner() {
       });
 
       try {
-        const result = await generateImageFromPrompt({
-          prompt,
-          model,
-          size,
-          requestId,
-        });
+        const result = await retryWithBackoff(
+          () =>
+            generateImageFromPrompt({
+              prompt,
+              model,
+              size,
+              requestId,
+            }),
+          {
+            maxRetries: 2,
+            onRetry: (_error: unknown, attempt: number, delayMs: number) => {
+              setNodes((nds) => {
+                const updated = nds.map((node) =>
+                  node.id === nodeId && node.data.shot
+                    ? {
+                        ...node,
+                        data: {
+                          ...node.data,
+                          shot: {
+                            ...node.data.shot,
+                            generationStatus: "retrying" as const,
+                            generationAttempts: nextAttempt + attempt + 1,
+                          },
+                        },
+                      }
+                    : node,
+                );
+                nodesRef.current = updated;
+                return updated;
+              });
+            },
+          },
+        );
         if (latestShotGenerationRequestIdsRef.current[nodeId] !== requestId) {
           return false;
         }
@@ -1940,7 +1967,7 @@ function StarCanvasInner() {
               if (node.id !== nodeId || !node.data.shot) return node;
               if (
                 node.data.shot.generationRequestId !== requestId ||
-                node.data.shot.generationStatus !== "generating"
+                (node.data.shot.generationStatus !== "generating" && node.data.shot.generationStatus !== "retrying")
               ) {
                 return node;
               }
@@ -2169,7 +2196,7 @@ function StarCanvasInner() {
           order: shot?.order,
           title: shot?.title,
           status:
-            shot?.generationStatus === "generating" || shot?.status === "generating"
+            shot?.generationStatus === "generating" || shot?.generationStatus === "retrying" || shot?.status === "generating"
               ? ("generating" as const)
               : shot?.generationStatus === "failed" || shot?.status === "error"
                 ? ("failed" as const)
@@ -2801,7 +2828,7 @@ function StarCanvasInner() {
           return;
         } catch (error: any) {
           const message = error?.message || "分镜图生成失败";
-          const finalMessage = `多格分镜图生成失败：${message}。已停止，不会继续逐张生成镜头图以避免浪费算力。`;
+          const finalMessage = `多格分镜图生成失败：${message}。已停止，不会继续逐张生成镜头图以避免浪费算力。可逐张手动为每个镜头生成图片后再次合成分镜图。`;
           const failedBatchJob: BatchGenerationJob = {
             ...batchJob,
             status: "failed",
@@ -2897,17 +2924,18 @@ function StarCanvasInner() {
       });
 
       if (validShotImages.length > 0 && validShotImages.length < candidateShotNodes.length) {
-        const failedShotIds = candidateShotNodes
-          .filter((shot) => !validShotImages.some((v) => v.shotNodeId === shot.id))
-          .map((shot) => shot.id);
         const failedTitles = candidateShotNodes
-          .filter((shot) => failedShotIds.includes(shot.id))
+          .filter((shot) => !validShotImages.some((v) => v.shotNodeId === shot.id))
           .map((shot) => shot.data.shot?.title || shot.data.title || "未命名镜头");
-        const message =
+        const warning =
           failedTitles.length === 1
-            ? `镜头「${failedTitles[0]}」图片生成失败。请重试该镜头后再合成。`
-            : `以下 ${failedTitles.length} 个镜头图片生成失败：${failedTitles.join("、")}。请重试后再合成。`;
-        updateSourceRunMeta({ status: "failed", progress: 100, message, error: message });
+            ? `镜头「${failedTitles[0]}」图片生成失败，将用占位图替代。可稍后重试该镜头后重新合成。`
+            : `${failedTitles.length} 个镜头（${failedTitles.join("、")}）图片生成失败，将用占位图替代。可稍后重试后重新合成。`;
+        updateSourceRunMeta({
+          status: "running",
+          progress: 75,
+          message: `${validShotImages.length}/${candidateShotNodes.length} 个镜头已生成，正在合成…`,
+        });
         setNodes((nds) => {
           const updated = nds.map((node) =>
             node.id === nodeId
@@ -2917,26 +2945,17 @@ function StarCanvasInner() {
                     ...node.data,
                     generatedShotNodeIds: candidateShotNodes.map((shotNode) => shotNode.id),
                     generatedStoryboardGridNodeId: gridNode?.id,
-                    storyboardError: message,
-                    storyboardErrorPhase: "partial-shot-failure",
-                    storyboardWarning: undefined,
+                    storyboardWarning: warning,
+                    storyboardError: undefined,
+                    storyboardErrorPhase: undefined,
                   },
                 }
               : node,
           );
-          const visibility = applyStoryboardProcessVisibility({
-            nodes: updated,
-            edges: edgesRef.current,
-            sourceNodeId: nodeId,
-            // 错误路径中不强制隐藏过程节点——用户可能需要查看来诊断问题
-            showProcess: true,
-          });
-          nodesRef.current = visibility.nodes;
-          edgesRef.current = visibility.edges;
-          setEdges(visibility.edges);
-          return visibility.nodes;
+          nodesRef.current = updated;
+          return updated;
         });
-        return;
+        // ★ 不 return，继续走下面的网格合成流程
       }
 
       if (validShotImages.length === 0) {
@@ -3083,7 +3102,11 @@ function StarCanvasInner() {
         : undefined;
 
       if (composed && outputImageUrl) {
-        const summary = `分镜图已生成：已合成 ${validShotImages.length} 个镜头。`;
+        const hasPartials = validShotImages.length < candidateShotNodes.length;
+        const failedCount = candidateShotNodes.length - validShotImages.length;
+        const summary = hasPartials
+          ? `分镜图已生成：已合成 ${validShotImages.length} 个镜头（${failedCount} 个镜头缺图，以占位替代）。可稍后重试缺失镜头后重新合成。`
+          : `分镜图已生成：已合成 ${validShotImages.length} 个镜头。`;
         finalizeStoryboardResult({
           sourceNodeId: nodeId,
           mode: "composed-grid",
@@ -3091,6 +3114,7 @@ function StarCanvasInner() {
           assetId: outputAssetId,
           imageNodeId: outputImageNodeId,
           message: summary,
+          ...(hasPartials ? { warning: summary } : {}),
         });
         addWorkspaceHistoryEvent({
           id: generateId(),
@@ -3107,7 +3131,7 @@ function StarCanvasInner() {
       }
 
       const fallbackShot = validShotImages[0];
-      const warning = "镜头图已生成，但合成分镜图暂时失败，已使用第一张镜头图作为临时结果。";
+      const warning = "镜头图已生成，但合成分镜图暂时失败，已使用第一张镜头图作为临时结果。可逐张手动为缺失镜头生成图片后重试合成。";
       finalizeStoryboardResult({
         sourceNodeId: nodeId,
         mode: "fallback-shot",
@@ -3169,12 +3193,21 @@ function StarCanvasInner() {
     const toGenerate = selectedShots.filter((n) => !getShotImageUrl(n.id));
     if (toGenerate.length < 1) return;
 
+    batchProgressRef.current?.start(toGenerate.length);
+
     await runWithConcurrency(
       toGenerate,
       SHOT_GENERATION_BATCH_CONCURRENCY,
-      (node) => handleGenerateShotImage(node.id),
+      async (node) => {
+        const ok = await handleGenerateShotImage(node.id);
+        if (ok) {
+          batchProgressRef.current?.tick();
+        } else {
+          batchProgressRef.current?.fail();
+        }
+      },
     );
-  }, [getSelectedShotNodes, getShotImageUrl, handleGenerateShotImage]);
+  }, [getSelectedShotNodes, getShotImageUrl, handleGenerateShotImage, batchProgressRef]);
 
   const getStoryboardCompositeImageSize = useCallback(
     (layout: StoryboardCompositeLayout) => {
@@ -3418,7 +3451,7 @@ function StarCanvasInner() {
         const fallbackShot = shotsWithImage[0];
         const fallbackImageUrl = getShotImageUrl(fallbackShot.id)!;
         const fallbackWarning =
-          "合成分镜图失败，已使用第一张可用镜头图作为结果。";
+          "合成分镜图失败，已使用第一张可用镜头图作为结果。可逐张手动为缺失镜头生成图片后重试合成。";
         const fallbackNode = {
           id: gridNodeId,
           type: "image" as const,
@@ -3480,7 +3513,7 @@ function StarCanvasInner() {
           if (!shotNodeIds.includes(node.id) || !node.data.shot) return node;
           if (
             node.data.shot.generationRequestId !== requestId ||
-            node.data.shot.generationStatus !== "generating"
+            (node.data.shot.generationStatus !== "generating" && node.data.shot.generationStatus !== "retrying")
           ) {
             return node;
           }

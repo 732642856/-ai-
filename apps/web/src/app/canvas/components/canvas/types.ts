@@ -219,7 +219,7 @@ export type StoryboardShotData = {
   generatedImageNodeId?: string
   generatedImageUrl?: string
   generatedImageAssetId?: string
-  generationStatus?: "idle" | "queued" | "generating" | "succeeded" | "failed"
+  generationStatus?: "idle" | "queued" | "generating" | "retrying" | "succeeded" | "failed"
   generationError?: string
   generationStartedAt?: number
   generationFinishedAt?: number
