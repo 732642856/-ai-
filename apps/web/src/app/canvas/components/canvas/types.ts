@@ -259,6 +259,18 @@ export type StoryboardShotData = {
   voiceAudioAssetId?: string
   voiceGenerationStatus?: VoiceGenerationStatus
   voiceGenerationError?: string
+  // --- 字幕时间轴 ---
+  /** 当前分镜在影片序列中的累积字幕时间轴数据 */
+  subtitleTimeline?: {
+    startTimeSeconds: number
+    durationSeconds: number
+    segments: Array<{
+      index: number
+      startSeconds: number
+      endSeconds: number
+      text: string
+    }>
+  }
 }
 
 export type StoryboardGridData = {

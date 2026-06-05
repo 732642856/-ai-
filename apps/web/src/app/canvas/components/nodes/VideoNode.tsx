@@ -11,12 +11,13 @@
 // ============================================================================
 "use client";
 
-import { memo, useState, useRef, useCallback } from "react";
+import { memo, useState, useRef, useCallback, useEffect } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Play, Pause, Loader2, AlertTriangle, RotateCcw, Music, Clock } from "lucide-react";
+import { Play, Pause, Loader2, AlertTriangle, RotateCcw, Music, Clock, Subtitles } from "lucide-react";
 import type { CanvasNodeData, NodeRunStatus } from "../canvas/types";
 import { nodeToneStyles } from "../canvas/types";
 import { getCompatibleRunMeta, isNodeBusy, isNodeFinished } from "../../utils/nodeRunMeta";
+import type { SubtitleSegment } from "../../../../lib/storyboard/subtitleFormatter";
 
 interface VideoNodeProps extends NodeProps {
   data: CanvasNodeData;
@@ -89,6 +90,33 @@ const VideoNode = memo(function VideoNode({ id, data, selected, onRetry }: Video
   const hasVoiceConfig = Boolean(data.shot?.voiceConfig);
   const hasAudioSync = Boolean(voiceAudioUrl) || hasVoiceConfig;
   const audioSynced = Boolean(voiceAudioUrl);
+
+  // ── Subtitle overlay (P1-3: subtitle timeline) ──
+  const subtitleSegments: SubtitleSegment[] = data.shot?.subtitleTimeline?.segments ?? [];
+  const hasSubtitles = subtitleSegments.length > 0;
+  const [currentSubtitle, setCurrentSubtitle] = useState<string>("");
+
+  useEffect(() => {
+    if (!hasSubtitles || !videoRef.current) return;
+    const video = videoRef.current;
+
+    const updateSubtitle = () => {
+      const t = video.currentTime;
+      const seg = subtitleSegments.find(
+        (s) => t >= s.startSeconds && t <= s.endSeconds,
+      );
+      setCurrentSubtitle(seg?.text ?? "");
+    };
+
+    video.addEventListener("timeupdate", updateSubtitle);
+    video.addEventListener("ended", () => setCurrentSubtitle(""));
+    video.addEventListener("pause", () => setCurrentSubtitle(""));
+    return () => {
+      video.removeEventListener("timeupdate", updateSubtitle);
+      video.removeEventListener("ended", () => setCurrentSubtitle(""));
+      video.removeEventListener("pause", () => setCurrentSubtitle(""));
+    };
+  }, [hasSubtitles, subtitleSegments]);
 
   // ── Countdown estimate ──
   const estimatedRemaining = runMeta.message?.match(/剩余(?:约)?\s*(\d+)\s*秒|(\d+)s?\s*remaining/i);
@@ -214,6 +242,21 @@ const VideoNode = memo(function VideoNode({ id, data, selected, onRetry }: Video
                 {isPlaying ? <Pause size={14} /> : <Play size={14} />}
               </button>
             </div>
+            {/* Subtitle overlay */}
+            {hasSubtitles && currentSubtitle && isPlaying && (
+              <div className="absolute bottom-8 left-0 right-0 flex justify-center px-4">
+                <span
+                  className="text-xs font-medium text-center px-3 py-1 rounded leading-relaxed"
+                  style={{
+                    backgroundColor: "rgba(0,0,0,0.75)",
+                    color: "#fff",
+                    textShadow: "0 1px 2px rgba(0,0,0,0.8)",
+                  }}
+                >
+                  {currentSubtitle}
+                </span>
+              </div>
+            )}
           </>
         ) : busy ? (
           /* ══ Progress area (generation in progress) ══ */
@@ -311,6 +354,13 @@ const VideoNode = memo(function VideoNode({ id, data, selected, onRetry }: Video
             style={{ backgroundColor: audioSynced ? "#22c55e" : "#94a3b8" }}
             title={audioSynced ? "音频已同步" : "音频待同步"}
           />
+        )}
+        {/* Subtitle sync indicator */}
+        {hasSubtitles && (
+          <span className="flex items-center gap-0.5 text-[10px]" title={`${subtitleSegments.length} 条字幕`}>
+            <Subtitles size={10} />
+            {subtitleSegments.length}
+          </span>
         )}
         {/* Flexible spacer */}
         <span className="flex-1" />

@@ -57,6 +57,11 @@ import {
   Play,
   ListChecks,
   BookOpen,
+  FileText,
+  Table2,
+  Subtitles,
+  Printer,
+  Clapperboard,
   type LucideIcon,
 } from "lucide-react";
 
@@ -218,6 +223,16 @@ import { buildShotProductionBriefs, buildShotProductionBrief } from "@/lib/story
 import { buildProjectPackageManifest } from "@/lib/storyboard/projectPackageManifest";
 import { buildProductionRunQueue } from "@/lib/storyboard/productionRunQueue";
 import { generateStoryboardPdfHtml, storyboardPdfFilename } from "@/lib/storyboard/storyboardPdfExport";
+import {
+  generateScreenplayMarkdown,
+  screenplayFilename,
+  generateCharacterTableCsv,
+  characterTableFilename,
+  generateStoryboardTableCsv,
+  storyboardTableFilename,
+} from "@/lib/storyboard/storyboardExportFormats";
+import { buildSubtitleExport, subtitleTimelineFilename } from "@/lib/storyboard/storyboardSubtitleTimeline";
+import { generateVideoCompositionScript, type VideoCompositionInput } from "@/lib/storyboard/storyboardVideoComposition";
 import { formatDialogueAsSrt, parseDurationToSeconds } from "@/lib/storyboard/subtitleFormatter";
 import type {
   ChatCanvasAction,
@@ -4646,31 +4661,184 @@ function StarCanvasInner() {
     URL.revokeObjectURL(url);
   }, [buildProjectPackage]);
 
-  const handleExportStoryboardPdf = useCallback(() => {
+  // Generate HTML content once (reused by both download and print paths)
+  const buildStoryboardHtml = useCallback(() => {
     const briefs = buildShotProductionBriefs(nodes);
-    if (briefs.length === 0) {
-      alert("当前画布没有找到分镜节点，请先通过「故事分镜」流程生成分镜。");
-      return;
-    }
-
-    // Collect image URLs for each shot from canvas nodes + linked image nodes
+    if (briefs.length === 0) return null;
     const imageUrls: Record<string, string> = {};
     for (const brief of briefs) {
       const url = getShotImageUrlFromCanvas({ shotId: brief.shotId, nodes: nodes as any });
       if (url) imageUrls[brief.shotId] = url;
     }
+    return { html: generateStoryboardPdfHtml({ title: "星轨分镜本", briefs, imageUrls }), briefs };
+  }, [nodes]);
 
-    const html = generateStoryboardPdfHtml({
-      title: "星轨分镜本",
-      briefs,
-      imageUrls,
-    });
+  const handleExportStoryboardPdf = useCallback(() => {
+    const result = buildStoryboardHtml();
+    if (!result) {
+      alert("当前画布没有找到分镜节点，请先通过「故事分镜」流程生成分镜。");
+      return;
+    }
 
-    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const blob = new Blob([result.html], { type: "text/html;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
     link.download = storyboardPdfFilename("星轨分镜本");
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }, [buildStoryboardHtml]);
+
+  /** 一键打印为 PDF：在新窗口打开分镜本 HTML 并自动调起打印对话框 */
+  const handlePrintStoryboardPdf = useCallback(() => {
+    const result = buildStoryboardHtml();
+    if (!result) {
+      alert("当前画布没有找到分镜节点。");
+      return;
+    }
+
+    const printWindow = window.open("", "_blank", "width=1024,height=768");
+    if (!printWindow) {
+      // Fallback: download HTML and instruct user
+      handleExportStoryboardPdf();
+      alert("弹窗被拦截，已下载 HTML 文件，请在浏览器中打开后 Ctrl+P 打印为 PDF。");
+      return;
+    }
+
+    printWindow.document.write(result.html);
+    printWindow.document.close();
+
+    // Wait for images/styles to load, then trigger print
+    printWindow.onload = () => {
+      setTimeout(() => {
+        printWindow.print();
+      }, 500);
+    };
+  }, [buildStoryboardHtml, handleExportStoryboardPdf]);
+
+  const handleExportScreenplay = useCallback(() => {
+    const briefs = buildShotProductionBriefs(nodes);
+    if (briefs.length === 0) {
+      alert("当前画布没有找到分镜节点。");
+      return;
+    }
+    const md = generateScreenplayMarkdown("星轨剧本", briefs);
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = screenplayFilename("星轨剧本");
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }, [nodes]);
+
+  const handleExportCharacterCsv = useCallback(() => {
+    const shots = nodes
+      .map((node) => node.data.shot)
+      .filter((shot): shot is NonNullable<CanvasNodeData["shot"]> => Boolean(shot));
+    const characters = collectCharacterAssetLibraryItemsFromShots(shots);
+    if (characters.length === 0) {
+      alert("当前画布没有找到角色资产，请先在分镜中定义角色。");
+      return;
+    }
+    const csv = generateCharacterTableCsv(characters);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = characterTableFilename("星轨");
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }, [nodes]);
+
+  const handleExportStoryboardCsv = useCallback(() => {
+    const briefs = buildShotProductionBriefs(nodes);
+    if (briefs.length === 0) {
+      alert("当前画布没有找到分镜节点。");
+      return;
+    }
+    const csv = generateStoryboardTableCsv(briefs);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = storyboardTableFilename("星轨");
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }, [nodes]);
+
+  const handleExportSubtitles = useCallback(() => {
+    const briefs = buildShotProductionBriefs(nodes);
+    if (briefs.length === 0) {
+      alert("当前画布没有找到分镜节点。");
+      return;
+    }
+    const bundle = buildSubtitleExport(briefs);
+
+    // Download SRT
+    const srtBlob = new Blob([bundle.srt], { type: "text/plain;charset=utf-8" });
+    const srtUrl = URL.createObjectURL(srtBlob);
+    const srtLink = document.createElement("a");
+    srtLink.href = srtUrl;
+    srtLink.download = subtitleTimelineFilename("星轨", "srt");
+    document.body.appendChild(srtLink);
+    srtLink.click();
+    srtLink.remove();
+    URL.revokeObjectURL(srtUrl);
+
+    // Download VTT
+    const vttBlob = new Blob([bundle.vtt], { type: "text/plain;charset=utf-8" });
+    const vttUrl = URL.createObjectURL(vttBlob);
+    const vttLink = document.createElement("a");
+    vttLink.href = vttUrl;
+    vttLink.download = subtitleTimelineFilename("星轨", "vtt");
+    document.body.appendChild(vttLink);
+    vttLink.click();
+    vttLink.remove();
+    URL.revokeObjectURL(vttUrl);
+  }, [nodes]);
+
+  const handleExportCompositionScript = useCallback(() => {
+    const briefs = buildShotProductionBriefs(nodes);
+    if (briefs.length === 0) {
+      alert("当前画布没有找到分镜节点。");
+      return;
+    }
+
+    // Collect video and audio URLs from shot nodes
+    const videoUrls: Record<string, string> = {};
+    const audioUrls: Record<string, string> = {};
+    for (const node of nodes) {
+      const shot = node.data.shot;
+      if (!shot) continue;
+      const shotId = shot.id;
+      // Video from resultUrl or data
+      if (node.data.resultUrl) videoUrls[shotId] = node.data.resultUrl;
+      // Audio from voice generation
+      if (shot.voiceAudioUrl) audioUrls[shotId] = shot.voiceAudioUrl;
+    }
+
+    const input: VideoCompositionInput = {
+      briefs,
+      videoUrls,
+      audioUrls,
+      projectName: "星轨",
+    };
+
+    const { script, scriptFilename } = generateVideoCompositionScript(input);
+    const blob = new Blob([script], { type: "text/x-sh;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = scriptFilename;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -6013,6 +6181,97 @@ function StarCanvasInner() {
         >
           <BookOpen size={14} strokeWidth={1.7} />
           <span>导出分镜本</span>
+        </button>
+        <button
+          type="button"
+          onClick={handlePrintStoryboardPdf}
+          className="flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-medium backdrop-blur-xl transition hover:bg-white/10"
+          style={{
+            borderColor: DESIGN_TOKENS.border,
+            backgroundColor: DESIGN_TOKENS.accentSoft,
+            color: DESIGN_TOKENS.textSecondary,
+          }}
+          title="一键打印为 PDF，浏览器直接弹出保存对话框"
+          data-testid="print-storyboard-pdf"
+        >
+          <Printer size={14} strokeWidth={1.7} />
+          <span>打印 PDF</span>
+        </button>
+        {/* ── P2: 额外导出格式 ── */}
+        <button
+          type="button"
+          onClick={handleExportScreenplay}
+          className="flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-medium backdrop-blur-xl transition hover:bg-white/10"
+          style={{
+            borderColor: DESIGN_TOKENS.border,
+            backgroundColor: "rgba(18,18,24,0.7)",
+            color: DESIGN_TOKENS.textSecondary,
+          }}
+          title="导出 Markdown 剧本格式，可在任意编辑器打开"
+          data-testid="export-screenplay"
+        >
+          <FileText size={14} strokeWidth={1.7} />
+          <span>剧本</span>
+        </button>
+        <button
+          type="button"
+          onClick={handleExportStoryboardCsv}
+          className="flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-medium backdrop-blur-xl transition hover:bg-white/10"
+          style={{
+            borderColor: DESIGN_TOKENS.border,
+            backgroundColor: "rgba(18,18,24,0.7)",
+            color: DESIGN_TOKENS.textSecondary,
+          }}
+          title="导出分镜表 CSV，可在 Excel / Numbers 中打开"
+          data-testid="export-storyboard-csv"
+        >
+          <Table2 size={14} strokeWidth={1.7} />
+          <span>分镜表</span>
+        </button>
+        <button
+          type="button"
+          onClick={handleExportCharacterCsv}
+          className="flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-medium backdrop-blur-xl transition hover:bg-white/10"
+          style={{
+            borderColor: DESIGN_TOKENS.border,
+            backgroundColor: "rgba(18,18,24,0.7)",
+            color: DESIGN_TOKENS.textSecondary,
+          }}
+          title="导出角色一致性资产表 CSV"
+          data-testid="export-character-csv"
+        >
+          <Table2 size={14} strokeWidth={1.7} />
+          <span>角色表</span>
+        </button>
+        <button
+          type="button"
+          onClick={handleExportSubtitles}
+          className="flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-medium backdrop-blur-xl transition hover:bg-white/10"
+          style={{
+            borderColor: DESIGN_TOKENS.border,
+            backgroundColor: "rgba(18,18,24,0.7)",
+            color: DESIGN_TOKENS.textSecondary,
+          }}
+          title="导出 SRT + VTT 字幕文件（按分镜时间轴）"
+          data-testid="export-subtitles"
+        >
+          <Subtitles size={14} strokeWidth={1.7} />
+          <span>字幕</span>
+        </button>
+        <button
+          type="button"
+          onClick={handleExportCompositionScript}
+          className="flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-medium backdrop-blur-xl transition hover:bg-white/10"
+          style={{
+            borderColor: DESIGN_TOKENS.border,
+            backgroundColor: "rgba(18,18,24,0.7)",
+            color: DESIGN_TOKENS.textSecondary,
+          }}
+          title="导出 FFmpeg 视频合成脚本，本地运行即可生成完整视频"
+          data-testid="export-composition"
+        >
+          <Clapperboard size={14} strokeWidth={1.7} />
+          <span>合成</span>
         </button>
         <button
           type="button"

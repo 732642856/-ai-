@@ -1,0 +1,34 @@
+# ── StarCanvas Voice Clone ──
+# docker compose up -d          → start
+# docker compose logs -f        → follow logs
+# docker compose down           → stop
+# docker compose up -d --build  → rebuild and start
+
+version: "3.9"
+
+services:
+  voice-clone:
+    build:
+      context: ./apps/web/src/services/voice_clone
+      dockerfile: Dockerfile
+    container_name: starcanvas-voice-clone
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    volumes:
+      # Persist voice profiles and audio data outside container
+      - voice_clone_data:/app/data/voice_clone
+    env_file:
+      - ./apps/web/src/services/voice_clone/.env
+    environment:
+      - VOICE_CLONE_DATA_DIR=/app/data/voice_clone
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8765/health').raise_for_status()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  voice_clone_data:
+    driver: local
