@@ -161,6 +161,24 @@ export interface NodeRunMeta {
 // @deprecated 旧五态模型，保留仅用于兼容读取，新代码请使用 NodeRunStatus
 export type WorkflowNodeStatus = "draft" | "ready" | "running" | "done" | "error"
 
+/** 声线克隆登记状态 */
+export type VoiceCloneStatus = "registering" | "ready" | "failed" | "expired"
+
+/** 角色声线档案（来自 Voice Clone 服务） */
+export type VoiceProfile = {
+  profileId: string
+  characterId: string
+  characterName: string
+  status: VoiceCloneStatus
+  refText?: string
+  tags?: string[]
+  audioDurationSeconds?: number
+  sampleRate?: number
+  createdAt: string
+  updatedAt: string
+  errorMessage?: string
+}
+
 /** AI 配音配置 */
 export type VoiceConfig = {
   mode: "design" | "clone" | "auto"
@@ -195,6 +213,10 @@ export type CharacterIdentityAsset = {
   colorPalette?: string[]
   referenceAssetId?: string
   notes?: string
+  /** Voice Clone profile ID — links to a registered voice profile from the Voice Clone service */
+  voiceProfileId?: string
+  /** Voice profile status (synced from Voice Clone service) */
+  voiceProfileStatus?: VoiceCloneStatus
 }
 
 export type StoryboardShotData = {

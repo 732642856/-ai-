@@ -30,6 +30,7 @@ import { getDefaultModel, getDefaultImageModel, getLocalProviderOverrides } from
 import { buildRunRequest } from "@/lib/ai/run-request"
 import { normalizeGenerationError, formatGenerationErrorForDisplay } from "@/lib/ai/normalizeGenerationError"
 import { persistImageDataUrl } from "@/lib/assets/localImageStore"
+import { generateVideoFromImage, VideoGenerationError, videoResultToNodeData } from "../utils/videoGenerationService"
 
 interface RunContext {
   runId: string
@@ -122,6 +123,14 @@ function isVideoSampleFramesStep(kind: CanvasNodeKind): boolean {
 
 function isVideoAnalyzeStep(kind: CanvasNodeKind): boolean {
   return kind === "video-analyze"
+}
+
+function isVideoGenerationStep(kind: CanvasNodeKind): boolean {
+  return kind === "video-generation"
+}
+
+function isPassThroughStep(kind: CanvasNodeKind): boolean {
+  return ["audio", "composition", "video-result"].includes(kind)
 }
 
 // Build system prompts for each step
@@ -862,8 +871,128 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
     }
 
     // ------------------------------------------------------------------
-    // PASS-THROUGH STEP (audio, video-generation, composition, etc.)
+    // VIDEO GENERATION STEP (image-to-video)
     // ------------------------------------------------------------------
+    if (isVideoGenerationStep(kind)) {
+      const startedAt = new Date().toISOString()
+
+      // Find upstream image node for the source image
+      let sourceImageUrl: string | undefined
+      for (const edge of upstreamEdges) {
+        const upstreamNode = allNodes.find((n) => n.id === edge.source)
+        if (upstreamNode) {
+          const ud = upstreamNode.data as CanvasNodeData | undefined
+          const imgUrl = ud?.imageUrl || ud?.resultUrl
+          if (imgUrl) { sourceImageUrl = imgUrl; break }
+        }
+      }
+
+      if (!sourceImageUrl) {
+        throw new VideoGenerationError({
+          message: "未找到上游图片节点，请先连接一个图片结果节点（image-result）到视频生成节点。",
+          code: "INVALID_IMAGE",
+          retryable: false,
+        })
+      }
+
+      const motionPrompt = (node.data as CanvasNodeData).prompt
+        || (node.data as CanvasNodeData).content
+        || upstreamText
+        || ""
+
+      // Update node to generating state
+      updateNodeData(node.id, {
+        status: "running",
+        runMeta: createRunningRunMeta({ runId: runContext?.runId, source: runContext?.source, message: "视频生成中..." }),
+        summary: "正在生成视频...",
+      })
+
+      try {
+        const result = await generateVideoFromImage(
+          {
+            imageUrl: sourceImageUrl,
+            motionPrompt: motionPrompt || undefined,
+            durationSeconds: 5,
+            backend: "mock", // Falls back to mock when no API key
+          },
+          (progress) => {
+            updateNodeData(node.id, {
+              summary: `${progress.message} (${progress.percent}%)`,
+              runMeta: createRunningRunMeta({
+                runId: runContext?.runId,
+                source: runContext?.source,
+                message: `${progress.message} (${progress.percent}%)`,
+              }),
+            })
+          },
+        )
+
+        // Write result data to node
+        const nodePatch = videoResultToNodeData(result)
+        updateNodeData(node.id, {
+          ...nodePatch,
+          runMeta: createSucceededRunMeta({ runId: runContext?.runId, message: "视频生成完成" }),
+        })
+
+        // Record usage
+        useAIUsageStore.getState().addUsageRecord({
+          id: `usage-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          nodeId: node.id,
+          runId: runContext?.runId,
+          provider: "copse",
+          model: result.backend,
+          taskType: "text", // Video gen usage tracked as text type for now
+          currency: "USD",
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          status: "success",
+        })
+
+        return JSON.stringify(nodePatch)
+      } catch (error: any) {
+        const errMsg = error instanceof VideoGenerationError
+          ? error.message
+          : `视频生成失败：${error?.message || "未知错误"}`
+
+        updateNodeData(node.id, {
+          status: "error",
+          errorMessage: errMsg,
+          runMeta: createFailedRunMeta({ error: errMsg, runId: runContext?.runId, message: errMsg }),
+        })
+
+        // Record failed usage
+        useAIUsageStore.getState().addUsageRecord({
+          id: `usage-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          nodeId: node.id,
+          runId: runContext?.runId,
+          provider: "copse",
+          model: "mock",
+          taskType: "text",
+          currency: "USD",
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          status: "failed",
+          error: errMsg,
+        })
+
+        throw error
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // PASS-THROUGH STEP (audio, composition, video-result)
+    // ------------------------------------------------------------------
+    if (isPassThroughStep(kind)) {
+      updateNodeData(node.id, {
+        runMeta: createSucceededRunMeta({ runId: runContext?.runId, message: "已接收" }),
+        summary: upstreamText
+          ? `已接收上游数据 (${upstreamText.slice(0, 100)}...)`
+          : "等待上游输入",
+      })
+      return upstreamText
+    }
+
+    // Default: pass through upstream content
     updateNodeData(node.id, {
       runMeta: createSucceededRunMeta({ runId: runContext?.runId, message: "已接收" }),
       summary: upstreamText

@@ -4,7 +4,7 @@
 // Phase 2: Self-hosted FastAPI service (clone + design + auto)
 // ============================================================================
 
-import type { StoryboardShotData, VoiceConfig } from "../components/canvas/types"
+import type { StoryboardShotData, VoiceConfig, VoiceProfile, CharacterIdentityAsset, VoiceCloneStatus } from "../components/canvas/types"
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -12,6 +12,253 @@ import type { StoryboardShotData, VoiceConfig } from "../components/canvas/types
 
 const HF_SPACE_URL = "https://k2-fsa-omnivoice.hf.space"
 const TTS_TIMEOUT_MS = 120_000
+
+/** Self-hosted Voice Clone FastAPI service URL */
+const VOICE_CLONE_API_URL = "http://localhost:8765"
+
+// ---------------------------------------------------------------------------
+// Voice Clone API client (Phase 2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Register a new voice clone profile with the self-hosted service.
+ * Uploads reference audio and creates a reusable voice profile for a character.
+ */
+export async function registerVoiceClone(params: {
+  audioFile: File | Blob
+  characterId: string
+  characterName: string
+  refText?: string
+  tags?: string[]
+}): Promise<{ profileId: string; status: string }> {
+  const formData = new FormData()
+  formData.append("audio", params.audioFile, "reference.wav")
+  formData.append("character_id", params.characterId)
+  formData.append("character_name", params.characterName)
+  if (params.refText) formData.append("ref_text", params.refText)
+  if (params.tags && params.tags.length > 0) formData.append("tags", params.tags.join(","))
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), TTS_TIMEOUT_MS)
+
+  try {
+    const resp = await fetch(`${VOICE_CLONE_API_URL}/api/voice-clone/register`, {
+      method: "POST",
+      body: formData,
+      signal: controller.signal,
+    })
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+      throw new TtsGenerationError({
+        message: err.detail || `Voice clone registration failed (${resp.status})`,
+        code: "CLONE_REGISTER_FAILED",
+        retryable: resp.status >= 500,
+      })
+    }
+
+    return await resp.json()
+  } catch (error: any) {
+    if (error instanceof TtsGenerationError) throw error
+    if (error?.name === "AbortError") {
+      throw new TtsGenerationError({
+        message: "声线注册超时，请稍后重试",
+        code: "CLONE_TIMEOUT",
+        retryable: true,
+      })
+    }
+    throw new TtsGenerationError({
+      message: `声线注册失败：${error?.message || "未知错误"}`,
+      code: "CLONE_NETWORK_ERROR",
+      retryable: true,
+    })
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+/**
+ * List registered voice clone profiles.
+ */
+export async function listVoiceProfiles(characterId?: string): Promise<VoiceProfile[]> {
+  const params = characterId ? `?character_id=${encodeURIComponent(characterId)}` : ""
+  const resp = await fetch(`${VOICE_CLONE_API_URL}/api/voice-clone/profiles${params}`)
+  if (!resp.ok) throw new Error(`Failed to list profiles: ${resp.status}`)
+  return await resp.json()
+}
+
+/**
+ * Delete a voice clone profile.
+ */
+export async function deleteVoiceProfile(profileId: string): Promise<void> {
+  const resp = await fetch(`${VOICE_CLONE_API_URL}/api/voice-clone/profiles/${encodeURIComponent(profileId)}`, {
+    method: "DELETE",
+  })
+  if (!resp.ok && resp.status !== 404) {
+    throw new Error(`Failed to delete profile: ${resp.status}`)
+  }
+}
+
+/**
+ * Synthesize speech with a cloned voice via the self-hosted service.
+ */
+async function synthesizeClone(params: {
+  profileId: string
+  text: string
+  speed?: number
+  language?: string
+}): Promise<ArrayBuffer> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), TTS_TIMEOUT_MS)
+
+  try {
+    const resp = await fetch(`${VOICE_CLONE_API_URL}/api/voice-clone/synthesize`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        profile_id: params.profileId,
+        text: params.text,
+        speed: params.speed ?? 1.0,
+        language: params.language ?? "Auto",
+      }),
+    })
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+      throw new TtsGenerationError({
+        message: err.detail || `Voice clone synthesis failed (${resp.status})`,
+        code: "CLONE_SYNTHESIS_FAILED",
+        retryable: resp.status >= 500,
+      })
+    }
+
+    const result = await resp.json()
+    if (result.status !== "done") {
+      throw new TtsGenerationError({
+        message: result.error_message || "Synthesis did not complete",
+        code: "CLONE_SYNTHESIS_INCOMPLETE",
+        retryable: true,
+      })
+    }
+
+    if (!result.audio_base64) {
+      throw new TtsGenerationError({
+        message: "No audio data in synthesis response",
+        code: "CLONE_NO_AUDIO",
+        retryable: false,
+      })
+    }
+
+    // Decode base64 to ArrayBuffer
+    const binaryString = atob(result.audio_base64)
+    const bytes = new Uint8Array(binaryString.length)
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i)
+    }
+    return bytes.buffer
+  } catch (error: any) {
+    if (error instanceof TtsGenerationError) throw error
+    if (error?.name === "AbortError") {
+      throw new TtsGenerationError({
+        message: "语音合成超时，请稍后重试",
+        code: "CLIENT_TIMEOUT",
+        retryable: true,
+      })
+    }
+    throw new TtsGenerationError({
+      message: `语音合成请求失败：${error?.message || "未知错误"}`,
+      code: "NETWORK_ERROR",
+      retryable: true,
+    })
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+// In-memory profile cache (avoids repeated API calls)
+let _profileCache: Map<string, VoiceProfile> | null = null
+
+/**
+ * Get a voice profile for a character from cache or API.
+ */
+export async function getVoiceProfileForCharacter(characterId: string): Promise<VoiceProfile | null> {
+  // Check cache first
+  if (!_profileCache) {
+    _profileCache = new Map()
+    try {
+      const profiles = await listVoiceProfiles()
+      for (const p of profiles) {
+        _profileCache.set(p.characterId, p)
+      }
+    } catch {
+      return null
+    }
+  }
+
+  return _profileCache.get(characterId) || null
+}
+
+/** Invalidate profile cache */
+export function invalidateProfileCache(): void {
+  _profileCache = null
+}
+
+/**
+ * 将 VoiceClone 服务返回的 VoiceProfile 同步到 CharacterIdentityAsset 中。
+ * 当克隆注册成功后调用，使该角色的 voiceProfileId 在所有镜头中生效。
+ *
+ * @returns Updated character identity asset with voiceProfileId set
+ */
+export function syncVoiceProfileToCharacter(
+  character: CharacterIdentityAsset,
+  profile: VoiceProfile,
+): CharacterIdentityAsset {
+  return {
+    ...character,
+    voiceProfileId: profile.profileId,
+    voiceProfileStatus: profile.status,
+  }
+}
+
+/**
+ * 检查并批量同步所有角色的声线档案状态。
+ * 遍历所有分镜的角色，从 Voice Clone API 拉取最新状态并更新。
+ *
+ * @returns Map of character ID → updated character asset
+ */
+export async function syncAllCharacterVoiceProfiles(
+  characters: CharacterIdentityAsset[],
+): Promise<Map<string, CharacterIdentityAsset>> {
+  const result = new Map<string, CharacterIdentityAsset>()
+
+  // Collect unique characters that might have voice profiles
+  const pendingCharacters = characters.filter(
+    (c) => c.voiceProfileId && c.voiceProfileStatus !== "ready" && c.voiceProfileStatus !== "failed",
+  )
+
+  for (const char of pendingCharacters) {
+    try {
+      if (char.voiceProfileId) {
+        const profile = await getVoiceProfileForCharacter(char.id)
+        if (profile) {
+          result.set(char.id, syncVoiceProfileToCharacter(char, profile))
+        }
+      }
+    } catch {
+      // Silently skip — profile service may not be running
+    }
+  }
+
+  // Also include ready characters as-is
+  for (const char of characters) {
+    if (!result.has(char.id) && char.voiceProfileStatus === "ready") {
+      result.set(char.id, char)
+    }
+  }
+
+  return result
+}
 
 // ---------------------------------------------------------------------------
 // Natural Language → OmniVoice instruct parser
@@ -305,7 +552,11 @@ export function inferVoiceHintFromDialogue(dialogue: string): string | null {
 export type VoiceIntentSuggestion = {
   description: string
   reason: string
-  source: "shot-context" | "dialogue" | "auto"
+  source: "shot-context" | "dialogue" | "auto" | "character-clone"
+  /** Voice profile ID if source is "character-clone" */
+  voiceProfileId?: string
+  /** Linked character name */
+  characterName?: string
 }
 
 function includesAny(text: string, keywords: string[]): boolean {
@@ -313,13 +564,47 @@ function includesAny(text: string, keywords: string[]): boolean {
 }
 
 /**
+ * 从分镜的角色一致性资产中查找已注册的声线克隆档案。
+ *
+ * 如果有任一角色拥有 ready 状态的 voiceProfileId，优先返回 clone 推荐。
+ * 这实现了"语音克隆一次，全剧自动复用"的核心流程。
+ */
+export function lookupCharacterVoiceProfile(
+  characterIdentities?: CharacterIdentityAsset[],
+): { profileId: string; characterName: string } | null {
+  if (!characterIdentities || characterIdentities.length === 0) return null
+
+  for (const char of characterIdentities) {
+    if (char.voiceProfileId && char.voiceProfileStatus === "ready") {
+      return { profileId: char.voiceProfileId, characterName: char.name }
+    }
+  }
+  return null
+}
+
+/**
  * 根据分镜上下文自动推荐声音描述。
  * 这是 Voice Director 的轻量规则版：
  * 台词 + 镜头画面 + 生图 prompt + 景别/运镜 → 推荐表演声线。
+ *
+ * P1-3 增强：优先检查角色一致性系统中的 Voice Clone 档案。
+ * 如果该镜头关联的角色已有 ready 状态的声线克隆，直接推荐 clone 模式。
  */
 export function inferVoiceDescriptionFromShot(shot?: StoryboardShotData): VoiceIntentSuggestion {
   if (!shot) {
     return { description: "自然、贴合剧情", reason: "未读取到镜头信息，使用自动模式。", source: "auto" }
+  }
+
+  // ── P1-3: 优先检查角色声线档案 ──
+  const characterVoiceProfile = lookupCharacterVoiceProfile(shot.characterIdentities)
+  if (characterVoiceProfile) {
+    return {
+      description: `使用角色「${characterVoiceProfile.characterName}」的已注册声线`,
+      reason: `角色「${characterVoiceProfile.characterName}」已注册声线克隆档案，自动复用。`,
+      source: "character-clone",
+      voiceProfileId: characterVoiceProfile.profileId,
+      characterName: characterVoiceProfile.characterName,
+    }
   }
 
   const dialogue = shot.dialogue || ""
@@ -691,11 +976,28 @@ export async function generateTtsAudio(input: TtsGenerateInput): Promise<TtsGene
     instruct = voiceConfig.instruct
     // 不再强制要求 instruct——空描述 = auto 模式
   } else if (voiceConfig.mode === "clone") {
-    throw new TtsGenerationError({
-      message: "语音克隆模式需要自建服务（Phase 2）",
-      code: "UNSUPPORTED_MODE",
-      retryable: false,
+    // Phase 2: Voice Clone via self-hosted FastAPI service
+    if (!voiceConfig.refAudioId) {
+      throw new TtsGenerationError({
+        message: "克隆模式需要提供 voice profile ID（请先注册角色声线）",
+        code: "MISSING_PROFILE_ID",
+        retryable: false,
+      })
+    }
+
+    const arrayBuffer = await synthesizeClone({
+      profileId: voiceConfig.refAudioId,
+      text: text.trim(),
+      speed: voiceConfig.speed,
+      language,
     })
+
+    const audioBlob = new Blob([arrayBuffer], { type: "audio/wav" })
+    const audioUrl = URL.createObjectURL(audioBlob)
+    const dataSize = arrayBuffer.byteLength - 44
+    const durationSeconds = dataSize > 0 ? dataSize / 48000 : 0
+
+    return { audioBlob, audioUrl, durationSeconds }
   }
   // auto mode: no instruct needed
 

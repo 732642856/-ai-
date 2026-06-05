@@ -56,6 +56,7 @@ import {
   ArrowRight,
   Play,
   ListChecks,
+  BookOpen,
   type LucideIcon,
 } from "lucide-react";
 
@@ -174,6 +175,28 @@ import {
   getStoryboardShotPosition,
 } from "@/lib/storyboard/layoutStoryboardShots";
 import {
+  CHAT_PANEL_WIDTH,
+  LEFT_TOOLBAR_SAFE_WIDTH,
+  STORYBOARD_FINAL_OUTPUT_OFFSET_X,
+  STORYBOARD_FINAL_OUTPUT_VIEW_PADDING,
+  STORYBOARD_PROCESS_NODE_OFFSET_X,
+  STORYBOARD_PROCESS_IMAGE_OFFSET_X,
+  STORYBOARD_PROCESS_GRID_OFFSET_X,
+  getStoryboardProcessNodePosition,
+  getStoryboardProcessImagePosition,
+  getStoryboardProcessGridPosition,
+  getStoryboardFinalOutputPosition,
+  getViewportForNodePosition,
+} from "./utils/canvasPositionUtils";
+import {
+  isStoryboardProcessNode,
+  isStoryboardFinalOutputNode,
+  getVisibleCanvasNodes,
+  applyFallbackCanvasLayout,
+  applyCanvasVisibilityRecovery,
+  applyCanvasVisibilityAndLayoutRecovery,
+} from "./utils/canvasVisibilityUtils";
+import {
   DEFAULT_STORYBOARD_COMPOSITE_SETTINGS,
   STORYBOARD_FRAME_ASPECT_RATIO,
   buildStoryboardCompositePrompt,
@@ -194,6 +217,7 @@ import { buildStoryboardImagePrompt } from "@/lib/storyboard/storyboardImageProm
 import { buildShotProductionBriefs, buildShotProductionBrief } from "@/lib/storyboard/shotProductionBrief";
 import { buildProjectPackageManifest } from "@/lib/storyboard/projectPackageManifest";
 import { buildProductionRunQueue } from "@/lib/storyboard/productionRunQueue";
+import { generateStoryboardPdfHtml, storyboardPdfFilename } from "@/lib/storyboard/storyboardPdfExport";
 import { formatDialogueAsSrt, parseDurationToSeconds } from "@/lib/storyboard/subtitleFormatter";
 import type {
   ChatCanvasAction,
@@ -223,8 +247,7 @@ const DEBUG_NODE = isDebugEnabled("DEBUG_NODE_ACTIONS");
 // CONSTANTS
 // ============================================================================
 const DEFAULT_ZOOM = 0.85;
-const CHAT_PANEL_WIDTH = 400;
-const LEFT_TOOLBAR_SAFE_WIDTH = 88;
+// (CHAT_PANEL_WIDTH and LEFT_TOOLBAR_SAFE_WIDTH imported from canvasPositionUtils)
 const IMAGE_NODE_TITLE_HEIGHT = 22;
 const IMAGE_NODE_SIZE = {
   minWidth: 120,
@@ -247,135 +270,7 @@ const ZOOM_CONSTRAINTS = {
 const SHOT_GENERATION_WATCHDOG_TIMEOUT_MS = 90_000;
 const SHOT_GENERATION_WATCHDOG_INTERVAL_MS = 10_000;
 const SHOT_GENERATION_BATCH_CONCURRENCY = 3;
-const STORYBOARD_FINAL_OUTPUT_OFFSET_X = 420;
-const STORYBOARD_FINAL_OUTPUT_VIEW_PADDING = 80;
-const STORYBOARD_PROCESS_NODE_OFFSET_X = 860;
-const STORYBOARD_PROCESS_IMAGE_OFFSET_X = STORYBOARD_PROCESS_NODE_OFFSET_X + STORYBOARD_SHOT_LAYOUT.shotWidth + 72;
-const STORYBOARD_PROCESS_GRID_OFFSET_X = STORYBOARD_PROCESS_IMAGE_OFFSET_X + 400;
-
-function getStoryboardProcessNodePosition(sourceNode: Node<CanvasNodeData>, index: number) {
-  return {
-    x: sourceNode.position.x + STORYBOARD_PROCESS_NODE_OFFSET_X,
-    y: sourceNode.position.y + index * STORYBOARD_SHOT_LAYOUT.rowGap,
-  };
-}
-
-function getStoryboardProcessImagePosition(sourceNode: Node<CanvasNodeData>, index: number) {
-  return {
-    x: sourceNode.position.x + STORYBOARD_PROCESS_IMAGE_OFFSET_X,
-    y: sourceNode.position.y + index * STORYBOARD_SHOT_LAYOUT.rowGap,
-  };
-}
-
-function getStoryboardProcessGridPosition(sourceNode: Node<CanvasNodeData>, shotCount: number) {
-  return {
-    x: sourceNode.position.x + STORYBOARD_PROCESS_GRID_OFFSET_X,
-    y: sourceNode.position.y + Math.max(0, Math.floor((Math.max(1, shotCount) - 1) / 2)) * STORYBOARD_SHOT_LAYOUT.rowGap,
-  };
-}
-
-function getStoryboardFinalOutputPosition(sourceNode?: Node<CanvasNodeData>) {
-  return sourceNode
-    ? { x: sourceNode.position.x + STORYBOARD_FINAL_OUTPUT_OFFSET_X, y: sourceNode.position.y }
-    : { x: 0, y: 0 };
-}
-
-function getViewportForNodePosition(
-  position: XYPosition,
-  currentViewport: Viewport,
-  padding = STORYBOARD_FINAL_OUTPUT_VIEW_PADDING,
-) {
-  return {
-    x: -(position.x - padding) * currentViewport.zoom,
-    y: -(position.y - padding) * currentViewport.zoom,
-    zoom: currentViewport.zoom,
-  };
-}
-
-function isStoryboardProcessNode(node: Node<CanvasNodeData>, sourceNodeId: string) {
-  const data = node.data;
-  return Boolean(
-    (data.sourceStoryboardNodeId === sourceNodeId ||
-      data.storyboardGrid?.sourceStoryboardNodeId === sourceNodeId ||
-      data.shot?.sourceStoryboardNodeId === sourceNodeId) &&
-      (node.type === "shot" ||
-        node.type === "storyboardGrid" ||
-        data.role === "storyboard-process" ||
-        data.role === "shot-image" ||
-        data.isStoryboardProcessNode === true),
-  );
-}
-
-function isStoryboardFinalOutputNode(node: Node<CanvasNodeData>, sourceNodeId: string) {
-  const data = node.data;
-  return Boolean(
-    data.sourceStoryboardNodeId === sourceNodeId &&
-      (data.role === "storyboard-final-output" || data.isStoryboardFinalOutput === true),
-  );
-}
-
-function getVisibleCanvasNodes(nodes: Node<CanvasNodeData>[]) {
-  return nodes.filter((node) => node.hidden !== true);
-}
-
-function shouldRecoverHiddenCanvasNode(node: Node<CanvasNodeData>) {
-  // 所有 hidden 节点都应该可以被恢复
-  // 之前排除 Storyboard process 节点会导致画布全空时无法恢复
-  return true;
-}
-
-function applyFallbackCanvasLayout(nodes: Node<CanvasNodeData>[]) {
-  return nodes.map((node, index) => {
-    const hasValidPosition =
-      node.position &&
-      Number.isFinite(node.position.x) &&
-      Number.isFinite(node.position.y);
-
-    if (hasValidPosition) return node;
-
-    return {
-      ...node,
-      position: {
-        x: 120 + (index % 3) * 460,
-        y: 120 + Math.floor(index / 3) * 360,
-      },
-    };
-  });
-}
-
-function applyCanvasVisibilityRecovery(nodes: Node<CanvasNodeData>[]) {
-  const visibleNodes = getVisibleCanvasNodes(nodes);
-  if (visibleNodes.length > 0) return nodes;
-
-  const primaryRecoverableIds = nodes
-    .filter((node) => node.hidden === true && shouldRecoverHiddenCanvasNode(node))
-    .map((node) => node.id);
-  const fallbackRecoverableIds = nodes
-    .filter((node) => node.hidden === true)
-    .map((node) => node.id);
-  const recoverableIds = new Set(
-    primaryRecoverableIds.length > 0 ? primaryRecoverableIds : fallbackRecoverableIds,
-  );
-
-  if (recoverableIds.size === 0) return nodes;
-
-  return nodes.map((node) =>
-    recoverableIds.has(node.id)
-      ? {
-          ...node,
-          hidden: false,
-          data: {
-            ...node.data,
-            hiddenByStoryboardProcessMode: false,
-          },
-        }
-      : node,
-  );
-}
-
-function applyCanvasVisibilityAndLayoutRecovery(nodes: Node<CanvasNodeData>[]) {
-  return applyFallbackCanvasLayout(applyCanvasVisibilityRecovery(nodes));
-}
+// (Position/visibility utilities imported from canvasPositionUtils.ts and canvasVisibilityUtils.ts)
 
 function applyStoryboardProcessVisibility(params: {
   nodes: Node<CanvasNodeData>[];
@@ -508,6 +403,7 @@ CreativeEdge.displayName = "CreativeEdge";
 // Set once when the component mounts via StarCanvasInner.
 let _runAgentFn: ((nodeId: string) => void) | undefined;
 let _runBatchGenerateFn: ((nodeIds: string[]) => void) | undefined;
+let _runVideoRetryFn: ((nodeId: string) => void) | undefined;
 let _doUndo: (() => void) | undefined;
 let _doRedo: (() => void) | undefined;
 
@@ -543,7 +439,7 @@ const nodeTypes = {
   workflow: WorkflowNode,
   shot: ShotNode,
   storyboardGrid: StoryboardGridNode,
-  video: VideoNode,
+  video: (props: any) => <VideoNode {...props} onRetry={_runVideoRetryFn} />,
   agent: (props: any) => (
     <AgentNode {...props} onRunAgent={_runAgentFn} onBatchGenerate={_runBatchGenerateFn} />
   ),
@@ -675,6 +571,7 @@ function StarCanvasInner() {
       // Clean up module-level bridge variables to prevent stale closures
       _runAgentFn = undefined;
       _runBatchGenerateFn = undefined;
+      _runVideoRetryFn = undefined;
     };
   }, []);
 
@@ -3600,6 +3497,11 @@ function StarCanvasInner() {
   // Wire AgentNode's run button to the workflow runner
   _runAgentFn = workflowRunner.runAgentFromCanvas;
 
+  // Wire VideoNode's retry button to the workflow runner
+  _runVideoRetryFn = (nodeId: string) => {
+    workflowRunner.runNode(nodeId);
+  };
+
   // Wire undo/redo for toolbar buttons
   _doUndo = () => {
     const entry = _undoStack.pop();
@@ -4743,6 +4645,37 @@ function StarCanvasInner() {
     link.remove();
     URL.revokeObjectURL(url);
   }, [buildProjectPackage]);
+
+  const handleExportStoryboardPdf = useCallback(() => {
+    const briefs = buildShotProductionBriefs(nodes);
+    if (briefs.length === 0) {
+      alert("当前画布没有找到分镜节点，请先通过「故事分镜」流程生成分镜。");
+      return;
+    }
+
+    // Collect image URLs for each shot from canvas nodes + linked image nodes
+    const imageUrls: Record<string, string> = {};
+    for (const brief of briefs) {
+      const url = getShotImageUrlFromCanvas({ shotId: brief.shotId, nodes: nodes as any });
+      if (url) imageUrls[brief.shotId] = url;
+    }
+
+    const html = generateStoryboardPdfHtml({
+      title: "星轨分镜本",
+      briefs,
+      imageUrls,
+    });
+
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = storyboardPdfFilename("星轨分镜本");
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }, [nodes]);
 
   // ========================================================================
   // ADD NODE
@@ -6065,6 +5998,21 @@ function StarCanvasInner() {
         >
           <Download size={14} strokeWidth={1.7} />
           <span>导出项目包</span>
+        </button>
+        <button
+          type="button"
+          onClick={handleExportStoryboardPdf}
+          className="flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-medium backdrop-blur-xl transition hover:bg-white/10"
+          style={{
+            borderColor: DESIGN_TOKENS.border,
+            backgroundColor: DESIGN_TOKENS.accentSoft,
+            color: DESIGN_TOKENS.textSecondary,
+          }}
+          title="导出打印优化的分镜本 HTML，浏览器直接「另存为 PDF」即可获得专业分镜本"
+          data-testid="export-storyboard-pdf"
+        >
+          <BookOpen size={14} strokeWidth={1.7} />
+          <span>导出分镜本</span>
         </button>
         <button
           type="button"

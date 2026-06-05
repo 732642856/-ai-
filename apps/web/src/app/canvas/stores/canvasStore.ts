@@ -2,7 +2,8 @@
 // Canvas Store - Zustand state management for the canvas
 // ============================================================================
 import { create } from 'zustand'
-import { addEdge, type Connection, type Edge, type Node, type Viewport } from '@xyflow/react'
+import { devtools } from 'zustand/middleware'
+import type { Node, Viewport } from '@xyflow/react'
 import type {
   CanvasNodeKind,
   ChatMode,
@@ -14,6 +15,12 @@ import type {
   AssetItem,
   AssetLibraryState,
 } from '../components/canvas/types'
+import {
+  getPersistedFlag,
+  setPersistedFlag,
+  persistState,
+  clearPersistedState,
+} from '../../../lib/localStoragePersist.ts'
 
 // Re-export types for backward compatibility
 export type { CanvasNodeKind, ChatMode, RightPanelMode, ContextMenuState, FloatingToolbarState, AssetFolder, AssetType, AssetItem, AssetLibraryState }
@@ -30,6 +37,10 @@ export const VIEWPORT_CONSTRAINTS = {
   maxZoom: 2,
   fitViewPadding: 0.3,
 }
+
+const ASSETS_STORAGE_KEY = 'startrails_assets'
+const AI_AUTO_RUN_KEY = 'startrails_ai_auto_run'
+const CANVAS_STORAGE_KEY = 'startrails_canvas'
 
 interface CanvasStore {
   // Viewport
@@ -94,120 +105,118 @@ interface CanvasStore {
   setAllowAIAutoRun: (value: boolean) => void
 }
 
-export const useCanvasStore = create<CanvasStore>((set) => ({
-  // Viewport
-  viewport: DEFAULT_VIEWPORT,
-  setViewport: (viewport) => set({ viewport }),
-  fitViewOnce: true,
-  setFitViewOnce: (value) => set({ fitViewOnce: value }),
+// Shared helper for persisting asset library
+function persistAssets(assets: AssetItem[]): void {
+  persistState({ key: ASSETS_STORAGE_KEY, version: 1 }, assets)
+}
 
-  // Selection
-  selectedNodeId: null,
-  setSelectedNodeId: (id) => set({ selectedNodeId: id }),
+// Initial asset state — load once at module level
+const initialAllowAIAutoRun = getPersistedFlag(AI_AUTO_RUN_KEY, 'false') === 'true'
 
-  // Context Menu
-  contextMenu: null,
-  setContextMenu: (state) => set({ contextMenu: state }),
-  closeContextMenu: () => set({ contextMenu: null }),
+export const useCanvasStore = create<CanvasStore>()(
+  devtools(
+    (set) => ({
+      // Viewport
+      viewport: DEFAULT_VIEWPORT,
+      setViewport: (viewport) => set({ viewport }, false, 'setViewport'),
+      fitViewOnce: true,
+      setFitViewOnce: (value) => set({ fitViewOnce: value }, false, 'setFitViewOnce'),
 
-  // Floating Toolbar
-  floatingToolbar: null,
-  setFloatingToolbar: (state) => set({ floatingToolbar: state }),
-  closeFloatingToolbar: () => set({ floatingToolbar: null }),
+      // Selection
+      selectedNodeId: null,
+      setSelectedNodeId: (id) => set({ selectedNodeId: id }, false, 'setSelectedNodeId'),
 
-  // Asset Library
-  assetLibrary: {
-    isOpen: false,
-    scope: 'personal',
-    query: '',
-    assets: [],
-  },
-  openAssetLibrary: () => set((state) => ({
-    assetLibrary: { ...state.assetLibrary, isOpen: true }
-  })),
-  closeAssetLibrary: () => set((state) => ({
-    assetLibrary: { ...state.assetLibrary, isOpen: false }
-  })),
-  setAssetLibraryQuery: (query) => set((state) => ({
-    assetLibrary: { ...state.assetLibrary, query }
-  })),
-  setAssetLibraryFolder: (folder) => set((state) => ({
-    assetLibrary: { ...state.assetLibrary, selectedFolder: folder }
-  })),
-  addAsset: (asset) => set((state) => {
-    const newAssets = [...state.assetLibrary.assets, asset]
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('startrails_assets', JSON.stringify(newAssets))
-    }
-    return { assetLibrary: { ...state.assetLibrary, assets: newAssets } }
-  }),
-  removeAsset: (id) => set((state) => {
-    const newAssets = state.assetLibrary.assets.filter((a) => a.id !== id)
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('startrails_assets', JSON.stringify(newAssets))
-    }
-    return { assetLibrary: { ...state.assetLibrary, assets: newAssets } }
-  }),
-  toggleAssetFavorite: (id) => set((state) => {
-    const newAssets = state.assetLibrary.assets.map((a) =>
-      a.id === id ? { ...a, favorite: !a.favorite } : a
-    )
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('startrails_assets', JSON.stringify(newAssets))
-    }
-    return { assetLibrary: { ...state.assetLibrary, assets: newAssets } }
-  }),
+      // Context Menu
+      contextMenu: null,
+      setContextMenu: (state) => set({ contextMenu: state }, false, 'setContextMenu'),
+      closeContextMenu: () => set({ contextMenu: null }, false, 'closeContextMenu'),
 
-  // Clipboard
-  clipboardNode: null,
-  setClipboardNode: (node) => set({ clipboardNode: node }),
+      // Floating Toolbar
+      floatingToolbar: null,
+      setFloatingToolbar: (state) => set({ floatingToolbar: state }, false, 'setFloatingToolbar'),
+      closeFloatingToolbar: () => set({ floatingToolbar: null }, false, 'closeFloatingToolbar'),
 
-  // Image Preview
-  previewImageNodeId: null,
-  setPreviewImageNodeId: (id) => set({ previewImageNodeId: id }),
+      // Asset Library
+      assetLibrary: {
+        isOpen: false,
+        scope: 'personal',
+        query: '',
+        assets: [],
+      },
+      openAssetLibrary: () => set((state) => ({
+        assetLibrary: { ...state.assetLibrary, isOpen: true }
+      }), false, 'openAssetLibrary'),
+      closeAssetLibrary: () => set((state) => ({
+        assetLibrary: { ...state.assetLibrary, isOpen: false }
+      }), false, 'closeAssetLibrary'),
+      setAssetLibraryQuery: (query) => set((state) => ({
+        assetLibrary: { ...state.assetLibrary, query }
+      }), false, 'setAssetLibraryQuery'),
+      setAssetLibraryFolder: (folder) => set((state) => ({
+        assetLibrary: { ...state.assetLibrary, selectedFolder: folder }
+      }), false, 'setAssetLibraryFolder'),
+      addAsset: (asset) => set((state) => {
+        const newAssets = [...state.assetLibrary.assets, asset]
+        persistAssets(newAssets)
+        return { assetLibrary: { ...state.assetLibrary, assets: newAssets } }
+      }, false, 'addAsset'),
+      removeAsset: (id) => set((state) => {
+        const newAssets = state.assetLibrary.assets.filter((a) => a.id !== id)
+        persistAssets(newAssets)
+        return { assetLibrary: { ...state.assetLibrary, assets: newAssets } }
+      }, false, 'removeAsset'),
+      toggleAssetFavorite: (id) => set((state) => {
+        const newAssets = state.assetLibrary.assets.map((a) =>
+          a.id === id ? { ...a, favorite: !a.favorite } : a
+        )
+        persistAssets(newAssets)
+        return { assetLibrary: { ...state.assetLibrary, assets: newAssets } }
+      }, false, 'toggleAssetFavorite'),
 
-  // Crop Dialog
-  cropImageNodeId: null,
-  setCropImageNodeId: (id) => set({ cropImageNodeId: id }),
+      // Clipboard
+      clipboardNode: null,
+      setClipboardNode: (node) => set({ clipboardNode: node }, false, 'setClipboardNode'),
 
-  // Empty state hint
-  showCanvasHint: true,
-  dismissCanvasHint: () => set({ showCanvasHint: false }),
+      // Image Preview
+      previewImageNodeId: null,
+      setPreviewImageNodeId: (id) => set({ previewImageNodeId: id }, false, 'setPreviewImageNodeId'),
 
-  // Canvas persistence
-  isCanvasRestored: false,
-  setIsCanvasRestored: (value) => set({ isCanvasRestored: value }),
-  clearPersistedCanvas: () => {
-    try {
-      if (typeof window !== "undefined") {
-        localStorage.removeItem("startrails_canvas")
-      }
-    } catch {
-      // ignore
-    }
-  },
+      // Crop Dialog
+      cropImageNodeId: null,
+      setCropImageNodeId: (id) => set({ cropImageNodeId: id }, false, 'setCropImageNodeId'),
 
-  // Prompt Preview panel
-  showPromptPreview: false,
-  promptPreviewNodeId: null,
-  openPromptPreview: (nodeId) => set({ showPromptPreview: true, promptPreviewNodeId: nodeId }),
-  closePromptPreview: () => set({ showPromptPreview: false, promptPreviewNodeId: null }),
+      // Empty state hint
+      showCanvasHint: true,
+      dismissCanvasHint: () => set({ showCanvasHint: false }, false, 'dismissCanvasHint'),
 
-  // AI auto-run safety (default: require manual confirmation)
-  allowAIAutoRun: (() => {
-    try {
-      if (typeof window !== "undefined") {
-        return localStorage.getItem("startrails_ai_auto_run") === "true"
-      }
-    } catch {}
-    return false
-  })(),
-  setAllowAIAutoRun: (value) => {
-    try {
-      if (typeof window !== "undefined") {
-        localStorage.setItem("startrails_ai_auto_run", String(value))
-      }
-    } catch {}
-    set({ allowAIAutoRun: value })
-  },
-}))
+      // Canvas persistence
+      isCanvasRestored: false,
+      setIsCanvasRestored: (value) => set({ isCanvasRestored: value }, false, 'setIsCanvasRestored'),
+      clearPersistedCanvas: () => {
+        clearPersistedState(CANVAS_STORAGE_KEY)
+      },
+
+      // Prompt Preview panel
+      showPromptPreview: false,
+      promptPreviewNodeId: null,
+      openPromptPreview: (nodeId) => set(
+        { showPromptPreview: true, promptPreviewNodeId: nodeId },
+        false,
+        'openPromptPreview',
+      ),
+      closePromptPreview: () => set(
+        { showPromptPreview: false, promptPreviewNodeId: null },
+        false,
+        'closePromptPreview',
+      ),
+
+      // AI auto-run safety (default: require manual confirmation)
+      allowAIAutoRun: initialAllowAIAutoRun,
+      setAllowAIAutoRun: (value) => {
+        setPersistedFlag(AI_AUTO_RUN_KEY, String(value))
+        set({ allowAIAutoRun: value }, false, 'setAllowAIAutoRun')
+      },
+    }),
+    { name: 'canvas' },
+  ),
+)
