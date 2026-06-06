@@ -1,0 +1,9 @@
+{
+  "name": "@creative-canvas/shared",
+  "version": "0.1.0",
+  "description": "Shared types and utilities for Starrail Canvas",
+  "main": "src/index.ts",
+  "typescript": {
+    "definitions": "src/index.ts"
+  }
+}
