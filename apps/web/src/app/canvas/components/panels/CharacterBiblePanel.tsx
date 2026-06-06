@@ -7,7 +7,7 @@
 
 import { useState, useEffect } from "react"
 import { createPortal } from "react-dom"
-import { X, Plus, UserRound, Trash2, Image as ImageIcon, Save } from "lucide-react"
+import { X, Plus, UserRound, Trash2, Image as ImageIcon, Save, Sparkles, Loader2 } from "lucide-react"
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 import { useCanvasStore } from "../../stores/canvasStore"
 import type { CharacterBibleData } from "../canvas/types"
@@ -32,6 +32,11 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
 
   const [tab, setTab] = useState<TabMode>("list")
   const [edit, setEdit] = useState<Partial<CharacterBibleData>>({})
+
+  // AI 生成状态
+  const [showAiInput, setShowAiInput] = useState(false)
+  const [aiPrompt, setAiPrompt] = useState("")
+  const [aiGenerating, setAiGenerating] = useState(false)
 
   const selectedCharacter = bibleCharacters.find((c) => c.id === selectedBibleCharacterId)
 
@@ -75,6 +80,58 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
       reader.readAsDataURL(file)
     }
     input.click()
+  }
+
+  /** 调用 AI 生成角色设定 */
+  const handleAiGenerate = async () => {
+    if (!aiPrompt.trim() || aiGenerating) return
+    setAiGenerating(true)
+    try {
+      // 读取 localStorage 中的 provider overrides
+      const overrides = getLocalProviderOverrides()
+      const res = await fetch("/api/ai/bible-director", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          task: "generate-character",
+          script: aiPrompt,
+          _providerOverrides: overrides || undefined,
+        }),
+      })
+      const data = await res.json()
+      if (data.parsed) {
+        const c = data.parsed
+        setEdit((prev) => ({
+          ...prev,
+          name: c.name || prev.name,
+          role: c.role || prev.role,
+          aliases: c.aliases || prev.aliases,
+          visualSignature: c.visualSignature || prev.visualSignature,
+          costume: c.costume || prev.costume,
+          props: c.props || prev.props,
+          physicalTraits: c.physicalTraits || prev.physicalTraits,
+          colorPalette: c.colorPalette || prev.colorPalette,
+          backstory: c.backstory || prev.backstory,
+          arcDescription: c.arcDescription || prev.arcDescription,
+        }))
+      }
+    } catch (e) {
+      console.error("AI generate character failed:", e)
+    } finally {
+      setAiGenerating(false)
+      setShowAiInput(false)
+      setAiPrompt("")
+    }
+  }
+
+  /** 获取 localStorage 中的 provider overrides */
+  function getLocalProviderOverrides() {
+    if (typeof window === "undefined") return null
+    const baseUrl = localStorage.getItem("startrails_provider_baseUrl")
+    const apiKey = localStorage.getItem("startrails_provider_apiKey")
+    const defaultModel = localStorage.getItem("startrails_provider_defaultModel")
+    if (!baseUrl && !apiKey) return null
+    return { baseUrl: baseUrl || undefined, apiKey: apiKey || undefined, defaultModel: defaultModel || undefined }
   }
 
   if (!isOpen) return null
@@ -126,6 +183,40 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
             </div>
           ) : (
             <div className="space-y-4">
+              {/* AI 生成按钮 */}
+              <div className="flex items-center gap-2 mb-2">
+                <button
+                  onClick={() => setShowAiInput(!showAiInput)}
+                  className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
+                  style={{ backgroundColor: "rgba(16, 185, 129, 0.15)", color: "rgb(52, 211, 153)" }}
+                >
+                  <Sparkles size={12} strokeWidth={1.5} />
+                  {showAiInput ? "取消" : "AI 生成角色设定"}
+                </button>
+              </div>
+
+              {/* AI 输入区域 */}
+              {showAiInput && (
+                <div className="rounded-xl border p-3 space-y-2" style={{ borderColor: "rgba(52, 211, 153, 0.25)", backgroundColor: "rgba(16, 185, 129, 0.06)" }}>
+                  <textarea
+                    value={aiPrompt}
+                    onChange={(e) => setAiPrompt(e.target.value)}
+                    placeholder="用一句话描述角色，例：一个30岁的刑警队长，沉默寡言，内心有创伤，左脸有一道疤痕，总穿着棕色皮夹克"
+                    rows={3}
+                    className="w-full rounded-lg border bg-black/40 px-3 py-2 text-sm text-white outline-none resize-none"
+                    style={{ borderColor: DESIGN_TOKENS.border }}
+                  />
+                  <button
+                    onClick={handleAiGenerate}
+                    disabled={aiGenerating || !aiPrompt.trim()}
+                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-white transition-opacity"
+                    style={{ backgroundColor: "rgb(16, 185, 129)", opacity: aiGenerating || !aiPrompt.trim() ? 0.5 : 1 }}
+                  >
+                    {aiGenerating ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                    {aiGenerating ? "生成中..." : "生成角色设定"}
+                  </button>
+                </div>
+              )}
               <div>
                 <label className="mb-1.5 block text-xs font-medium" style={{ color: DESIGN_TOKENS.textSecondary }}>参考图片</label>
                 <div className="relative rounded-xl border-2 border-dashed p-4 flex items-center justify-center cursor-pointer transition-colors" style={{ borderColor: DESIGN_TOKENS.border, minHeight: 120 }} onClick={handleImageUpload}>
