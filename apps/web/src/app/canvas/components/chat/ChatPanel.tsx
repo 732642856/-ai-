@@ -124,6 +124,8 @@ interface ChatPanelProps {
   onApplyChatActions?: (actions: ChatCanvasAction[]) => ApplyActionsReport // 返回执行报告
   showHistoryFromOutside?: boolean
   onHistoryPanelClosed?: () => void
+  pendingInput?: string // 外部注入的输入文本（来自剧本导入）
+  onPendingInputConsumed?: () => void // 注入输入已消费的回调
 }
 
 export function ChatPanel({
@@ -136,6 +138,8 @@ export function ChatPanel({
   onApplyChatActions,
   showHistoryFromOutside,
   onHistoryPanelClosed,
+  pendingInput,
+  onPendingInputConsumed,
 }: ChatPanelProps) {
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<Message[]>([])
@@ -283,6 +287,14 @@ export function ChatPanel({
   useEffect(() => {
     scrollToBottom()
   }, [messages, isStreaming, scrollToBottom])
+
+  // 外部注入输入文本（来自剧本导入→发送到Chat）
+  useEffect(() => {
+    if (pendingInput && pendingInput.length > 0) {
+      setInput(pendingInput)
+      onPendingInputConsumed?.()
+    }
+  }, [pendingInput, onPendingInputConsumed])
 
   // 发送消息
   const handleSend = useCallback(async (model: string) => {

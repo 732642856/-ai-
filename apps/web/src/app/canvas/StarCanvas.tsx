@@ -83,6 +83,7 @@ import { CharacterBiblePanel } from "./components/panels/CharacterBiblePanel"
 import { SceneBiblePanel } from "./components/panels/SceneBiblePanel"
 import { VisualStyleBiblePanel } from "./components/panels/VisualStyleBiblePanel"
 import { StoryboardShotEditorPanel } from "./components/panels/StoryboardShotEditorPanel"
+import { ScriptImportPanel } from "./components/panels/ScriptImportPanel"
 import { NodeHistoryPanel } from "./components/history/NodeHistoryPanel"
 import { WorkflowRunPanel } from "./components/workflow/WorkflowRunPanel"
 import { PromptPreviewPanel } from "./components/preview/PromptPreviewPanel"
@@ -287,6 +288,8 @@ function StarCanvasInner() {
   const [chatOpen, setChatOpen] = useState(true)
   const [showHistory, setShowHistory] = useState(false)
   const [showUserMenu, setShowUserMenu] = useState(false)
+  const [scriptImportOpen, setScriptImportOpen] = useState(false)
+  const [pendingChatInput, setPendingChatInput] = useState("")
   const [showGrid, setShowGrid] = useState(true)
   const [showHelp, setShowHelp] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
@@ -721,6 +724,33 @@ function StarCanvasInner() {
 
   const handleUploadClick = useCallback(() => {
     fileInputRef.current?.click()
+  }, [])
+
+  // 导入剧本 → 创建 content 节点
+  const handleImportToCanvas = useCallback((text: string, fileName: string) => {
+    const position = getCenteredFlowPosition(NODE_DEFAULT_SIZE.content)
+    const newId = generateId()
+    const newNode: Node<CanvasNodeData> = {
+      id: newId,
+      type: "content",
+      position,
+      data: {
+        title: fileName.replace(/\.(pdf|docx|txt)$/i, ""),
+        prompt: text.slice(0, 500),
+        content: text,
+        nodeKind: "script" as CanvasNodeKind,
+        createdAt: Date.now(),
+      },
+    }
+    setNodes((nds) => [...nds, newNode])
+    dismissCanvasHint()
+    setChatOpen(true)
+  }, [getCenteredFlowPosition, setNodes, dismissCanvasHint])
+
+  // 发送剧本到 Chat
+  const handleSendToChat = useCallback((text: string, fileName: string) => {
+    setPendingChatInput(`请根据以下剧本内容进行分析和创意扩展：\n\n${text.slice(0, 8000)}`)
+    setChatOpen(true)
   }, [])
 
   const buildProjectPackage = useCallback(() => {
@@ -1719,6 +1749,7 @@ function StarCanvasInner() {
         isChatOpen={chatOpen}
         onOpenUserMenu={() => setShowUserMenu((prev) => !prev)}
         onOpenBiblePanel={openBiblePanel}
+        onOpenScriptImport={() => setScriptImportOpen(true)}
       />
 
       {/* User Menu Portal */}
@@ -2198,6 +2229,18 @@ function StarCanvasInner() {
           document.body
         )}
 
+      {/* Script Import Panel */}
+      {scriptImportOpen && typeof document !== "undefined" &&
+        createPortal(
+          <ScriptImportPanel
+            isOpen={scriptImportOpen}
+            onClose={() => setScriptImportOpen(false)}
+            onImportToCanvas={handleImportToCanvas}
+            onSendToChat={handleSendToChat}
+          />,
+          document.body
+        )}
+
       {/* Bible Panels */}
       {biblePanelOpen && typeof document !== "undefined" &&
         createPortal(<CharacterBiblePanel isOpen={biblePanelOpen} onClose={closeBiblePanel} />, document.body)}
@@ -2351,6 +2394,8 @@ function StarCanvasInner() {
         onApplyChatActions={applyChatActions}
         showHistoryFromOutside={showHistory}
         onHistoryPanelClosed={() => setShowHistory(false)}
+        pendingInput={pendingChatInput}
+        onPendingInputConsumed={() => setPendingChatInput("")}
       />
     </div>
   )

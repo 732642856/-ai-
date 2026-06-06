@@ -2,7 +2,7 @@
  * LeftToolbar - 左侧胶囊工具栏（精简版 6 按钮）
  */
 
-import { Library, Image, FileText, MessageCircle, Film, UserRound } from "lucide-react"
+import { Library, Image, FileText, MessageCircle, Film, UserRound, Upload } from "lucide-react"
 import { DESIGN_TOKENS } from "../../styles/designSystem"
 
 interface LeftToolbarProps {
@@ -15,6 +15,7 @@ interface LeftToolbarProps {
   isChatOpen: boolean
   onOpenUserMenu: () => void
   onOpenBiblePanel?: () => void
+  onOpenScriptImport?: () => void
 }
 
 export function LeftToolbar({
@@ -27,10 +28,12 @@ export function LeftToolbar({
   isChatOpen,
   onOpenUserMenu,
   onOpenBiblePanel,
+  onOpenScriptImport,
 }: LeftToolbarProps) {
   const tools = [
     { icon: Image, label: "参考图", onClick: onUploadImage },
     { icon: FileText, label: "创意文本", onClick: onAddText },
+    { icon: Upload, label: "导入剧本", onClick: onOpenScriptImport || (() => {}) },
     { icon: Film, label: "前期流程", onClick: onCreateVideoWorkflow || onCreateNode },
     { icon: Library, label: "素材库", onClick: onOpenAssetLibrary },
     { icon: UserRound, label: "角色圣经", onClick: onOpenBiblePanel },

@@ -18,7 +18,9 @@
     "nanoid": "^5.0.0",
     "@creative-canvas/shared": "workspace:*",
     "@creative-canvas/canvas": "workspace:*",
-    "dagre": "^0.8.5"
+    "dagre": "^0.8.5",
+    "mammoth": "^1.8.0",
+    "pdfjs-dist": "^3.11.174"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
