@@ -27,6 +27,7 @@ import type { WorkflowRunEvent } from "../types/workflow-run"
 import { enhancePromptWithCinematicContext } from "@/lib/cinematic/context"
 import { getDefaultModel, getDefaultImageModel, getLocalProviderOverrides } from "@/lib/ai/client"
 import { buildRunRequest } from "@/lib/ai/run-request"
+import { buildBibleContext } from "../utils/bible-context"
 
 interface RunContext {
   runId: string
@@ -317,7 +318,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
         localDefaultModel: localModels.textModel,
         envDefaultModel: resolvedTextModel,
         providerOverrides: providerOverrides ? { ...providerOverrides } as Record<string, unknown> : undefined,
-        systemOverride: getSystemPrompt(kind),
+        systemOverride: getSystemPrompt(kind) + (["storyboard", "script", "image-generation"].includes(kind) ? buildBibleContext() : ""),
       })
 
       const model = runRequest.model

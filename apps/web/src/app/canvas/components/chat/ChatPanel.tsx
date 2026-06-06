@@ -25,6 +25,7 @@ import { useChatSSE, parseCanvasActions, stripCanvasActions } from "../../hooks/
 import type { ChatCanvasAction, ApplyActionsReport, ApplyActionResult } from "../../features/canvas/actions/chatActions"
 import { getActionLabel, getStatusIcon, formatActionsSummary } from "../../features/canvas/actions/chatActions"
 import { generateId } from "../../utils/generateId"
+import { buildBibleContext } from "../../utils/bible-context"
 import type { Node } from "@xyflow/react"
 
 type CanvasNodeContextSnapshot = {
@@ -338,6 +339,7 @@ export function ChatPanel({
             height: a.height,
           })),
           model,
+          bibleContext: buildBibleContext(),
         })
     } catch (error) {
       console.error("[Chat] Send error:", error)
