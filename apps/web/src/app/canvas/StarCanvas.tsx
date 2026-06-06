@@ -82,6 +82,7 @@ import { SettingsPanel } from "./components/panels/SettingsPanel"
 import { CharacterBiblePanel } from "./components/panels/CharacterBiblePanel"
 import { SceneBiblePanel } from "./components/panels/SceneBiblePanel"
 import { VisualStyleBiblePanel } from "./components/panels/VisualStyleBiblePanel"
+import { StoryboardShotEditorPanel } from "./components/panels/StoryboardShotEditorPanel"
 import { NodeHistoryPanel } from "./components/history/NodeHistoryPanel"
 import { WorkflowRunPanel } from "./components/workflow/WorkflowRunPanel"
 import { PromptPreviewPanel } from "./components/preview/PromptPreviewPanel"
@@ -214,6 +215,7 @@ function StarCanvasInner() {
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const { setNodes } = useReactFlow()
 
   // ========================================================================
   // ZUSTAND STORE
@@ -263,6 +265,11 @@ function StarCanvasInner() {
     styleBiblePanelOpen,
     openStyleBiblePanel,
     closeStyleBiblePanel,
+    shotEditorOpen,
+    shotEditorNodeId,
+    shotEditorRawContent,
+    shotEditorNodePrompt,
+    closeShotEditor,
   } = useCanvasStore()
 
   // ========================================================================
@@ -2198,6 +2205,49 @@ function StarCanvasInner() {
         createPortal(<SceneBiblePanel isOpen={sceneBiblePanelOpen} onClose={closeSceneBiblePanel} />, document.body)}
       {styleBiblePanelOpen && typeof document !== "undefined" &&
         createPortal(<VisualStyleBiblePanel isOpen={styleBiblePanelOpen} onClose={closeStyleBiblePanel} />, document.body)}
+
+      {/* Storyboard Shot Editor Panel */}
+      {shotEditorOpen && typeof document !== "undefined" &&
+        createPortal(
+          <StoryboardShotEditorPanel
+            isOpen={shotEditorOpen}
+            onClose={closeShotEditor}
+            rawContent={shotEditorRawContent}
+            nodePrompt={shotEditorNodePrompt}
+            onSave={(shots) => {
+              // Save edited shots back to node data
+              if (shotEditorNodeId) {
+                setNodes((nds) =>
+                  nds.map((node) => {
+                    if (node.id !== shotEditorNodeId) return node
+                    // 将 shots 数组存到 node.data.generatedShots
+                    // 同时也要更新 content，以便下次打开面板时能正确解析
+                    const content = JSON.stringify(shots, null, 2)
+                    return {
+                      ...node,
+                      data: {
+                        ...node.data,
+                        generatedShots: shots,
+                        content, // 覆盖 content，保存为 JSON 字符串
+                      },
+                    }
+                  })
+                )
+              }
+              closeShotEditor()
+            }}
+            onRegenerate={(prompt) => {
+              closeShotEditor()
+              if (shotEditorNodeId) {
+                const event = new CustomEvent("startrails-run-node", {
+                  detail: { nodeId: shotEditorNodeId }
+                })
+                window.dispatchEvent(event)
+              }
+            }}
+          />,
+          document.body
+        )}
 
       {/* Node History Panel */}
       {showNodeHistory && typeof document !== "undefined" &&

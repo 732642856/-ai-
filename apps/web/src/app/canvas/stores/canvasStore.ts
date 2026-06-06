@@ -283,4 +283,22 @@ export const useCanvasStore = create<CanvasStore>((set) => ({
   removeBibleStyle: (id) => set((state) => ({
     bibleStyles: state.bibleStyles.filter((s) => s.id !== id),
   })),
+
+  // Storyboard Shot Editor
+  shotEditorOpen: false,
+  shotEditorNodeId: null,
+  shotEditorRawContent: "",
+  shotEditorNodePrompt: "",
+  openShotEditor: (nodeId, rawContent, nodePrompt) => set({
+    shotEditorOpen: true,
+    shotEditorNodeId: nodeId,
+    shotEditorRawContent: rawContent,
+    shotEditorNodePrompt: nodePrompt,
+  }),
+  closeShotEditor: () => set({
+    shotEditorOpen: false,
+    shotEditorNodeId: null,
+    shotEditorRawContent: "",
+    shotEditorNodePrompt: "",
+  }),
 }))

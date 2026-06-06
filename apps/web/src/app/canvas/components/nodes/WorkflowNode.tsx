@@ -21,11 +21,13 @@ import {
   Sparkles,
   Video,
   DollarSign,
+  Pencil,
 } from "lucide-react"
 import { Handle, Position, NodeResizer, type NodeProps } from "@xyflow/react"
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 import type { CanvasNodeData, CanvasNodeKind, NodeRunStatus, NodeRunSource } from "../canvas/types"
 import { nodeToneStyles } from "../canvas/types"
+import { useCanvasStore } from "../../stores/canvasStore"
 import { useAIUsageStore } from "../../features/canvas/usage/useAIUsageStore"
 import { formatCostUsd } from "../../features/canvas/usage/estimateCost"
 import { getCompatibleRunMeta, isNodeBusy, isNodeFinished } from "../../utils/nodeRunMeta"
@@ -152,6 +154,7 @@ export const WorkflowNode = memo(function WorkflowNode({ id, data, selected }: W
 
   const isBusy = isNodeBusy(runStatus)
   const isFinished = isNodeFinished(runStatus)
+  const openShotEditor = useCanvasStore((s) => s.openShotEditor)
 
   return (
     <>
@@ -311,6 +314,20 @@ export const WorkflowNode = memo(function WorkflowNode({ id, data, selected }: W
               >
                 <Sparkles size={12} />
                 {isFinished ? "重新运行" : "运行此节点"}
+              </button>
+            )}
+
+            {/* ── 编辑分镜按钮（仅 storyboard 节点） ─── */}
+            {kind === "storyboard" && data.content && data.content.length > 10 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  openShotEditor(id, data.content || "", data.prompt || "")
+                }}
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/5 py-2 text-xs text-white/60 transition-colors hover:bg-white/10 hover:text-white/80"
+              >
+                <Pencil size={12} />
+                编辑分镜
               </button>
             )}
           </div>
