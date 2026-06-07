@@ -2,13 +2,15 @@
  * StoryboardShotEditorPanel — 分镜镜头编辑面板
  * 解析 AI 生成的分镜 JSON，展示为可编辑的镜头卡片
  * 支持：改景别/机位/运镜/情绪，重新生图，保存修改
+ * C 路线：Ideogram 4 深度集成 — 分镜数据→JSON 结构化提示→智能生图
  */
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
 import { createPortal } from "react-dom"
-import { X, Save, Sparkles, RefreshCw, ChevronDown, Loader2 } from "lucide-react"
+import { X, Save, Sparkles, RefreshCw, ChevronDown, Loader2, Zap, Eye } from "lucide-react"
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
+import { translateShotToIdeogram } from "@/lib/ai/shot-to-ideogram-prompt"
 
 // === Types ===
 export interface EditableShot {
@@ -112,7 +114,11 @@ export function StoryboardShotEditorPanel({
   const [shots, setShots] = useState<EditableShot[]>([])
   const [editingPrompt, setEditingPrompt] = useState("")
   const [generatingShotIndex, setGeneratingShotIndex] = useState<number | null>(null)
+  const [generatingIdeogramIndex, setGeneratingIdeogramIndex] = useState<number | null>(null)
   const [shotImages, setShotImages] = useState<Record<number, string>>({})
+  const [ideogramImages, setIdeogramImages] = useState<Record<number, string>>({})
+  const [showJsonPreview, setShowJsonPreview] = useState<number | null>(null)
+  const [jsonPreviews, setJsonPreviews] = useState<Record<number, string>>({})
 
   useEffect(() => {
     if (isOpen) {
@@ -156,6 +162,41 @@ export function StoryboardShotEditorPanel({
       alert(`生图失败: ${err.message}`)
     } finally {
       setGeneratingShotIndex(null)
+    }
+  }, [shots, updateShot])
+
+  // Ideogram 4 结构化生图
+  const handleGenerateIdeogram = useCallback(async (shotIndex: number) => {
+    const shot = shots.find((s) => s.shotIndex === shotIndex)
+    if (!shot) return
+    setGeneratingIdeogramIndex(shotIndex)
+    try {
+      // 1. 翻译分镜数据为 Ideogram JSON
+      const payload = translateShotToIdeogram(shot)
+      // 缓存 JSON 预览
+      setJsonPreviews((prev) => ({ ...prev, [shotIndex]: payload.json_prompt }))
+
+      // 2. 调用 Ideogram API
+      const res = await fetch("/api/ai/generate-image-ideogram", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonPrompt: payload.json_prompt,
+          width: payload.width,
+          height: payload.height,
+          samplerPreset: payload.sampler_preset,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Ideogram 生图失败")
+      const imageUrl = data.imageUrl
+      if (!imageUrl) throw new Error("未返回图片")
+      setIdeogramImages((prev) => ({ ...prev, [shotIndex]: imageUrl }))
+      updateShot(shotIndex, "generatedImageUrl", imageUrl)
+    } catch (err: any) {
+      alert(`Ideogram 生图失败: ${err.message}`)
+    } finally {
+      setGeneratingIdeogramIndex(null)
     }
   }, [shots, updateShot])
 
@@ -271,6 +312,68 @@ export function StoryboardShotEditorPanel({
                     <img
                       src={shotImages[shot.shotIndex] || shot.generatedImageUrl}
                       alt={`镜头 ${shot.shotIndex} 生成结果`}
+                      className="w-full h-auto max-h-48 object-cover"
+                    />
+                  </div>
+                )}
+
+                {/* Ideogram 4 智能生图按钮 */}
+                <div className="flex items-center gap-2 pt-1 border-t" style={{ borderColor: DESIGN_TOKENS.border }}>
+                  <button
+                    onClick={() => handleGenerateIdeogram(shot.shotIndex)}
+                    disabled={generatingIdeogramIndex === shot.shotIndex}
+                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
+                    style={{ backgroundColor: "rgba(139, 92, 246, 0.15)", color: "rgb(167, 139, 250)" }}
+                  >
+                    {generatingIdeogramIndex === shot.shotIndex ? (
+                      <>
+                        <Loader2 size={12} strokeWidth={1.5} className="animate-spin" />
+                        智能生图中...
+                      </>
+                    ) : (
+                      <>
+                        <Zap size={12} strokeWidth={1.5} />
+                        Ideogram 4 智能生图
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (showJsonPreview === shot.shotIndex) {
+                        setShowJsonPreview(null)
+                      } else {
+                        const payload = translateShotToIdeogram(shot)
+                        setJsonPreviews((prev) => ({ ...prev, [shot.shotIndex]: payload.json_prompt }))
+                        setShowJsonPreview(shot.shotIndex)
+                      }
+                    }}
+                    className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-[10px] font-medium transition-colors"
+                    style={{ color: DESIGN_TOKENS.textMuted }}
+                  >
+                    <Eye size={10} strokeWidth={1.5} />
+                    {showJsonPreview === shot.shotIndex ? "隐藏 JSON" : "查看 JSON"}
+                  </button>
+                </div>
+
+                {/* JSON 预览 */}
+                {showJsonPreview === shot.shotIndex && jsonPreviews[shot.shotIndex] && (
+                  <div className="rounded-lg border p-2 overflow-auto" style={{ borderColor: DESIGN_TOKENS.border, backgroundColor: "rgba(0,0,0,0.4)", maxHeight: "160px" }}>
+                    <pre className="text-[9px] font-mono" style={{ color: DESIGN_TOKENS.textMuted, whiteSpace: "pre-wrap" }}>
+                      {jsonPreviews[shot.shotIndex]}
+                    </pre>
+                  </div>
+                )}
+
+                {/* Ideogram 生图结果预览 */}
+                {ideogramImages[shot.shotIndex] && (
+                  <div className="rounded-lg overflow-hidden border" style={{ borderColor: "rgba(139, 92, 246, 0.4)" }}>
+                    <div className="px-2 py-0.5 text-[9px] font-medium" style={{ backgroundColor: "rgba(139, 92, 246, 0.15)", color: "rgb(167, 139, 250)" }}>
+                      Ideogram 4 生成结果
+                    </div>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={ideogramImages[shot.shotIndex]}
+                      alt={`镜头 ${shot.shotIndex} Ideogram 生成结果`}
                       className="w-full h-auto max-h-48 object-cover"
                     />
                   </div>
