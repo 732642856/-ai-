@@ -6,9 +6,9 @@
  */
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { createPortal } from "react-dom"
-import { X, Save, Sparkles, RefreshCw, ChevronDown, Loader2, Zap, Eye } from "lucide-react"
+import { X, Save, Sparkles, RefreshCw, ChevronDown, Loader2, Zap, Eye, Play, Square } from "lucide-react"
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 import { translateShotToIdeogram } from "@/lib/ai/shot-to-ideogram-prompt"
 
@@ -120,6 +120,11 @@ export function StoryboardShotEditorPanel({
   const [showJsonPreview, setShowJsonPreview] = useState<number | null>(null)
   const [jsonPreviews, setJsonPreviews] = useState<Record<number, string>>({})
 
+  // 批量生图状态
+  const [batchGenerating, setBatchGenerating] = useState(false)
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 })
+  const abortControllerRef = useRef<AbortController | null>(null)
+
   useEffect(() => {
     if (isOpen) {
       const parsed = parseShots(rawContent)
@@ -200,6 +205,68 @@ export function StoryboardShotEditorPanel({
     }
   }, [shots, updateShot])
 
+  // 批量生图（所有镜头依次生成）
+  const handleBatchGenerate = useCallback(async (useIdeogram: boolean = false) => {
+    if (shots.length === 0) return
+    setBatchGenerating(true)
+    setBatchProgress({ current: 0, total: shots.length })
+    abortControllerRef.current = new AbortController()
+
+    for (let i = 0; i < shots.length; i++) {
+      if (abortControllerRef.current.signal.aborted) break
+      const shot = shots[i]
+      setBatchProgress({ current: i + 1, total: shots.length })
+
+      try {
+        if (useIdeogram) {
+          // Ideogram 批量生图
+          const payload = translateShotToIdeogram(shot)
+          const res = await fetch("/api/ai/generate-image-ideogram", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              jsonPrompt: payload.json_prompt,
+              width: payload.width,
+              height: payload.height,
+            }),
+            signal: abortControllerRef.current.signal,
+          })
+          const data = await res.json()
+          if (data.imageUrl) {
+            setIdeogramImages((prev) => ({ ...prev, [shot.shotIndex]: data.imageUrl }))
+            updateShot(shot.shotIndex, "generatedImageUrl", data.imageUrl)
+          }
+        } else {
+          // 普通批量生图
+          const res = await fetch("/api/ai/generate-image", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ prompt: shot.visualPrompt }),
+            signal: abortControllerRef.current.signal,
+          })
+          const data = await res.json()
+          if (data.imageUrl) {
+            setShotImages((prev) => ({ ...prev, [shot.shotIndex]: data.imageUrl }))
+            updateShot(shot.shotIndex, "generatedImageUrl", data.imageUrl)
+          }
+        }
+      } catch (err: any) {
+        if (err.name === "AbortError") break
+        console.error(`批量生图失败 镜头#${shot.shotIndex}:`, err)
+      }
+    }
+
+    setBatchGenerating(false)
+    setBatchProgress({ current: 0, total: 0 })
+    abortControllerRef.current = null
+  }, [shots, updateShot])
+
+  const handleCancelBatch = useCallback(() => {
+    abortControllerRef.current?.abort()
+    setBatchGenerating(false)
+    setBatchProgress({ current: 0, total: 0 })
+  }, [])
+
   const handleSave = () => {
     onSave(shots)
     onClose()
@@ -219,9 +286,63 @@ export function StoryboardShotEditorPanel({
           <h3 className="text-sm font-medium" style={{ color: DESIGN_TOKENS.text }}>
             分镜镜头编辑 {shots.length > 0 && <span className="text-xs" style={{ color: DESIGN_TOKENS.textMuted }}>({shots.length} 个镜头)</span>}
           </h3>
-          <button onClick={onClose} className="rounded-lg p-1 transition-colors hover:bg-white/10">
-            <X size={16} strokeWidth={ICON_CONFIG.strokeWidth} style={{ color: DESIGN_TOKENS.textMuted }} />
-          </button>
+          <div className="flex items-center gap-2">
+            {/* 批量生图按钮 */}
+            {!batchGenerating ? (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => handleBatchGenerate(false)}
+                  disabled={shots.length === 0}
+                  className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[10px] font-medium transition-colors disabled:opacity-40"
+                  style={{ backgroundColor: "rgba(99, 102, 241, 0.12)", color: "rgb(129, 140, 248)" }}
+                  title="批量生图（普通）"
+                >
+                  <Play size={10} strokeWidth={1.5} />
+                  批量生图
+                </button>
+                <button
+                  onClick={() => handleBatchGenerate(true)}
+                  disabled={shots.length === 0}
+                  className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[10px] font-medium transition-colors disabled:opacity-40"
+                  style={{ backgroundColor: "rgba(139, 92, 246, 0.12)", color: "rgb(167, 139, 250)" }}
+                  title="批量生图（Ideogram 4）"
+                >
+                  <Zap size={10} strokeWidth={1.5} />
+                  批量 Ideogram
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  <Loader2 size={12} strokeWidth={1.5} className="animate-spin" style={{ color: DESIGN_TOKENS.accent }} />
+                  <span className="text-[10px]" style={{ color: DESIGN_TOKENS.textMuted }}>
+                    {batchProgress.current} / {batchProgress.total}
+                  </span>
+                </div>
+                {/* 进度条 */}
+                <div className="w-20 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: "rgba(255,255,255,0.1)" }}>
+                  <div
+                    className="h-full rounded-full transition-all duration-300"
+                    style={{
+                      width: `${batchProgress.total > 0 ? (batchProgress.current / batchProgress.total) * 100 : 0}%`,
+                      backgroundColor: DESIGN_TOKENS.accent,
+                    }}
+                  />
+                </div>
+                <button
+                  onClick={handleCancelBatch}
+                  className="flex items-center gap-0.5 rounded-lg px-1.5 py-0.5 text-[9px] font-medium transition-colors hover:bg-white/10"
+                  style={{ color: "rgb(248, 113, 113)" }}
+                >
+                  <Square size={8} strokeWidth={1.5} />
+                  取消
+                </button>
+              </div>
+            )}
+            <button onClick={onClose} className="rounded-lg p-1 transition-colors hover:bg-white/10">
+              <X size={16} strokeWidth={ICON_CONFIG.strokeWidth} style={{ color: DESIGN_TOKENS.textMuted }} />
+            </button>
+          </div>
         </div>
 
         {/* Shot List */}

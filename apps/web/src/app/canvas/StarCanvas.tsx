@@ -41,6 +41,8 @@ import {
   Download,
   Sparkles,
   Loader2,
+  Undo2,
+  Redo2,
   type LucideIcon,
 } from "lucide-react"
 
@@ -281,6 +283,66 @@ function StarCanvasInner() {
   // Cache nodes in a ref so callbacks don't need nodes in deps (avoids re-registering)
   const nodesRef = useRef(nodes)
   nodesRef.current = nodes
+
+  // ========================================================================
+  // UNDO / REDO HISTORY
+  // ========================================================================
+  interface HistorySnapshot {
+    nodes: Node<CanvasNodeData>[]
+    edges: Edge[]
+  }
+  const pastRef = useRef<HistorySnapshot[]>([])
+  const futureRef = useRef<HistorySnapshot[]>([])
+  const isUndoingRef = useRef(false)
+
+  const [historyVersion, setHistoryVersion] = useState(0)
+
+  const canUndo = pastRef.current.length > 0
+  const canRedo = futureRef.current.length > 0
+
+  const saveHistory = useCallback(() => {
+    if (isUndoingRef.current) return
+    pastRef.current.push({
+      nodes: JSON.parse(JSON.stringify(nodesRef.current)),
+      edges: JSON.parse(JSON.stringify(edges)),
+    })
+    // Limit history to 50 snapshots
+    if (pastRef.current.length > 50) pastRef.current.shift()
+    futureRef.current = []
+    setHistoryVersion((v) => v + 1)
+  }, [edges])
+
+  const undo = useCallback(() => {
+    if (pastRef.current.length === 0) return
+    isUndoingRef.current = true
+    const current = {
+      nodes: JSON.parse(JSON.stringify(nodesRef.current)),
+      edges: JSON.parse(JSON.stringify(edges)),
+    }
+    const previous = pastRef.current.pop()!
+    futureRef.current.push(current)
+    setNodes(previous.nodes)
+    setEdges(previous.edges)
+    setSelectedNodeId(null)
+    setHistoryVersion((v) => v + 1)
+    setTimeout(() => { isUndoingRef.current = false }, 0)
+  }, [edges, setNodes, setEdges, setSelectedNodeId])
+
+  const redo = useCallback(() => {
+    if (futureRef.current.length === 0) return
+    isUndoingRef.current = true
+    const current = {
+      nodes: JSON.parse(JSON.stringify(nodesRef.current)),
+      edges: JSON.parse(JSON.stringify(edges)),
+    }
+    const next = futureRef.current.pop()!
+    pastRef.current.push(current)
+    setNodes(next.nodes)
+    setEdges(next.edges)
+    setSelectedNodeId(null)
+    setHistoryVersion((v) => v + 1)
+    setTimeout(() => { isUndoingRef.current = false }, 0)
+  }, [edges, setNodes, setEdges, setSelectedNodeId])
 
   // ========================================================================
   // LOCAL STATE
@@ -745,7 +807,8 @@ function StarCanvasInner() {
     setNodes((nds) => [...nds, newNode])
     dismissCanvasHint()
     setChatOpen(true)
-  }, [getCenteredFlowPosition, setNodes, dismissCanvasHint])
+    saveHistory()
+  }, [getCenteredFlowPosition, setNodes, dismissCanvasHint, saveHistory])
 
   // 发送剧本到 Chat
   const handleSendToChat = useCallback((text: string, fileName: string) => {
@@ -1004,8 +1067,10 @@ function StarCanvasInner() {
 
       setNodes((nds) => [...nds, newNode])
       dismissCanvasHint()
+      // Save to undo history after adding
+      setTimeout(() => saveHistory(), 0)
     },
-    [getCenteredFlowPosition, setNodes, dismissCanvasHint]
+    [getCenteredFlowPosition, setNodes, dismissCanvasHint, saveHistory]
   )
 
   const handleCreateVideoWorkflow = useCallback(() => {
@@ -1076,8 +1141,9 @@ function StarCanvasInner() {
       setNodes((nds) => nds.filter((n) => n.id !== nodeId))
       setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId))
       setSelectedNodeId(null)
+      saveHistory()
     },
-    [setNodes, setEdges, setSelectedNodeId]
+    [setNodes, setEdges, setSelectedNodeId, saveHistory]
   )
 
   const deleteEdge = useCallback(
@@ -1582,6 +1648,18 @@ function StarCanvasInner() {
         duplicateNode(selectedNodeId)
       }
 
+      // Ctrl+Z: Undo
+      if ((e.metaKey || e.ctrlKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault()
+        undo()
+      }
+
+      // Ctrl+Shift+Z / Ctrl+Y: Redo
+      if (((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "z") || ((e.metaKey || e.ctrlKey) && e.key === "y")) {
+        e.preventDefault()
+        redo()
+      }
+
       if ((e.metaKey || e.ctrlKey) && e.key === "r" && selectedNodeId) {
         e.preventDefault()
         const plan = buildExecutionPlan({
@@ -1621,6 +1699,8 @@ function StarCanvasInner() {
     setSelectedNodeId,
     edges,
     workflowRunner,
+    undo,
+    redo,
   ])
 
   // ========================================================================
@@ -1642,6 +1722,26 @@ function StarCanvasInner() {
           <Download size={14} strokeWidth={1.7} />
           <span>导出项目包</span>
         </button>
+
+        {/* Undo / Redo */}
+        <div className="flex items-center gap-1 rounded-2xl border px-2 py-1.5 backdrop-blur-xl" style={{ borderColor: DESIGN_TOKENS.border, backgroundColor: "rgba(18,18,24,0.7)" }}>
+          <button
+            onClick={undo}
+            disabled={!canUndo}
+            className="rounded-lg p-1 transition-colors disabled:opacity-30 hover:bg-white/10"
+            title="撤销 (Ctrl+Z)"
+          >
+            <Undo2 size={14} strokeWidth={1.7} style={{ color: DESIGN_TOKENS.textSecondary }} />
+          </button>
+          <button
+            onClick={redo}
+            disabled={!canRedo}
+            className="rounded-lg p-1 transition-colors disabled:opacity-30 hover:bg-white/10"
+            title="重做 (Ctrl+Shift+Z / Ctrl+Y)"
+          >
+            <Redo2 size={14} strokeWidth={1.7} style={{ color: DESIGN_TOKENS.textSecondary }} />
+          </button>
+        </div>
       </div>
 
       {/* Hidden file input */}
@@ -1680,6 +1780,7 @@ function StarCanvasInner() {
                 eds
               )
             )
+            saveHistory()
           }}
           onInit={setReactFlowInstance}
           onMoveEnd={onMoveEnd}
