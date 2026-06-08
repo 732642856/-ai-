@@ -113,6 +113,14 @@ import { useWorkflowTemplates, type WorkflowTemplate } from "./hooks/useWorkflow
 import { AddNodePanel } from "./components/toolbar/AddNodePanel";
 import { ChatPanel } from "./components/chat/ChatPanel";
 import { SettingsPanel } from "./components/panels/SettingsPanel";
+import { ScriptImportPanel, type ScriptImportPayload } from "./components/panels/ScriptImportPanel";
+import {
+  ProjectBiblePanel,
+  type ProjectSceneBibleItem,
+  type ProjectSceneBiblePatch,
+  type ProjectVisualBible,
+  type ProjectVisualBiblePatch,
+} from "./components/panels/ProjectBiblePanel";
 import { NodeHistoryPanel } from "./components/history/NodeHistoryPanel";
 import { WorkspaceHistoryPanel } from "./components/history/WorkspaceHistoryPanel";
 import { WorkflowRunPanel } from "./components/workflow/WorkflowRunPanel";
@@ -657,6 +665,8 @@ function StarCanvasInner() {
   const [showSettings, setShowSettings] = useState(false);
   const [showAddNodePanel, setShowAddNodePanel] = useState(false);
   const [showNodeHistory, setShowNodeHistory] = useState(false);
+  const [showScriptImportPanel, setShowScriptImportPanel] = useState(false);
+  const [showProjectBiblePanel, setShowProjectBiblePanel] = useState(false);
   const [showCharacterLibrary, setShowCharacterLibrary] = useState(false);
   const [showProductionQueue, setShowProductionQueue] = useState(false);
   const [historyNodeId, setHistoryNodeId] = useState<string | null>(null);
@@ -701,6 +711,65 @@ function StarCanvasInner() {
     ),
     [nodes],
   );
+
+  const sceneBibleItems = useMemo<ProjectSceneBibleItem[]>(() => {
+    const itemById = new Map<string, ProjectSceneBibleItem>();
+
+    for (const node of nodes) {
+      const shot = node.data.shot;
+      if (!shot) continue;
+      const sceneAnalysis = shot.sceneAnalysis;
+      const storedScene = node.data.projectScenes?.[0];
+      const fallbackId = shot.cinematicShot?.sceneId || shot.sourceStoryboardNodeId || "scene-unknown";
+      const sceneId = sceneAnalysis?.sceneId || storedScene?.id || fallbackId;
+      const location = sceneAnalysis?.location || storedScene?.location || "未命名场景";
+      const existing = itemById.get(sceneId);
+      const shotTitle = shot.title || node.data.title || `镜头 ${shot.order}`;
+      const characters = sceneAnalysis?.characters ?? storedScene?.characters ?? shot.characterIdentities?.map((character) => character.name).filter(Boolean) ?? [];
+      const next: ProjectSceneBibleItem = existing
+        ? {
+            ...existing,
+            shotCount: existing.shotTitles.includes(shotTitle) ? existing.shotCount : existing.shotCount + 1,
+            shotTitles: existing.shotTitles.includes(shotTitle) ? existing.shotTitles : [...existing.shotTitles, shotTitle],
+            characters: [...new Set([...existing.characters, ...characters])],
+          }
+        : {
+            id: sceneId,
+            sceneNumber: sceneAnalysis?.sceneNumber ?? storedScene?.sceneNumber,
+            location,
+            timeOfDay: sceneAnalysis?.timeOfDay ?? storedScene?.timeOfDay,
+            characters: [...new Set(characters)],
+            summary: sceneAnalysis?.summary ?? storedScene?.summary,
+            atmosphere: storedScene?.atmosphere,
+            lightingStyle: storedScene?.lightingStyle,
+            colorPalette: storedScene?.colorPalette,
+            shotCount: 1,
+            shotTitles: [shotTitle],
+          };
+      itemById.set(sceneId, next);
+    }
+
+    return [...itemById.values()].sort((a, b) => (a.sceneNumber ?? 9999) - (b.sceneNumber ?? 9999));
+  }, [nodes]);
+
+  const projectVisualBible = useMemo<ProjectVisualBible>(() => {
+    const sourceVisuals = nodes.map((node) => node.data.projectVisualBible).filter(Boolean) as NonNullable<CanvasNodeData["projectVisualBible"]>[];
+    const sourcePrompts = nodes
+      .map((node) => node.data.compositeSettings?.stylePrompt || node.data.projectVisualBible?.stylePrompt)
+      .filter((value): value is string => Boolean(value?.trim()));
+    const colorPalette = sourceVisuals.flatMap((item) => item.colorPalette ?? []);
+    const latest = sourceVisuals[sourceVisuals.length - 1];
+    return {
+      name: latest?.name || "项目视觉风格",
+      description: latest?.description || "",
+      colorPalette: [...new Set(colorPalette)],
+      lightingStyle: latest?.lightingStyle || "",
+      cameraNotes: latest?.cameraNotes || "",
+      aspectRatio: latest?.aspectRatio || "16:9",
+      stylePrompt: latest?.stylePrompt || sourcePrompts[sourcePrompts.length - 1] || storyboardCompositeSettings.stylePrompt || "",
+      sourceCount: sourceVisuals.length + sourcePrompts.length,
+    };
+  }, [nodes, storyboardCompositeSettings.stylePrompt]);
 
   const productionRunQueue = useMemo(() => {
     const briefs = buildShotProductionBriefs(nodes);
@@ -1135,6 +1204,96 @@ function StarCanvasInner() {
       return updated;
     });
   }, [setNodes]);
+
+  const handleApplySceneBiblePatch = useCallback((sceneId: string, patch: ProjectSceneBiblePatch) => {
+    pushUndo({ nodes: nodesRef.current, edges: edgesRef.current });
+    setNodes((nds) => {
+      const updated = nds.map((node) => {
+        const shot = node.data.shot;
+        if (!shot) return node;
+        const currentSceneId = shot.sceneAnalysis?.sceneId || shot.cinematicShot?.sceneId || shot.sourceStoryboardNodeId || "scene-unknown";
+        const storedScenes = node.data.projectScenes ?? [];
+        const storedScene = storedScenes.find((scene) => scene.id === sceneId);
+        if (currentSceneId !== sceneId && !storedScene) return node;
+
+        const nextScene = {
+          id: sceneId,
+          sceneNumber: shot.sceneAnalysis?.sceneNumber ?? storedScene?.sceneNumber,
+          location: patch.location ?? shot.sceneAnalysis?.location ?? storedScene?.location,
+          timeOfDay: patch.timeOfDay ?? shot.sceneAnalysis?.timeOfDay ?? storedScene?.timeOfDay,
+          characters: shot.sceneAnalysis?.characters ?? storedScene?.characters,
+          summary: patch.summary ?? shot.sceneAnalysis?.summary ?? storedScene?.summary,
+          atmosphere: patch.atmosphere ?? storedScene?.atmosphere,
+          lightingStyle: patch.lightingStyle ?? storedScene?.lightingStyle,
+          colorPalette: patch.colorPalette ?? storedScene?.colorPalette,
+        };
+
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            projectScenes: [nextScene, ...storedScenes.filter((scene) => scene.id !== sceneId)],
+            shot: shot.sceneAnalysis
+              ? {
+                  ...shot,
+                  sceneAnalysis: {
+                    ...shot.sceneAnalysis,
+                    location: nextScene.location || shot.sceneAnalysis.location,
+                    timeOfDay: nextScene.timeOfDay || shot.sceneAnalysis.timeOfDay,
+                    summary: nextScene.summary || shot.sceneAnalysis.summary,
+                  },
+                }
+              : shot,
+          },
+        };
+      });
+      nodesRef.current = updated;
+      return updated;
+    });
+  }, [setNodes]);
+
+  const handleApplyProjectVisualPatch = useCallback((patch: ProjectVisualBiblePatch) => {
+    pushUndo({ nodes: nodesRef.current, edges: edgesRef.current });
+    const nextVisual = {
+      name: patch.name || "项目视觉风格",
+      description: patch.description,
+      colorPalette: patch.colorPalette,
+      lightingStyle: patch.lightingStyle,
+      cameraNotes: patch.cameraNotes,
+      aspectRatio: patch.aspectRatio,
+      stylePrompt: patch.stylePrompt,
+    };
+    setStoryboardCompositeSettings((settings) => ({
+      ...settings,
+      stylePrompt: patch.stylePrompt ?? settings.stylePrompt,
+    }));
+    setDraftStoryboardCompositeSettings((settings) => ({
+      ...settings,
+      stylePrompt: patch.stylePrompt ?? settings.stylePrompt,
+    }));
+    setNodes((nds) => {
+      const preferredSourceId = selectedNodeId && nds.some((node) => node.id === selectedNodeId)
+        ? selectedNodeId
+        : nds.find((node) => ["storyboard", "document", "text", "prompt"].includes(String(node.data.nodeKind)))?.id;
+      const updated = nds.map((node) =>
+        node.id === preferredSourceId
+          ? {
+              ...node,
+              data: {
+                ...node.data,
+                projectVisualBible: nextVisual,
+                compositeSettings: {
+                  ...(node.data.compositeSettings ?? DEFAULT_STORYBOARD_COMPOSITE_SETTINGS),
+                  stylePrompt: patch.stylePrompt ?? node.data.compositeSettings?.stylePrompt ?? DEFAULT_STORYBOARD_COMPOSITE_SETTINGS.stylePrompt,
+                },
+              },
+            }
+          : node,
+      );
+      nodesRef.current = updated;
+      return updated;
+    });
+  }, [selectedNodeId, setNodes]);
 
   const createDocumentDerivedNode = useCallback(
     (nodeId: string, target: "inspiration" | "storyboard") => {
@@ -5028,6 +5187,70 @@ function StarCanvasInner() {
     [getCenteredFlowPosition, setNodes, dismissCanvasHint],
   );
 
+  const handleImportScript = useCallback((payload: ScriptImportPayload) => {
+    const defaultSize = NODE_DEFAULT_SIZE.content;
+    const basePosition = getCenteredFlowPosition(defaultSize);
+    const nodeId = generateId();
+    const now = Date.now();
+    const scriptNode: Node<CanvasNodeData> = {
+      id: nodeId,
+      type: "content",
+      position: basePosition,
+      width: defaultSize.width,
+      height: defaultSize.height,
+      measured: defaultSize,
+      data: {
+        title: payload.title,
+        nodeKind: "storyboard",
+        content: payload.text,
+        prompt: payload.text,
+        summary: payload.source === "file"
+          ? `导入剧本 · ${payload.fileName || "文本文件"}`
+          : "粘贴导入剧本",
+        fileName: payload.fileName,
+        fileSize: payload.fileSize,
+        mimeType: payload.mimeType,
+        storyboardAssistantStage: "idea",
+        autoSizeMode: "fixed-width-height-grows",
+        displayWidth: defaultSize.width,
+        displayHeight: defaultSize.height,
+        source: payload.source === "file" ? "upload" : undefined,
+        createdAt: now,
+        projectVisualBible: {
+          name: `${payload.title} 视觉风格`,
+          aspectRatio: "16:9",
+          stylePrompt: storyboardCompositeSettings.stylePrompt,
+        },
+      },
+    };
+
+    setNodes((nds) => {
+      const updated = [...nds, scriptNode];
+      nodesRef.current = updated;
+      return updated;
+    });
+    setSelectedNodeId(nodeId);
+    dismissCanvasHint();
+    addWorkspaceHistoryEvent({
+      id: generateId(),
+      type: "document-uploaded",
+      title: `导入剧本：${payload.title}`,
+      summary: payload.splitToShots ? "已创建故事分镜源节点，并准备拆分 Shot。" : "已创建故事分镜源节点。",
+      nodeId,
+      createdAt: new Date().toISOString(),
+    });
+
+    window.setTimeout(() => {
+      if (payload.splitToShots) {
+        handleSplitStoryboardNode(nodeId, true, { processVisible: true });
+      }
+      if (payload.openBibleAfterImport) {
+        setShowProjectBiblePanel(true);
+      }
+      fitViewToVisibleCanvas(650);
+    }, 60);
+  }, [addWorkspaceHistoryEvent, dismissCanvasHint, fitViewToVisibleCanvas, getCenteredFlowPosition, handleSplitStoryboardNode, setNodes, setSelectedNodeId, storyboardCompositeSettings.stylePrompt]);
+
   const handleCreateVideoWorkflow = useCallback(() => {
     const basePosition = getCenteredFlowPosition({ width: 1120, height: 540 });
     const { nodes: newNodes, edges: newEdges } = buildVideoWorkflowTemplate({
@@ -6275,18 +6498,18 @@ function StarCanvasInner() {
         </button>
         <button
           type="button"
-          onClick={() => setShowCharacterLibrary((value) => !value)}
+          onClick={() => setShowProjectBiblePanel((value) => !value)}
           className="flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-medium backdrop-blur-xl transition hover:bg-white/10"
           style={{
-            borderColor: showCharacterLibrary ? "rgba(168, 85, 247, 0.5)" : DESIGN_TOKENS.border,
-            backgroundColor: showCharacterLibrary ? "rgba(168, 85, 247, 0.18)" : "rgba(18,18,24,0.7)",
+            borderColor: showProjectBiblePanel ? "rgba(168, 85, 247, 0.5)" : DESIGN_TOKENS.border,
+            backgroundColor: showProjectBiblePanel ? "rgba(168, 85, 247, 0.18)" : "rgba(18,18,24,0.7)",
             color: DESIGN_TOKENS.textSecondary,
           }}
-          title="查看当前画布从 ShotNode 汇总出的全局角色一致性资产"
-          data-testid="character-asset-library-toggle"
+          title="查看并编辑当前画布汇总出的角色、场景和视觉风格圣经"
+          data-testid="project-bible-toggle"
         >
-          <Sparkles size={14} strokeWidth={1.7} />
-          <span>角色库 {characterLibraryItems.length}</span>
+          <BookOpen size={14} strokeWidth={1.7} />
+          <span>Bible {characterLibraryItems.length}/{sceneBibleItems.length}</span>
         </button>
         {productionRunQueue && (
           <button
@@ -6680,6 +6903,7 @@ function StarCanvasInner() {
         <EmptyCanvasGuide
           onUploadImage={handleUploadClick}
           onCreateTextNode={() => handleAddNode("content", undefined, "storyboard")}
+          onImportScript={() => setShowScriptImportPanel(true)}
           chatOpen={chatOpen}
           chatPanelWidth={CHAT_PANEL_WIDTH}
           leftToolbarWidth={LEFT_TOOLBAR_SAFE_WIDTH}
@@ -6724,6 +6948,8 @@ function StarCanvasInner() {
         }
         onUploadImage={handleUploadClick}
         onUploadDocument={handleDocumentUploadClick}
+        onImportScript={() => setShowScriptImportPanel(true)}
+        onOpenProjectBible={() => setShowProjectBiblePanel(true)}
         onCreateVideoWorkflow={handleCreateVideoWorkflow}
         onOpenAssetLibrary={openAssetLibrary}
       />
@@ -7284,7 +7510,19 @@ function StarCanvasInner() {
           document.body,
         )}
 
-      {/* Character Asset Library Panel */}
+      {/* Project Bible Panel */}
+      <ProjectBiblePanel
+        isOpen={showProjectBiblePanel}
+        onClose={() => setShowProjectBiblePanel(false)}
+        characterItems={characterLibraryItems}
+        sceneItems={sceneBibleItems}
+        visualBible={projectVisualBible}
+        onApplyCharacterPatch={handleApplyCharacterAssetPatch}
+        onApplyScenePatch={handleApplySceneBiblePatch}
+        onApplyVisualPatch={handleApplyProjectVisualPatch}
+      />
+
+      {/* Legacy Character Asset Library Panel */}
       {showCharacterLibrary &&
         typeof document !== "undefined" &&
         createPortal(
@@ -7353,6 +7591,13 @@ function StarCanvasInner() {
           />,
           document.body,
         )}
+
+      {/* Script Import Panel */}
+      <ScriptImportPanel
+        isOpen={showScriptImportPanel}
+        onClose={() => setShowScriptImportPanel(false)}
+        onImportScript={handleImportScript}
+      />
 
       {/* Settings Panel */}
       {showSettings &&

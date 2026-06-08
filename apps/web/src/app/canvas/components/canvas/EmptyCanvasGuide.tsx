@@ -8,6 +8,7 @@ import { DESIGN_TOKENS } from "../../styles/designSystem"
 
 interface EmptyCanvasGuideProps {
   onCreateTextNode?: () => void
+  onImportScript?: () => void
   onUploadImage: () => void
   /** Whether the right-side chat panel is open */
   chatOpen?: boolean
@@ -19,6 +20,7 @@ interface EmptyCanvasGuideProps {
 
 export function EmptyCanvasGuide({
   onCreateTextNode,
+  onImportScript,
   onUploadImage,
   chatOpen = false,
   chatPanelWidth = 400,
@@ -27,8 +29,8 @@ export function EmptyCanvasGuide({
   const guides = [
     {
       icon: FileText,
-      label: "写故事 / 剧本",
-      desc: "创建文本节点，直接写内容；后续可一键生成故事、分镜或画面",
+      label: "导入剧本 / AI 分析",
+      desc: "粘贴或导入剧本文本，自动进入 Shot 拆分与 Bible 统一设定",
       color: "#94a3b8",
     },
     {
@@ -114,15 +116,27 @@ export function EmptyCanvasGuide({
         {/* Quick Actions */}
         <div className="pointer-events-auto flex items-center gap-2">
           <button
-            onClick={() => onCreateTextNode?.()}
+            onClick={() => onImportScript?.()}
             className="flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-medium transition-all hover:opacity-80"
             style={{
               backgroundColor: DESIGN_TOKENS.accent,
               color: "#fff",
             }}
           >
+            <FileText size={14} strokeWidth={1.5} />
+            导入剧本 / AI 分析
+          </button>
+          <button
+            onClick={() => onCreateTextNode?.()}
+            className="flex items-center gap-1.5 rounded-full px-4 py-2 text-xs transition-all hover:scale-[1.02]"
+            style={{
+              backgroundColor: DESIGN_TOKENS.card,
+              color: DESIGN_TOKENS.textSecondary,
+              border: `1px solid ${DESIGN_TOKENS.border}`,
+            }}
+          >
             <Sparkles size={14} strokeWidth={1.5} />
-            开始写故事 / 剧本
+            空白写作
           </button>
           <button
             onClick={() => onUploadImage()}

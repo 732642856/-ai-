@@ -29,6 +29,7 @@ import {
   LayoutGrid,
   Workflow,
   Lightbulb,
+  BookOpen,
 } from "lucide-react"
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 import type { CanvasNodeKind } from "../canvas/types"
@@ -41,7 +42,9 @@ type AddNodeAction =
   | { type: "add-node"; nodeType: "content" | "image" | "workflow"; nodeKind: CanvasNodeKind }
   | { type: "upload-image" }
   | { type: "upload-document" }
+  | { type: "import-script" }
   | { type: "create-workflow" }
+  | { type: "open-project-bible" }
   | { type: "open-asset-library" }
 
 interface AddNodeItem {
@@ -64,7 +67,9 @@ interface AddNodePanelProps {
   onAddNode: (nodeType: "content" | "image" | "workflow", nodeKind: CanvasNodeKind) => void
   onUploadImage: () => void
   onUploadDocument?: () => void
+  onImportScript?: () => void
   onCreateVideoWorkflow?: () => void
+  onOpenProjectBible?: () => void
   onOpenAssetLibrary?: () => void
 }
 
@@ -95,6 +100,12 @@ const CATEGORIES: AddNodeCategory[] = [
         title: "上传文档",
         description: "导入 TXT / Markdown，作为故事、剧本或资料继续创作",
         action: { type: "upload-document" },
+      },
+      {
+        icon: BookOpen,
+        title: "导入剧本 / Bible",
+        description: "粘贴剧本，创建故事分镜源节点，并进入角色/场景/视觉圣经",
+        action: { type: "import-script" },
       },
       {
         icon: Lightbulb,
@@ -185,6 +196,12 @@ const CATEGORIES: AddNodeCategory[] = [
         action: { type: "add-node", nodeType: "workflow", nodeKind: "composition" },
       },
       {
+        icon: BookOpen,
+        title: "项目 Bible",
+        description: "查看和统一当前画布角色、场景、视觉风格设定",
+        action: { type: "open-project-bible" },
+      },
+      {
         icon: FolderOpen,
         title: "素材库",
         description: "浏览和管理当前项目素材",
@@ -204,7 +221,9 @@ export function AddNodePanel({
   onAddNode,
   onUploadImage,
   onUploadDocument,
+  onImportScript,
   onCreateVideoWorkflow,
+  onOpenProjectBible,
   onOpenAssetLibrary,
 }: AddNodePanelProps) {
   const [activeCategory, setActiveCategory] = useState(CATEGORIES[0].id)
@@ -236,8 +255,14 @@ export function AddNodePanel({
         case "upload-document":
           onUploadDocument?.()
           break
+        case "import-script":
+          onImportScript?.()
+          break
         case "create-workflow":
           onCreateVideoWorkflow?.()
+          break
+        case "open-project-bible":
+          onOpenProjectBible?.()
           break
         case "open-asset-library":
           onOpenAssetLibrary?.()
@@ -245,7 +270,7 @@ export function AddNodePanel({
       }
       onClose()
     },
-    [onAddNode, onUploadImage, onUploadDocument, onCreateVideoWorkflow, onOpenAssetLibrary, onClose]
+    [onAddNode, onUploadImage, onUploadDocument, onImportScript, onCreateVideoWorkflow, onOpenProjectBible, onOpenAssetLibrary, onClose]
   )
 
   if (!isOpen) return null

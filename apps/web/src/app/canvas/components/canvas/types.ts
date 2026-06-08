@@ -302,6 +302,28 @@ export type StoryboardCompositeSettings = {
   strategy: "auto-compose-or-generate" | "always-generate-composite"
 }
 
+export type ProjectSceneBibleData = {
+  id: string
+  sceneNumber?: number
+  location?: string
+  timeOfDay?: string
+  characters?: string[]
+  summary?: string
+  atmosphere?: string
+  lightingStyle?: string
+  colorPalette?: string[]
+}
+
+export type ProjectVisualBibleData = {
+  name?: string
+  description?: string
+  colorPalette?: string[]
+  lightingStyle?: string
+  cameraNotes?: string
+  aspectRatio?: string
+  stylePrompt?: string
+}
+
 export type StoryboardAssistantStage = "idea" | "story" | "storyboard-text"
 
 /** 运行时元数据（不持久化，仅前端运行时使用） */
@@ -387,6 +409,8 @@ export type CanvasNodeData = {
   generationOutput?: any
   compositeSettings?: StoryboardCompositeSettings
   storyboardAssistantStage?: StoryboardAssistantStage
+  projectScenes?: ProjectSceneBibleData[]
+  projectVisualBible?: ProjectVisualBibleData
   autoSizeMode?: "auto" | "fixed-width-height-grows" | "manual"
   writingMode?: "normal" | "focus"
   generation?: any
