@@ -10,7 +10,7 @@ const DEBUG_CHAT = typeof window !== "undefined" && window.localStorage.getItem(
 export interface ChatAttachment {
   id: string
   type: "image" | "video" | "audio" | "file"
-  file: File
+  file?: File // Optional for AI-generated images that don't have a File object
   src: string
   name: string
   size: number

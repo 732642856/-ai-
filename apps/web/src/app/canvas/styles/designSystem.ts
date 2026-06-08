@@ -11,6 +11,7 @@ export const DESIGN_TOKENS = {
   panelSolid: "#15151b",
   card: "rgba(255, 255, 255, 0.04)",
   cardHover: "rgba(255, 255, 255, 0.07)",
+  surfaceAlt: "rgba(255, 255, 255, 0.06)",
 
   // 边框
   border: "rgba(255, 255, 255, 0.08)",
@@ -20,6 +21,7 @@ export const DESIGN_TOKENS = {
   // 文字
   text: "rgba(255, 255, 255, 0.92)",
   textSecondary: "rgba(255, 255, 255, 0.62)",
+  textPrimary: '#e8e9f0',
   textMuted: "rgba(255, 255, 255, 0.38)",
 
   // 主色 - 灰色系（替代原紫色系，降低饱和度）
@@ -36,14 +38,14 @@ export const DESIGN_TOKENS = {
   radiusButton: "12px",
 
   // 阴影
-  shadowPanel: "0 24px 80px rgba(0, 0, 0, 0.45)",
-  shadowMenu: "0 16px 48px rgba(0, 0, 0, 0.5)",
-  shadowNode: "0 8px 32px rgba(0, 0, 0, 0.35)",
+  shadowPanel: "0 16px 48px rgba(0, 0, 0, 0.35)",
+  shadowMenu: "0 8px 32px rgba(0, 0, 0, 0.4)",
+  shadowNode: "0 4px 16px rgba(0, 0, 0, 0.25)",
 
-  // 节点颜色 - 灰色系
+  // 节点颜色 - 低饱和度灰色系
   nodeHandle: "#94a3b8",
-  nodeHandleGlow: "rgba(148, 163, 184, 0.6)",
-  nodeEdge: "rgba(148, 163, 184, 0.45)",
+  nodeHandleGlow: "rgba(148, 163, 184, 0.3)",
+  nodeEdge: "rgba(148, 163, 184, 0.25)",
 
   // Z-index 层级
   zIndex: {

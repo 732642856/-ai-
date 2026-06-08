@@ -1,5 +1,6 @@
 // ============================================================================
 // Workflow Node Component - Generic TapNow-style video workflow node
+// P1-3: 统一使用 NodeRunStatus 六态模型驱动 UI
 // ============================================================================
 "use client"
 
@@ -12,16 +13,24 @@ import {
   Clapperboard,
   FileText,
   Film,
+  Grid3X3,
   ImagePlus,
   Loader2,
   PanelsTopLeft,
+  ScanEye,
   Sparkles,
   Video,
+  DollarSign,
+  Pencil,
 } from "lucide-react"
 import { Handle, Position, NodeResizer, type NodeProps } from "@xyflow/react"
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
-import type { CanvasNodeData, CanvasNodeKind, WorkflowNodeStatus } from "../canvas/types"
+import type { CanvasNodeData, CanvasNodeKind, NodeRunStatus, NodeRunSource } from "../canvas/types"
 import { nodeToneStyles } from "../canvas/types"
+import { useCanvasStore } from "../../stores/canvasStore"
+import { useAIUsageStore } from "../../features/canvas/usage/useAIUsageStore"
+import { formatCostUsd } from "../../features/canvas/usage/estimateCost"
+import { getCompatibleRunMeta, isNodeBusy, isNodeFinished } from "../../utils/nodeRunMeta"
 
 interface WorkflowNodeProps extends NodeProps {
   data: CanvasNodeData
@@ -40,22 +49,35 @@ const workflowLabels: Partial<Record<CanvasNodeKind, string>> = {
   "uploaded-video": "视频素材",
   "uploaded-audio": "音频素材",
   "uploaded-file": "文件素材",
+  "video-sample-frames": "视频抽帧",
+  "video-analyze": "视频分析",
 }
 
-const statusLabels: Record<WorkflowNodeStatus, string> = {
-  draft: "草稿",
-  ready: "就绪",
-  running: "生成中",
-  done: "完成",
-  error: "错误",
+// ── 六态标签 & 样式 ────────────────────────────────────────
+const runStatusLabels: Record<NodeRunStatus, string> = {
+  idle: "空闲",
+  pending: "待确认",
+  running: "运行中",
+  succeeded: "成功",
+  failed: "失败",
+  cancelled: "已取消",
 }
 
-const statusClasses: Record<WorkflowNodeStatus, string> = {
-  draft: "border-white/15 bg-white/5 text-white/50",
-  ready: "border-sky-300/25 bg-sky-400/10 text-sky-100/80",
-  running: "border-amber-300/30 bg-amber-400/10 text-amber-100/90",
-  done: "border-emerald-300/30 bg-emerald-400/10 text-emerald-100/90",
-  error: "border-red-300/30 bg-red-400/10 text-red-100/90",
+const runStatusClasses: Record<NodeRunStatus, string> = {
+  idle: "border-white/10 bg-white/5 text-white/40",
+  pending: "border-amber-300/30 bg-amber-400/10 text-amber-200/80",
+  running: "border-amber-300/20 bg-amber-400/8 text-amber-200/80",
+  succeeded: "border-emerald-300/20 bg-emerald-400/8 text-emerald-200/80",
+  failed: "border-red-300/20 bg-red-400/8 text-red-200/80",
+  cancelled: "border-zinc-300/20 bg-zinc-400/8 text-zinc-200/60",
+}
+
+const sourceLabels: Record<NodeRunSource, string> = {
+  manual: "手动",
+  ai: "AI",
+  workflow: "工作流",
+  retry: "重试",
+  system: "系统",
 }
 
 function getIcon(kind?: CanvasNodeKind) {
@@ -79,24 +101,44 @@ function getIcon(kind?: CanvasNodeKind) {
     case "video-result":
     case "uploaded-video":
       return Film
+    case "video-sample-frames":
+      return Grid3X3
+    case "video-analyze":
+      return ScanEye
     default:
       return Sparkles
   }
 }
 
-function getStatusIcon(status: WorkflowNodeStatus) {
+function getStatusIcon(status: NodeRunStatus) {
   if (status === "running") return Loader2
-  if (status === "done") return CheckCircle2
-  if (status === "error") return CircleAlert
+  if (status === "succeeded") return CheckCircle2
+  if (status === "failed") return CircleAlert
   return null
 }
 
-export const WorkflowNode = memo(function WorkflowNode({ data, selected }: WorkflowNodeProps) {
+// Whether this node kind supports AI execution
+function isTextModelStep(kind?: CanvasNodeKind): boolean {
+  return Boolean(kind && ["text", "script", "storyboard", "subtitle"].includes(kind))
+}
+function isImageModelStep(kind?: CanvasNodeKind): boolean {
+  return Boolean(kind && ["image-generation", "image-result"].includes(kind))
+}
+function isVideoStep(kind?: CanvasNodeKind): boolean {
+  return Boolean(kind && ["video-sample-frames", "video-analyze"].includes(kind))
+}
+
+// ── 主组件 ─────────────────────────────────────────────────
+export const WorkflowNode = memo(function WorkflowNode({ id, data, selected }: WorkflowNodeProps) {
   const kind = data.nodeKind || "script"
   const tone = nodeToneStyles[kind]
-  const status = data.status || "draft"
+
+  // P1-3: 统一从 runMeta 读取状态（兼容旧字段）
+  const runMeta = getCompatibleRunMeta(data)
+  const runStatus = runMeta.runStatus
+
   const Icon = getIcon(kind)
-  const StatusIcon = getStatusIcon(status)
+  const StatusIcon = getStatusIcon(runStatus)
   const title = data.title || workflowLabels[kind] || "工作流节点"
   const body = data.summary || data.instruction || data.prompt || data.content || data.fileName || "等待输入或连接上游节点。"
   const metaItems = [
@@ -105,6 +147,14 @@ export const WorkflowNode = memo(function WorkflowNode({ data, selected }: Workf
     data.duration,
     data.fileSize ? `${Math.round(data.fileSize / 1024)} KB` : undefined,
   ].filter(Boolean)
+
+  // ── AI Usage Cost ─────────────────────────────────────
+  const nodeCost = useAIUsageStore((s) => s.getNodeCostUsd(id))
+  const lastCost = useAIUsageStore((s) => s.getNodeLastCostUsd(id))
+
+  const isBusy = isNodeBusy(runStatus)
+  const isFinished = isNodeFinished(runStatus)
+  const openShotEditor = useCanvasStore((s) => s.openShotEditor)
 
   return (
     <>
@@ -127,56 +177,161 @@ export const WorkflowNode = memo(function WorkflowNode({ data, selected }: Workf
         style={{
           width: 280,
           minHeight: 150,
-          border: selected ? "1px solid rgba(148, 163, 184, 0.65)" : tone.border,
-          background: `linear-gradient(145deg, ${tone.background} 0%, rgba(16,18,34,0.94) 100%)`,
+          border: selected ? "1px solid rgba(148, 163, 184, 0.4)" : tone.border,
+          backgroundColor: DESIGN_TOKENS.panelSolid,
           boxShadow: selected ? DESIGN_TOKENS.shadowNode : "none",
         }}
       >
-        <div className="flex items-center gap-2 border-b border-white/10 bg-black/20 px-4 py-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-xl" style={{ backgroundColor: tone.background }}>
-            <Icon size={16} strokeWidth={ICON_CONFIG.strokeWidth} className={tone.eyebrow} />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className={`truncate text-[10px] font-medium uppercase tracking-[0.18em] ${tone.eyebrow}`}>
-              {workflowLabels[kind] || kind}
-            </p>
-            <p className="truncate text-sm font-medium text-white/90">{title}</p>
-          </div>
-          <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] ${statusClasses[status]}`}>
-            {StatusIcon && <StatusIcon size={11} className={status === "running" ? "animate-spin" : ""} />}
-            {statusLabels[status]}
-          </span>
-        </div>
-
-        <div className="space-y-3 p-4">
-          <p className={`line-clamp-4 text-sm leading-relaxed ${tone.body}`}>{body}</p>
-
-          {metaItems.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {metaItems.map((item) => (
-                <span key={String(item)} className={`rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[10px] ${tone.meta}`}>
-                  {String(item)}
-                </span>
-              ))}
+          {/* ── Header ─────────────────────────────────── */}
+          <div className="flex items-center gap-2 border-b border-white/10 bg-black/20 px-4 py-3">
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl" style={{ backgroundColor: tone.background }}>
+              <Icon size={16} strokeWidth={ICON_CONFIG.strokeWidth} className={tone.eyebrow} />
             </div>
-          )}
-
-          {(data.inputs?.length || data.outputs?.length) && (
-            <div className="grid grid-cols-2 gap-2 border-t border-white/10 pt-3 text-[10px] text-white/45">
-              <div>
-                <p className="mb-1 uppercase tracking-wider">输入</p>
-                <p className="truncate">{data.inputs?.map((i) => i.label).join(" / ") || "—"}</p>
-              </div>
-              <div>
-                <p className="mb-1 uppercase tracking-wider">输出</p>
-                <p className="truncate">{data.outputs?.map((o) => o.label).join(" / ") || "—"}</p>
-              </div>
+            <div className="min-w-0 flex-1">
+              <p className={`truncate text-[10px] font-medium uppercase tracking-[0.18em] ${tone.eyebrow}`}>
+                {workflowLabels[kind] || kind}
+              </p>
+              <p className="truncate text-sm font-medium text-white/90">{title}</p>
             </div>
-          )}
+            <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] ${runStatusClasses[runStatus]}`}>
+              {StatusIcon && <StatusIcon size={11} className={runStatus === "running" ? "animate-spin" : ""} />}
+              {runStatusLabels[runStatus]}
+            </span>
+            {runMeta.source && runMeta.source !== "manual" && (
+              <span className="rounded-full border border-white/10 bg-white/5 px-1.5 py-0.5 text-[9px] text-white/30" title={`触发来源: ${sourceLabels[runMeta.source]}`}>
+                {sourceLabels[runMeta.source]}
+              </span>
+            )}
+          </div>
 
-          {data.errorMessage && <p className="rounded-lg border border-red-400/20 bg-red-500/10 px-2 py-1.5 text-xs text-red-100/80">{data.errorMessage}</p>}
+          <div className="space-y-3 p-4">
+            <p className={`line-clamp-4 text-sm leading-relaxed ${tone.body}`}>{body}</p>
+
+            {metaItems.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {metaItems.map((item) => (
+                  <span key={String(item)} className={`rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[10px] ${tone.meta}`}>
+                    {String(item)}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* ── Progress Bar (running) ─────────────── */}
+            {runStatus === "running" && (
+              <>
+                <div className="h-1 w-full overflow-hidden rounded-full bg-white/10">
+                  <div
+                    className="h-1 rounded-full bg-amber-400 transition-all duration-300"
+                    style={{ width: `${runMeta.progress ?? 20}%` }}
+                  />
+                </div>
+                {runMeta.message && (
+                  <p className="text-[10px] text-amber-200/60">{runMeta.message}</p>
+                )}
+              </>
+            )}
+
+            {/* ── Pending Reason ──────────────────────── */}
+            {runStatus === "pending" && (
+              <div className="rounded-lg border border-amber-400/30 bg-amber-400/8 px-3 py-2.5 text-xs text-amber-200/80">
+                {runMeta.message ?? runMeta.pendingReason ?? "等待确认运行"}
+              </div>
+            )}
+
+            {/* ── Error Message ──────────────────────── */}
+            {runStatus === "failed" && (
+              <div className="rounded-lg border border-red-400/20 bg-red-500/10 px-2 py-1.5 text-xs text-red-100/80">
+                {runMeta.message && <p className="mb-0.5 font-medium text-red-200/90">{runMeta.message}</p>}
+                {runMeta.error && <p className="opacity-80">{runMeta.error}</p>}
+              </div>
+            )}
+
+            {/* ── Succeeded Message ──────────────────── */}
+            {runStatus === "succeeded" && runMeta.message && (
+              <p className="text-[10px] text-emerald-200/50">{runMeta.message}</p>
+            )}
+
+            {/* ── AI 使用成本 ───────────────────────── */}
+            {nodeCost > 0 && (
+              <div className="flex items-center gap-2 border-t border-white/10 pt-2.5 text-[10px]" style={{ color: DESIGN_TOKENS.textMuted }}>
+                <div className="flex items-center gap-1" title={`本节点累计成本: ${formatCostUsd(nodeCost)}`}>
+                  <DollarSign size={10} strokeWidth={1.5} />
+                  <span>{formatCostUsd(nodeCost)}</span>
+                  {lastCost !== undefined && lastCost !== nodeCost && (
+                    <span className="opacity-60">（{formatCostUsd(lastCost)} 本次）</span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {(data.inputs?.length || data.outputs?.length) && (
+              <div className="grid grid-cols-2 gap-2 border-t border-white/10 pt-3 text-[10px] text-white/45">
+                <div>
+                  <p className="mb-1 uppercase tracking-wider">输入</p>
+                  <p className="truncate">{data.inputs?.map((i) => i.label).join(" / ") || "—"}</p>
+                </div>
+                <div>
+                  <p className="mb-1 uppercase tracking-wider">输出</p>
+                  <p className="truncate">{data.outputs?.map((o) => o.label).join(" / ") || "—"}</p>
+                </div>
+              </div>
+            )}
+
+            {/* ── Pending Execution Confirmation ──────── */}
+            {runStatus === "pending" && (
+              <div className="rounded-lg border border-amber-400/30 bg-amber-400/8 px-3 py-2.5">
+                <p className="mb-2 text-xs text-amber-200/80">
+                  ⚠ AI 建议运行此节点
+                </p>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    // 清除 pending，触发运行
+                    if (typeof window !== "undefined") {
+                      window.dispatchEvent(new CustomEvent("startrails-clear-pending", { detail: { nodeId: id } }))
+                      window.dispatchEvent(new CustomEvent("startrails-run-node", { detail: { nodeId: id } }))
+                    }
+                  }}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-amber-400/40 bg-amber-400/15 py-2 text-xs font-medium text-amber-200/90 transition-colors hover:bg-amber-400/25 hover:text-amber-100"
+                >
+                  <Sparkles size={12} />
+                  确认运行
+                </button>
+              </div>
+            )}
+
+            {/* ── Run / Re-run Button ─────────────────── */}
+            {(isTextModelStep(kind) || isImageModelStep(kind) || isVideoStep(kind)) && !isBusy && runStatus !== "pending" && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (typeof window !== "undefined") {
+                    window.dispatchEvent(new CustomEvent("startrails-run-node", { detail: { nodeId: id } }))
+                  }
+                }}
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/5 py-2 text-xs text-white/60 transition-colors hover:bg-white/10 hover:text-white/80"
+              >
+                <Sparkles size={12} />
+                {isFinished ? "重新运行" : "运行此节点"}
+              </button>
+            )}
+
+            {/* ── 编辑分镜按钮（仅 storyboard 节点） ─── */}
+            {kind === "storyboard" && data.content && data.content.length > 10 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  openShotEditor(id, data.content || "", data.prompt || "")
+                }}
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/5 py-2 text-xs text-white/60 transition-colors hover:bg-white/10 hover:text-white/80"
+              >
+                <Pencil size={12} />
+                编辑分镜
+              </button>
+            )}
+          </div>
         </div>
-      </div>
     </>
   )
 })

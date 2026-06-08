@@ -16,6 +16,11 @@ import {
   Trash2,
   Image,
   FileText,
+  History,
+  Play,
+  RotateCcw,
+  ArrowRight,
+  Square,
 } from "lucide-react"
 import type { ContextMenuState, CanvasNodeKind } from "../canvas/types"
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
@@ -31,6 +36,12 @@ interface NodeContextMenuProps {
   onCropImage: () => void
   onSaveToAssetLibrary: () => void
   onEdit: () => void
+  onViewHistory?: () => void
+  onRunCurrentNode?: () => void
+  onRunUpstreamAndCurrent?: () => void
+  onRunDownstreamChain?: () => void
+  onStopWorkflow?: () => void
+  isWorkflowRunning?: boolean
   nodeKind?: CanvasNodeKind
 }
 
@@ -95,6 +106,12 @@ export const NodeContextMenu = memo(function NodeContextMenu({
   onCropImage,
   onSaveToAssetLibrary,
   onEdit,
+  onViewHistory,
+  onRunCurrentNode,
+  onRunUpstreamAndCurrent,
+  onRunDownstreamChain,
+  onStopWorkflow,
+  isWorkflowRunning,
   nodeKind,
 }: NodeContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
@@ -133,7 +150,7 @@ export const NodeContextMenu = memo(function NodeContextMenu({
   const adjustedPosition = { ...position }
   if (typeof window !== "undefined") {
     const menuWidth = 200
-    const menuHeight = isImageNode ? 340 : 280
+    const menuHeight = isImageNode ? 480 : 420
     if (adjustedPosition.x + menuWidth > window.innerWidth) {
       adjustedPosition.x = window.innerWidth - menuWidth - 10
     }
@@ -176,6 +193,68 @@ export const NodeContextMenu = memo(function NodeContextMenu({
             onClose()
           }}
         />
+        {onViewHistory && (
+          <MenuItem
+            icon={<History size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
+            label="查看历史"
+            onClick={() => {
+              onViewHistory()
+              onClose()
+            }}
+          />
+        )}
+      </div>
+
+      {/* Run Section (P2-2) */}
+      <div
+        className="border-b px-3 py-2"
+        style={{ borderColor: DESIGN_TOKENS.border }}
+      >
+        <p
+          className="text-[10px] uppercase tracking-wider"
+          style={{ color: DESIGN_TOKENS.textMuted }}
+        >
+          运行
+        </p>
+      </div>
+      <div className="py-1">
+        <MenuItem
+          icon={<Play size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
+          label="运行当前节点"
+          shortcut="⌘R"
+          onClick={() => {
+            onRunCurrentNode?.()
+            onClose()
+          }}
+        />
+        <MenuItem
+          icon={<RotateCcw size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
+          label="运行上游+当前"
+          onClick={() => {
+            onRunUpstreamAndCurrent?.()
+            onClose()
+          }}
+        />
+        <MenuItem
+          icon={<ArrowRight size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
+          label="运行下游链路"
+          onClick={() => {
+            onRunDownstreamChain?.()
+            onClose()
+          }}
+        />
+        {onStopWorkflow && (
+          <MenuItem
+            icon={<Square size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
+            label="停止当前工作流"
+            disabled={!isWorkflowRunning}
+            onClick={() => {
+              if (!isWorkflowRunning) return
+              onStopWorkflow()
+              onClose()
+            }}
+          />
+        )}
       </div>
 
       {/* Clipboard Section */}

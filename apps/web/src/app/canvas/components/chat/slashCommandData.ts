@@ -1,0 +1,128 @@
+// Slash command types (local definitions)
+type SlashCommandCategory = 'generation' | 'editing' | 'canvas' | 'storyboard'
+
+interface SlashCommand {
+  id: string
+  label: string
+  description: string
+  icon: string
+  category: SlashCommandCategory
+  requiresSelection?: boolean
+  action: { type: string; payload: Record<string, unknown> }
+}
+
+// Slash command icon helpers (using text-based icons for simplicity)
+const ICONS: Record<string, string> = {
+  sparkles: '✨',
+  image: '🖼',
+  video: '🎬',
+  pen: '✏️',
+  book: '📖',
+  wand: '✨',
+  camera: '📸',
+  music: '🎵',
+  code: '💻',
+  layout: '📐',
+  trash: '🗑',
+  copy: '📋',
+  group: '🔗',
+  auto: '🧠',
+}
+
+export const SLASH_COMMANDS: SlashCommand[] = [
+  // === Generation ===
+  {
+    id: 'generate-text',
+    label: 'Generate Text',
+    description: 'AI writes text content based on your prompt',
+    icon: ICONS.sparkles,
+    category: 'generation' as SlashCommandCategory,
+    action: { type: 'send_message', payload: { message: 'Generate text about: ' } },
+  },
+  {
+    id: 'generate-image',
+    label: 'Generate Image',
+    description: 'Create an AI image from a text description',
+    icon: ICONS.image,
+    category: 'generation' as SlashCommandCategory,
+    action: { type: 'send_message', payload: { message: 'Generate an image of: ' } },
+  },
+  {
+    id: 'generate-video',
+    label: 'Generate Video',
+    description: 'Create a short video from text or image',
+    icon: ICONS.video,
+    category: 'generation' as SlashCommandCategory,
+    action: { type: 'send_message', payload: { message: 'Generate a video of: ' } },
+  },
+  {
+    id: 'storyboard',
+    label: 'Storyboard',
+    description: 'Generate a storyboard from script or description',
+    icon: ICONS.camera,
+    category: 'storyboard' as SlashCommandCategory,
+    action: { type: 'send_message', payload: { message: 'Generate a storyboard for: ' } },
+  },
+  {
+    id: 'shot-list',
+    label: 'Shot List',
+    description: 'Generate a detailed shot list for a scene',
+    icon: ICONS.layout,
+    category: 'storyboard' as SlashCommandCategory,
+    action: { type: 'send_message', payload: { message: 'Generate shot list for: ' } },
+  },
+  // === Editing ===
+  {
+    id: 'revise-text',
+    label: 'Revise Text',
+    description: 'Improve or rewrite selected text content',
+    icon: ICONS.pen,
+    category: 'editing' as SlashCommandCategory,
+    requiresSelection: true,
+    action: { type: 'send_message', payload: { message: 'Revise the selected content: ' } },
+  },
+  {
+    id: 'expand',
+    label: 'Expand',
+    description: 'Expand selected content with more detail',
+    icon: ICONS.wand,
+    category: 'editing' as SlashCommandCategory,
+    requiresSelection: true,
+    action: { type: 'send_message', payload: { message: 'Expand on: ' } },
+  },
+  {
+    id: 'summarize',
+    label: 'Summarize',
+    description: 'Summarize selected content',
+    icon: ICONS.book,
+    category: 'editing' as SlashCommandCategory,
+    requiresSelection: true,
+    action: { type: 'send_message', payload: { message: 'Summarize: ' } },
+  },
+  // === Canvas ===
+  {
+    id: 'auto-layout',
+    label: 'Auto Layout',
+    description: 'Automatically arrange all nodes neatly',
+    icon: ICONS.auto,
+    category: 'canvas' as SlashCommandCategory,
+    action: { type: 'execute_action', payload: { action: 'auto_layout' } },
+  },
+  {
+    id: 'clear-canvas',
+    label: 'Clear Canvas',
+    description: 'Remove all nodes and edges from the canvas',
+    icon: ICONS.trash,
+    category: 'canvas' as SlashCommandCategory,
+    action: { type: 'execute_action', payload: { action: 'clear_canvas' } },
+  },
+  {
+    id: 'duplicate',
+    label: 'Duplicate',
+    description: 'Duplicate selected nodes',
+    icon: ICONS.copy,
+    category: 'canvas' as SlashCommandCategory,
+    requiresSelection: true,
+    action: { type: 'execute_action', payload: { action: 'duplicate_node' } },
+  },
+]

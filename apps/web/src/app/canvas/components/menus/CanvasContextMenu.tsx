@@ -20,7 +20,7 @@ import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 interface CanvasContextMenuProps {
   state: ContextMenuState
   onClose: () => void
-  onAddNode: (type: "prompt" | "text" | "image", position: { x: number; y: number }) => void
+  onAddNode: (type: "content" | "image", position: { x: number; y: number }, nodeKind?: string) => void
   onUploadImage: (position: { x: number; y: number }) => void
   onPaste: () => void
   hasClipboard: boolean
@@ -147,7 +147,7 @@ export const CanvasContextMenu = memo(function CanvasContextMenu({
           icon={<FileText size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
           label="添加 Prompt 节点"
           onClick={() => {
-            onAddNode("prompt", canvasPosition)
+            onAddNode("content", canvasPosition, "prompt")
             onClose()
           }}
         />
@@ -155,7 +155,7 @@ export const CanvasContextMenu = memo(function CanvasContextMenu({
           icon={<FilePen size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
           label="添加文本节点"
           onClick={() => {
-            onAddNode("text", canvasPosition)
+            onAddNode("content", canvasPosition, "text")
             onClose()
           }}
         />

@@ -3,11 +3,12 @@
 // ============================================================================
 import type { Node, Edge } from '@xyflow/react'
 import type { ReactNode } from 'react'
+import type { CinematicShot, ContinuityWarning, SceneAnalysis } from '@/types/cinematic'
 
 // ============================================================================
 // Node Types
 // ============================================================================
-export type AgentNodeType = "text" | "prompt" | "image" | "storyboard" | "reference" | "group"
+export type AgentNodeType = "text" | "prompt" | "image" | "storyboard" | "shot" | "storyboard-grid" | "document" | "reference" | "group"
 export type VideoWorkflowNodeKind =
   | "script"
   | "image-generation"
@@ -16,6 +17,44 @@ export type VideoWorkflowNodeKind =
   | "subtitle"
   | "composition"
   | "video-result"
+export type StoryboardResultQuality = "composed-grid" | "single-shot" | "fallback-shot"
+
+export type BatchGenerationJobStatus =
+  | "queued"
+  | "preparing"
+  | "generating"
+  | "completed"
+  | "failed"
+
+export type BatchGenerationShotStatus =
+  | "queued"
+  | "generating"
+  | "completed"
+  | "failed"
+
+export type BatchGenerationJob = {
+  id: string
+  sourceNodeId: string
+  targetShotIds: string[]
+  status: BatchGenerationJobStatus
+  total: number
+  completed: number
+  failed: number
+  progress: number
+  activeShotId?: string
+  message?: string
+  shots: Record<string, {
+    shotNodeId: string
+    title?: string
+    status: BatchGenerationShotStatus
+    imageNodeId?: string
+    error?: string
+  }>
+  startedAt: number
+  updatedAt: number
+  finishedAt?: number
+}
+
 export type CanvasNodeKind =
   | AgentNodeType
   | VideoWorkflowNodeKind
@@ -26,18 +65,325 @@ export type CanvasNodeKind =
   | "uploaded-file"
   | "image-result"
   | "text-result"
+  | "ai-generated-image"
+  | "video-sample-frames"
+  | "video-analyze"
+  | "video"
+  | "agent"
+  | "subtitle-srt"
+  | "handoff-report"
 
+// ============================================================================
+// Node Run Status (P1-3 六态模型)
+// ============================================================================
+export type NodeRunStatus =
+  | "idle"
+  | "pending"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+
+export type NodeRunSource =
+  | "manual"
+  | "ai"
+  | "workflow"
+  | "retry"
+  | "system"
+
+export interface NodeRunMeta {
+  /**
+   * 节点当前运行状态（六态模型）
+   */
+  runStatus: NodeRunStatus
+
+  /**
+   * 0 - 100，主要给 ComfyUI / 视频生成 / 长任务用
+   */
+  progress?: number
+
+  /**
+   * 给用户看的状态说明
+   * 例如：排队中、提交任务中、轮询结果中、下载输出中
+   */
+  message?: string
+
+  /**
+   * 失败原因
+   */
+  error?: string
+
+  /**
+   * 最近一次开始运行时间 (ISO 8601)
+   */
+  lastRunAt?: string
+
+  /**
+   * 最近一次结束时间，成功/失败/取消都可以记录 (ISO 8601)
+   */
+  lastFinishedAt?: string
+
+  /**
+   * 当前运行 ID，可用于 usage metering / history / task 关联
+   */
+  runId?: string
+
+  /**
+   * 当前运行对应的 history id
+   * P1-5 节点生成历史会用到
+   */
+  currentHistoryId?: string
+
+  /**
+   * 外部任务 ID
+   * 例如：ComfyUI prompt_id、ModelScope task_id、APIMart task_id
+   */
+  externalTaskId?: string
+
+  /**
+   * 外部原始状态
+   * 例如 SUCCEED / FAILED / queued / running
+   */
+  rawStatus?: string
+
+  /**
+   * 触发来源
+   */
+  source?: NodeRunSource
+
+  /**
+   * pending 状态的原因
+   * 例如：AI 请求自动运行，需要用户确认
+   */
+  pendingReason?: string
+}
+
+// @deprecated 旧五态模型，保留仅用于兼容读取，新代码请使用 NodeRunStatus
 export type WorkflowNodeStatus = "draft" | "ready" | "running" | "done" | "error"
+
+/** 声线克隆登记状态 */
+export type VoiceCloneStatus = "registering" | "ready" | "failed" | "expired"
+
+/** 角色声线档案（来自 Voice Clone 服务） */
+export type VoiceProfile = {
+  profileId: string
+  characterId: string
+  characterName: string
+  status: VoiceCloneStatus
+  refText?: string
+  tags?: string[]
+  audioDurationSeconds?: number
+  sampleRate?: number
+  createdAt: string
+  updatedAt: string
+  errorMessage?: string
+}
+
+/** AI 配音配置 */
+export type VoiceConfig = {
+  mode: "design" | "clone" | "auto"
+  text: string
+  /** 语音设计模式：属性描述（如 "female, young adult, low pitch, american accent"） */
+  instruct?: string
+  /** 克隆模式：参考音频存储 ID */
+  refAudioId?: string
+  /** 克隆模式：参考音频转写文本 */
+  refText?: string
+  /** 语速倍率（默认 1.0） */
+  speed?: number
+  /** 推理步数（默认 32，16 可加速） */
+  numStep?: number
+}
+
+/** AI 配音状态 */
+export type VoiceGenerationStatus = "idle" | "generating" | "succeeded" | "failed"
+
+export type CharacterIdentityAsset = {
+  id: string
+  name: string
+  aliases?: string[]
+  role?: string
+  /** Stable actor-like identity: face, age range, build, hairstyle, silhouette, distinctive marks */
+  visualSignature?: string
+  /** Costume or wardrobe that must stay recognizable across panels */
+  costume?: string
+  /** Identifying props that should persist when the character appears */
+  props?: string[]
+  physicalTraits?: string[]
+  colorPalette?: string[]
+  referenceAssetId?: string
+  notes?: string
+  /** Voice Clone profile ID — links to a registered voice profile from the Voice Clone service */
+  voiceProfileId?: string
+  /** Voice profile status (synced from Voice Clone service) */
+  voiceProfileStatus?: VoiceCloneStatus
+}
+
+// ============================================================================
+// Bible System Types — Character/Scene/Style Bibles
+// ============================================================================
+export type CharacterBibleData = {
+  id: string
+  name: string
+  aliases?: string[]
+  role?: string
+  visualSignature?: string
+  costume?: string
+  props?: string[]
+  physicalTraits?: string[]
+  colorPalette?: string[]
+  referenceAssetIds?: string[]
+  backstory?: string
+  arcDescription?: string
+  notes?: string
+  referenceImageUrl?: string
+  createdAt: number
+}
+
+export type SceneBibleData = {
+  id: string
+  sceneNumber: number
+  location: string
+  timeOfDay?: string
+  weather?: string
+  atmosphere?: string
+  characters?: string[]
+  props?: string[]
+  lightingStyle?: string
+  colorPalette?: string[]
+  description?: string
+  referenceImageUrl?: string
+  createdAt: number
+}
+
+export type VisualStyleBibleData = {
+  id: string
+  name: string
+  description?: string
+  colorPalette?: string[]
+  lightingStyle?: string
+  aspectRatio?: string
+  filmStock?: string
+  cameraNotes?: string
+  referenceUrls?: string[]
+  moodboardAssetIds?: string[]
+  createdAt: number
+}
+
+export type StoryboardShotData = {
+  id: string
+  order: number
+  title: string
+  shotType?: string
+  cameraMovement?: string
+  duration?: string
+  description: string
+  visualPrompt: string
+  negativePrompt?: string
+  dialogue?: string
+  notes?: string
+  /** 角色一致性资产：用于跨镜头保持同一角色的脸、发型、服装、道具和轮廓稳定 */
+  characterIdentities?: CharacterIdentityAsset[]
+  /** 专业分镜导演层输出：保留镜头动机、构图、调度、连续性等成熟镜头语言信息 */
+  cinematicShot?: CinematicShot
+  sceneAnalysis?: SceneAnalysis
+  continuityWarnings?: ContinuityWarning[]
+  sourceStoryboardNodeId?: string
+  generatedImageNodeId?: string
+  generatedImageUrl?: string
+  generatedImageAssetId?: string
+  generationStatus?: "idle" | "queued" | "generating" | "retrying" | "succeeded" | "failed"
+  generationError?: string
+  generationStartedAt?: number
+  generationFinishedAt?: number
+  generationRequestId?: string
+  generationAttempts?: number
+  generationErrorCode?: string
+  generationRetryable?: boolean
+  lastGeneratedAt?: string
+  status?: "draft" | "ready" | "generating" | "done" | "error"
+  errorMessage?: string
+
+  // --- AI 配音 ---
+  voiceConfig?: VoiceConfig
+  voiceAudioUrl?: string
+  voiceAudioAssetId?: string
+  voiceGenerationStatus?: VoiceGenerationStatus
+  voiceGenerationError?: string
+  // --- 字幕时间轴 ---
+  /** 当前分镜在影片序列中的累积字幕时间轴数据 */
+  subtitleTimeline?: {
+    startTimeSeconds: number
+    durationSeconds: number
+    segments: Array<{
+      index: number
+      startSeconds: number
+      endSeconds: number
+      text: string
+    }>
+  }
+}
+
+export type StoryboardGridData = {
+  id: string
+  title: string
+  sourceStoryboardNodeId?: string
+  shotNodeIds: string[]
+  columns: 1 | 2 | 3
+  maxShots: number
+  shotStates?: Array<{
+    shotNodeId: string
+    order?: number
+    title?: string
+    status: "missing" | "generating" | "ready" | "failed"
+    imageUrl?: string
+    errorMessage?: string
+  }>
+  outputImageUrl?: string
+  outputImageNodeId?: string
+  status?: "draft" | "generating" | "done" | "error"
+  errorMessage?: string
+}
+
+export type StoryboardCompositeSettings = {
+  layout: "auto" | "2x2" | "1x4" | "4x1"
+  showShotNumber: boolean
+  showShotTitle: boolean
+  stylePrompt: string
+  strategy: "auto-compose-or-generate" | "always-generate-composite"
+}
+
+export type StoryboardAssistantStage = "idea" | "story" | "storyboard-text"
+
+/** 运行时元数据（不持久化，仅前端运行时使用） */
+export interface RuntimeMeta {
+  batchProgress?: string
+  retryCount?: number
+  batchPending?: boolean
+  fallbackComposite?: boolean
+  childNodeIds?: string[]
+}
 
 export type CanvasNodeData = {
   label?: ReactNode
   title?: string
   nodeKind?: CanvasNodeKind
   workflowRole?: string
+
+  // ---- 新：统一运行状态 ----
+  runMeta?: NodeRunMeta
+
+  // ---- 旧：兼容字段，禁止新写入 ----
   status?: WorkflowNodeStatus
+  errorMessage?: string
+  pendingExecution?: boolean  // AI suggested run_node, waiting for user confirmation
+
+  // ---- 业务字段 ----
   summary?: string
   prompt?: string
   content?: string
+  /** 文本内容（非 markdown 类型节点的纯文本展示，兼容旧数据） */
+  text?: string
   negativePrompt?: string
   instruction?: string
   inputs?: Array<{ id?: string; label: string; type?: string }>
@@ -45,7 +391,6 @@ export type CanvasNodeData = {
   duration?: string
   model?: string
   resultUrl?: string
-  errorMessage?: string
   imageUrl?: string
   assetUrl?: string
   fileName?: string
@@ -61,11 +406,90 @@ export type CanvasNodeData = {
   assetKind?: string
   assetPurpose?: string
   storyboard?: any
+  shot?: StoryboardShotData
+  storyboardGrid?: StoryboardGridData
+  agentOutput?: string
+  agentStatus?: "idle" | "running" | "done" | "error"
+  agentPhase?: string
+  runtimeMeta?: RuntimeMeta
+  /** @deprecated 迁移到 runtimeMeta.childNodeIds */
+  _childNodeIds?: string[]
+  /** @deprecated 迁移到 runtimeMeta.batchProgress */
+  _batchProgress?: string
+  /** @deprecated 迁移到 runtimeMeta.retryCount */
+  _retryCount?: number
+  /** @deprecated 迁移到 runtimeMeta.batchPending */
+  _batchPending?: boolean
+  /** @deprecated 迁移到 runtimeMeta.fallbackComposite */
+  _fallbackComposite?: boolean
+  /** @deprecated 迁移到 runtimeMeta */
   previs3d?: any
   generationJob?: any
   sourcePromptId?: string
   sourceGenerationJobId?: string
+  sourceType?: "shot" | "storyboard" | "prompt" | "image" | string
+  sourceStoryboardNodeId?: string
+  sourceShotId?: string
+  sourceShotOrder?: number
+  sourceShotTitle?: string
+  sourcePrompt?: string
+  generatedAt?: string
+  generationId?: string
   generationOutput?: any
+  compositeSettings?: StoryboardCompositeSettings
+  storyboardAssistantStage?: StoryboardAssistantStage
+  autoSizeMode?: "auto" | "fixed-width-height-grows" | "manual"
+  writingMode?: "normal" | "focus"
+  generation?: any
+  generatedShotNodeIds?: string[]
+  generatedStoryboardGridNodeId?: string
+  storyboardOutputImageNodeId?: string
+  storyboardOutputImageUrl?: string
+  storyboardOutputAssetId?: string
+  storyboardBatchJob?: BatchGenerationJob
+  storyboardResultQuality?: StoryboardResultQuality
+  storyboardWarning?: string
+  storyboardError?: string
+  storyboardErrorPhase?: string
+  storyboardProcessVisible?: boolean
+  role?: string
+  isStoryboardProcessNode?: boolean
+  isStoryboardFinalOutput?: boolean
+  hiddenByStoryboardProcessMode?: boolean
+  // --- Video metadata (V1-3，全部可选) ---
+  videoDurationMs?: number
+  videoWidth?: number
+  videoHeight?: number
+  videoFps?: number
+  videoFrameCount?: number
+  thumbnailUrl?: string
+
+  // --- Image asset persistence (IndexedDB / remote) ---
+  assetId?: string
+  /** @internal Where the image data lives: "indexeddb" | "remote" | "missing" */
+  persistence?: "indexeddb" | "remote" | "missing"
+  /** @internal Source of the image: "upload" | "generated" | "remote" */
+  source?: "upload" | "generated" | "remote"
+  /** @internal Error identifier when image asset is not found on restore */
+  loadError?: string
+
+  // --- Subtitle / Handoff node fields ---
+  /** SRT 字幕原始内容 */
+  srtContent?: string
+  /** 字幕分段信息 */
+  segments?: Array<{ index: number; start: number; end: number; text: string }>
+  /** 字幕总时长（秒） */
+  totalDurationSeconds?: number
+  /** 字幕格式标识 */
+  format?: string
+  /** 交接报告元数据 */
+  totalWarnings?: number
+  affectedShotCount?: number
+  affectedShotIds?: string[]
+
+  // --- Persistence internal marker (deprecated, kept for reading old data) ---
+  /** @deprecated Use `persistence` field instead */
+  _imageStripped?: boolean
 }
 
 // ============================================================================
@@ -134,6 +558,12 @@ export type ContextMenuState =
       screenX: number
       screenY: number
     }
+  | {
+      type: "edge"
+      edgeId: string
+      screenX: number
+      screenY: number
+    }
 
 // ============================================================================
 // Floating Toolbar Types
@@ -177,9 +607,12 @@ export type ChatMessage = {
 }
 
 // ============================================================================
-// Action Types
+// Canvas Operation Types (internal UI operations)
+// NOTE: These are internal canvas UI operations (context menus, toolbar, etc.),
+// NOT the same as AI-generated chat CanvasAction (see hooks/useChatSSE.ts).
+// The AI chat system uses a different structure: { action, nodeType, nodeId, ... }
 // ============================================================================
-export type CanvasActionType =
+export type CanvasOperationType =
   | "create_node"
   | "update_node"
   | "delete_node"
@@ -193,6 +626,8 @@ export type CanvasActionType =
   | "ask_clarification"
   | "no_action"
   | "select_node"
+  | "focus_node"
+  | "run_node"
   | "apply_asset_workflow"
   | "generate_image"
   | "open_panel"
@@ -202,10 +637,16 @@ export type CanvasActionType =
   | "save_canvas"
   | "create_workflow_template"
 
-export type CanvasAction = {
-  type: CanvasActionType
+export type CanvasOperation = {
+  type: CanvasOperationType
   params?: Record<string, any>
 }
+
+// Keep old names as aliases for backward compatibility
+/** @deprecated Use CanvasOperationType instead. The AI chat system uses a separate CanvasAction type in hooks/useChatSSE.ts */
+export type CanvasActionType = CanvasOperationType
+/** @deprecated Use CanvasOperation instead. The AI chat system uses a separate CanvasAction type in hooks/useChatSSE.ts */
+export type CanvasAction = CanvasOperation
 
 // ============================================================================
 // Storyboard Types (from @creative-canvas/canvas)
@@ -281,143 +722,213 @@ export const nodeToneStyles: Record<CanvasNodeKind, {
   background: string
 }> = {
   text: {
-    eyebrow: "text-violet-200",
-    body: "text-violet-100/75",
-    meta: "text-violet-200/60",
-    border: "1px solid rgba(196, 181, 253, 0.35)",
-    background: "rgba(124, 58, 237, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   prompt: {
-    eyebrow: "text-purple-200",
-    body: "text-purple-100/75",
-    meta: "text-purple-200/60",
-    border: "1px solid rgba(216, 180, 254, 0.35)",
-    background: "rgba(168, 85, 247, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   image: {
-    eyebrow: "text-fuchsia-200",
-    body: "text-fuchsia-100/75",
-    meta: "text-fuchsia-200/60",
-    border: "1px solid rgba(232, 121, 249, 0.35)",
-    background: "rgba(192, 38, 211, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   storyboard: {
-    eyebrow: "text-violet-200",
-    body: "text-violet-100/75",
-    meta: "text-violet-200/60",
-    border: "1px solid rgba(150, 149, 236, 0.4)",
-    background: "rgba(109, 40, 217, 0.18)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
+  },
+  document: {
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.22)",
+    background: "rgba(100, 116, 139, 0.12)",
+  },
+  shot: {
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
+  },
+  "storyboard-grid": {
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   reference: {
-    eyebrow: "text-indigo-200",
-    body: "text-indigo-100/75",
-    meta: "text-indigo-200/60",
-    border: "1px solid rgba(129, 140, 248, 0.35)",
-    background: "rgba(79, 70, 229, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   group: {
-    eyebrow: "text-violet-200",
-    body: "text-violet-100/75",
-    meta: "text-violet-200/60",
-    border: "1px dashed rgba(216, 180, 254, 0.45)",
-    background: "rgba(30, 27, 75, 0.42)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px dashed rgba(148, 163, 184, 0.25)",
+    background: "rgba(100, 116, 139, 0.06)",
   },
   previs: {
-    eyebrow: "text-indigo-200",
-    body: "text-indigo-100/75",
-    meta: "text-indigo-200/60",
-    border: "1px solid rgba(129, 140, 248, 0.35)",
-    background: "rgba(67, 56, 202, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   "uploaded-image": {
-    eyebrow: "text-violet-200",
-    body: "text-violet-100/75",
-    meta: "text-violet-200/60",
-    border: "1px solid rgba(150, 149, 236, 0.35)",
-    background: "rgba(109, 40, 217, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   "uploaded-video": {
-    eyebrow: "text-indigo-200",
-    body: "text-indigo-100/75",
-    meta: "text-indigo-200/60",
-    border: "1px solid rgba(129, 140, 248, 0.35)",
-    background: "rgba(79, 70, 229, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   "uploaded-audio": {
-    eyebrow: "text-purple-200",
-    body: "text-purple-100/75",
-    meta: "text-purple-200/60",
-    border: "1px solid rgba(216, 180, 254, 0.35)",
-    background: "rgba(126, 34, 206, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   "uploaded-file": {
-    eyebrow: "text-indigo-200",
-    body: "text-indigo-100/75",
-    meta: "text-indigo-200/60",
-    border: "1px solid rgba(129, 140, 248, 0.35)",
-    background: "rgba(67, 56, 202, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   "image-result": {
-    eyebrow: "text-fuchsia-200",
-    body: "text-fuchsia-100/75",
-    meta: "text-fuchsia-200/60",
-    border: "1px solid rgba(232, 121, 249, 0.35)",
-    background: "rgba(192, 38, 211, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   "text-result": {
-    eyebrow: "text-purple-200",
-    body: "text-purple-100/75",
-    meta: "text-purple-200/60",
-    border: "1px solid rgba(216, 180, 254, 0.35)",
-    background: "rgba(126, 34, 206, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   script: {
-    eyebrow: "text-cyan-200",
-    body: "text-cyan-100/75",
-    meta: "text-cyan-200/60",
-    border: "1px solid rgba(103, 232, 249, 0.35)",
-    background: "rgba(8, 145, 178, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   "image-generation": {
-    eyebrow: "text-pink-200",
-    body: "text-pink-100/75",
-    meta: "text-pink-200/60",
-    border: "1px solid rgba(244, 114, 182, 0.35)",
-    background: "rgba(190, 24, 93, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   "video-generation": {
-    eyebrow: "text-sky-200",
-    body: "text-sky-100/75",
-    meta: "text-sky-200/60",
-    border: "1px solid rgba(56, 189, 248, 0.35)",
-    background: "rgba(2, 132, 199, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   audio: {
-    eyebrow: "text-emerald-200",
-    body: "text-emerald-100/75",
-    meta: "text-emerald-200/60",
-    border: "1px solid rgba(52, 211, 153, 0.35)",
-    background: "rgba(5, 150, 105, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   subtitle: {
-    eyebrow: "text-amber-200",
-    body: "text-amber-100/75",
-    meta: "text-amber-200/60",
-    border: "1px solid rgba(251, 191, 36, 0.35)",
-    background: "rgba(217, 119, 6, 0.16)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   composition: {
-    eyebrow: "text-violet-200",
-    body: "text-violet-100/75",
-    meta: "text-violet-200/60",
-    border: "1px solid rgba(167, 139, 250, 0.4)",
-    background: "rgba(91, 33, 182, 0.2)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
   },
   "video-result": {
-    eyebrow: "text-blue-200",
-    body: "text-blue-100/75",
-    meta: "text-blue-200/60",
-    border: "1px solid rgba(96, 165, 250, 0.4)",
-    background: "rgba(37, 99, 235, 0.18)",
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
+  },
+  "ai-generated-image": {
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
+  },
+  "video-sample-frames": {
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
+  },
+  "video-analyze": {
+    eyebrow: "text-slate-300",
+    body: "text-slate-200/75",
+    meta: "text-slate-300/60",
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(100, 116, 139, 0.1)",
+  },
+  agent: {
+    eyebrow: "text-purple-300",
+    body: "text-purple-200/75",
+    meta: "text-purple-300/60",
+    border: "1px solid rgba(168, 85, 247, 0.2)",
+    background: "rgba(168, 85, 247, 0.1)",
+  },
+  video: {
+    eyebrow: "text-amber-300",
+    body: "text-amber-200/75",
+    meta: "text-amber-300/60",
+    border: "1px solid rgba(245, 158, 11, 0.2)",
+    background: "rgba(245, 158, 11, 0.1)",
+  },
+  "subtitle-srt": {
+    eyebrow: "text-blue-300",
+    body: "text-blue-200/75",
+    meta: "text-blue-300/60",
+    border: "1px solid rgba(59, 130, 246, 0.2)",
+    background: "rgba(59, 130, 246, 0.1)",
+  },
+  "handoff-report": {
+    eyebrow: "text-yellow-300",
+    body: "text-yellow-200/75",
+    meta: "text-yellow-300/60",
+    border: "1px solid rgba(234, 179, 8, 0.3)",
+    background: "rgba(234, 179, 8, 0.1)",
   },
 }
