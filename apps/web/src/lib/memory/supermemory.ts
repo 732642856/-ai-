@@ -1,11 +1,11 @@
 // ============================================================================
 // supermemory — AI long-term memory engine adapter
-// Replaces localStorage for canvas persistence with vector-based semantic storage
 // 
-// supermemory is a 26k-star open-source project that provides:
-// - Vector-based semantic search (across sessions)
-// - SQLite-backed exact storage
-// - Cross-tool memory sharing via MCP Server
+// V2: Upgraded to real semantic vector search using transformers.js
+// - Embeddings generated in-browser via transformers.js (Xenova)
+// - Cosine similarity for ranking (not keyword matching)
+// - IndexedDB for persistent storage
+// - Fallback to keyword matching if transformers.js not loaded
 // ============================================================================
 
 import type { Node, Edge } from "@xyflow/react";
@@ -19,6 +19,7 @@ interface MemoryEntry<T = unknown> {
   key: string;
   content: T;
   metadata: Record<string, string>;
+  embedding?: number[]; // Vector embedding
   createdAt: number;
   updatedAt: number;
 }
@@ -28,12 +29,11 @@ interface MemoryIndex {
 }
 
 // ---------------------------------------------------------------------------
-// IndexedDB-backed supermemory adapter (replaces localStorage)
-// Uses IndexedDB for larger capacity, no size limit, better performance
+// IndexedDB setup
 // ---------------------------------------------------------------------------
 
 const DB_NAME = "supermemory";
-const DB_VERSION = 2;
+const DB_VERSION = 3; // Bumped for embedding column
 const STORE_NAME = "memory_store";
 const INDEX_STORE = "memory_index";
 
@@ -57,6 +57,106 @@ function openDB(): Promise<IDBDatabase> {
 }
 
 // ---------------------------------------------------------------------------
+// Embedding engine (transformers.js)
+// ---------------------------------------------------------------------------
+
+let embeddingPipeline: any = null;
+let embeddingLoading = false;
+
+/**
+ * Get or initialize the embedding pipeline.
+ * Uses a small model (all-MiniLM-L6-v2) for fast browser inference.
+ */
+async function getEmbeddingPipeline() {
+  if (embeddingPipeline) return embeddingPipeline;
+  if (embeddingLoading) {
+    while (embeddingLoading) await new Promise((r) => setTimeout(r, 100));
+    return embeddingPipeline;
+  }
+  embeddingLoading = true;
+  try {
+    const { pipeline } = await import("@xenova/transformers");
+    // Use a small, fast embedding model suitable for browser
+    embeddingPipeline = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2", {
+      quantized: true,
+    });
+    return embeddingPipeline;
+  } catch (e) {
+    console.warn("[supermemory] Failed to load embedding model, falling back to keyword search:", e);
+    return null;
+  } finally {
+    embeddingLoading = false;
+  }
+}
+
+/**
+ * Generate embedding vector from text.
+ * Returns null if embedding pipeline is unavailable.
+ */
+async function generateEmbedding(text: string): Promise<number[] | null> {
+  try {
+    const pipe = await getEmbeddingPipeline();
+    if (!pipe) return null;
+    
+    const result = await pipe(text, { pooling: "mean", normalize: true });
+    // Extract the embedding vector from the Tensor
+    const data = result.data as Float32Array;
+    return Array.from(data);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Compute cosine similarity between two vectors.
+ */
+function cosineSimilarity(a: number[], b: number[]): number {
+  if (a.length !== b.length) return 0;
+  let dot = 0, normA = 0, normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  const denom = Math.sqrt(normA) * Math.sqrt(normB);
+  return denom === 0 ? 0 : dot / denom;
+}
+
+/**
+ * Fallback keyword search (original implementation).
+ */
+function keywordSearch(
+  query: string,
+  entries: MemoryEntry[],
+  filterType?: string,
+): Array<{ entry: MemoryEntry; score: number }> {
+  const queryLower = query.toLowerCase();
+  const queryTerms = queryLower.split(/\s+/).filter(Boolean);
+  const results: Array<{ entry: MemoryEntry; score: number }> = [];
+
+  for (const entry of entries) {
+    if (filterType && entry.metadata.type !== filterType) continue;
+    let score = 0;
+    const searchableText = [
+      entry.key,
+      JSON.stringify(entry.content || ""),
+      JSON.stringify(entry.metadata),
+    ].join(" ").toLowerCase();
+
+    for (const term of queryTerms) {
+      if (searchableText.includes(term)) {
+        score += 1;
+        if (entry.key.toLowerCase().includes(term)) score += 2;
+        if (entry.metadata.type?.toLowerCase().includes(term)) score += 1;
+      }
+    }
+    if (score > 0) results.push({ entry, score });
+  }
+
+  return results.sort((a, b) => b.score - a.score || b.entry.updatedAt - a.entry.updatedAt);
+}
+
+// ---------------------------------------------------------------------------
 // Core operations
 // ---------------------------------------------------------------------------
 
@@ -68,11 +168,16 @@ export const supermemory = {
     const store = tx.objectStore(STORE_NAME);
     const idxStore = tx.objectStore(INDEX_STORE);
 
+    // Generate embedding from content + metadata
+    const searchableText = `${key} ${JSON.stringify(content)} ${JSON.stringify(metadata)}`;
+    const embedding = await generateEmbedding(searchableText);
+
     const entry: MemoryEntry<T> = {
       id: `mem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       key: `${STORAGE_PREFIX}${key}`,
       content,
       metadata,
+      embedding: embedding || undefined,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -135,55 +240,53 @@ export const supermemory = {
     });
   },
 
-  /** Semantic search across all memory entries */
+  /** Semantic vector search across all memory entries */
   async search(query: string, filterType?: string): Promise<Array<{ key: string; content: unknown; metadata: Record<string, string>; score: number }>> {
     const db = await openDB();
     const tx = db.transaction(STORE_NAME, "readonly");
     const store = tx.objectStore(STORE_NAME);
 
-    const results: Array<{ entry: MemoryEntry; score: number }> = [];
-
     return new Promise((resolve, reject) => {
       const req = store.getAll();
-      req.onsuccess = () => {
+      req.onsuccess = async () => {
         const allEntries = req.result as MemoryEntry[];
-        const queryLower = query.toLowerCase();
-        const queryTerms = queryLower.split(/\s+/).filter(Boolean);
 
-        for (const entry of allEntries) {
-          if (filterType && entry.metadata.type !== filterType) continue;
+        // Filter by type
+        const filtered = filterType
+          ? allEntries.filter((e) => e.metadata.type === filterType)
+          : allEntries;
 
-          let score = 0;
-          const searchableText = [
-            entry.key, 
-            JSON.stringify(entry.content || ""), 
-            JSON.stringify(entry.metadata)
-          ].join(" ").toLowerCase();
+        // 1. Try vector search if embeddings are available
+        const queryEmbedding = await generateEmbedding(query);
 
-          for (const term of queryTerms) {
-            if (searchableText.includes(term)) {
-              score += 1;
-              // Bonus for matching the key
-              if (entry.key.toLowerCase().includes(term)) score += 2;
-              // Bonus for matching metadata type
-              if (entry.metadata.type?.toLowerCase().includes(term)) score += 1;
-            }
-          }
+        if (queryEmbedding && filtered.some((e) => e.embedding)) {
+          // Vector search: compute cosine similarity
+          const scored = filtered
+            .map((entry) => ({
+              entry,
+              score: entry.embedding
+                ? cosineSimilarity(queryEmbedding, entry.embedding)
+                : 0,
+            }))
+            .filter((r) => r.score > 0.15) // Threshold: only meaningful matches
+            .sort((a, b) => b.score - a.score);
 
-          if (score > 0) {
-            results.push({ entry, score });
-          }
+          resolve(scored.slice(0, 10).map((r) => ({
+            key: r.entry.key.replace(STORAGE_PREFIX, ""),
+            content: r.entry.content,
+            metadata: r.entry.metadata,
+            score: Math.round(r.score * 1000) / 1000,
+          })));
+        } else {
+          // 2. Fallback: keyword search
+          const keywordResults = keywordSearch(query, filtered);
+          resolve(keywordResults.slice(0, 10).map((r) => ({
+            key: r.entry.key.replace(STORAGE_PREFIX, ""),
+            content: r.entry.content,
+            metadata: r.entry.metadata,
+            score: r.score,
+          })));
         }
-
-        // Sort by score descending, then by recency
-        results.sort((a, b) => b.score - a.score || b.entry.updatedAt - a.entry.updatedAt);
-
-        resolve(results.slice(0, 10).map((r) => ({
-          key: r.entry.key.replace(STORAGE_PREFIX, ""),
-          content: r.entry.content,
-          metadata: r.entry.metadata,
-          score: r.score,
-        })));
       };
       req.onerror = () => reject(req.error);
     });

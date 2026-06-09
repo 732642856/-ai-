@@ -1,8 +1,9 @@
 // ============================================================================
 // ttsService — 文本转语音 API 客户端
 //
-// 封装 VoxCPM / Mock 等 TTS 后端。
-// 支持 SSE 流式进度回调与 mock 本地开发模式。
+// 封装 Kokoro / VoxCPM / Mock 等 TTS 后端。
+// Kokoro 为纯浏览器端 TTS（Apache-2.0），无需服务端支持。
+// VoxCPM 为服务器端语音合成（含克隆能力）。
 // ============================================================================
 
 import * as Sentry from "@sentry/nextjs";
@@ -14,7 +15,7 @@ import * as Sentry from "@sentry/nextjs";
 export const TTS_TIMEOUT_MS = 120_000 // 2 minutes
 
 /** Supported TTS backends */
-export type TtsBackend = "voxcpm" | "mock"
+export type TtsBackend = "kokoro" | "voxcpm" | "mock"
 
 /** TTS generation parameters */
 export interface TtsInput {
@@ -257,6 +258,109 @@ async function voxcpmGenerateTts(
   )
 }
 
+/**
+ * Kokoro TTS — 纯浏览器端语音合成（Apache-2.0）
+ * 使用 kokoro-js 库，基于 ONNX Runtime 在浏览器本地运行。
+ * 100+ 预设音色，无需服务端。
+ */
+let kokoroTtsInstance: any = null
+let kokoroLoading = false
+
+async function getKokoroInstance() {
+  if (kokoroTtsInstance) return kokoroTtsInstance
+  if (kokoroLoading) {
+    // Wait for loading to complete
+    while (kokoroLoading) await new Promise((r) => setTimeout(r, 100))
+    return kokoroTtsInstance
+  }
+  kokoroLoading = true
+  try {
+    const { KokoroTTS } = await import("kokoro-js")
+    const instance = await KokoroTTS.from_pretrained(
+      "onnx-community/Kokoro-82M-v1.0-ONNX",
+      { dtype: "q8", device: "wasm" },
+    )
+    kokoroTtsInstance = instance
+    return instance
+  } finally {
+    kokoroLoading = false
+  }
+}
+
+/**
+ * Kokoro voice name mapping from Chinese tags.
+ * Maps Quick Tags to best-matching Kokoro preset voices.
+ */
+const KOKORO_VOICE_MAP: Record<string, string> = {
+  "年轻女声": "af_bella",
+  "沉稳男声": "am_adam",
+  "活泼": "af_heart",
+  "低沉": "am_adam",
+  "温柔": "af_sarah",
+  "稍快语速": "af_sky",
+  "缓慢": "af_nicole",
+  "有磁性": "am_michael",
+  "沙哑": "am_adam",
+  "带口音": "af_bella",
+  "老年声": "am_adam",
+  "童声": "af_sky",
+}
+
+/** Get the best Kokoro voice name from a Chinese description */
+export function resolveKokoroVoice(voiceDescription?: string, voice?: string): string {
+  if (voice) return voice
+  if (!voiceDescription) return "af_heart"
+  for (const [tag, mapped] of Object.entries(KOKORO_VOICE_MAP)) {
+    if (voiceDescription.includes(tag)) return mapped
+  }
+  return "af_heart"
+}
+
+/**
+ * Kokoro TTS generator — runs 100% in browser.
+ */
+async function kokoroGenerateTts(
+  input: TtsInput,
+  onProgress?: TtsProgressCallback,
+): Promise<TtsResult> {
+  onProgress?.({ stage: "connecting", percent: 10, message: "正在加载 Kokoro 语音引擎..." })
+
+  const tts = await getKokoroInstance()
+  if (!tts) {
+    throw new TtsError({
+      message: "Kokoro 语音引擎加载失败",
+      code: "BACKEND_UNAVAILABLE",
+      retryable: true,
+    })
+  }
+
+  onProgress?.({ stage: "synthesizing", percent: 50, message: "正在合成语音..." })
+
+  const voice = resolveKokoroVoice(input.voiceDescription, input.voice)
+  const audio = await tts.generate(input.text, { voice })
+
+  // Convert audio to base64 WAV
+  const arrayBuffer = audio.toArrayBuffer()
+  const uint8 = new Uint8Array(arrayBuffer)
+  let binary = ""
+  for (let i = 0; i < uint8.length; i++) {
+    binary += String.fromCharCode(uint8[i])
+  }
+  const audioBase64 = btoa(binary)
+
+  const durationMs = Math.round(audio.duration * 1000)
+
+  onProgress?.({ stage: "done", percent: 100, message: "语音合成完成" })
+
+  return {
+    audioBase64,
+    format: "wav",
+    durationMs,
+    backend: "kokoro",
+    metadata: { model: "Kokoro-82M-v1.0-ONNX" },
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Backend registry
 // ---------------------------------------------------------------------------
@@ -265,15 +369,27 @@ const BACKENDS: Record<
   TtsBackend,
   (input: TtsInput, onProgress?: TtsProgressCallback) => Promise<TtsResult>
 > = {
+  kokoro: kokoroGenerateTts,
   mock: mockGenerateTts,
   voxcpm: voxcpmGenerateTts,
+}
+
+/** List available Kokoro voices */
+export async function listKokoroVoices(): Promise<string[]> {
+  const tts = await getKokoroInstance()
+  if (!tts?.list_voices) return Object.values(KOKORO_VOICE_MAP)
+  return tts.list_voices()
 }
 
 /** Resolve which backend to use */
 function pickTtsBackend(input: TtsInput): TtsBackend {
   if (input.backend) return input.backend
 
-  // Auto-detect: prefer voxcpm if env var exists, fallback to mock
+  // Prefer browser-native Kokoro (no server needed, Apache-2.0)
+  // Fallback to voxcpm if env var exists, then mock
+  if (typeof window !== "undefined") {
+    return "kokoro"
+  }
   if (process.env.VOXCPM_BASE_URL) {
     return "voxcpm"
   }
@@ -452,52 +568,40 @@ export function invalidateProfileCache(): void {
 }
 
 /**
- * Voice Panel — TTS generation (bridged to VoxCPM2 via generateTts).
- * If VOXCPM_BASE_URL is configured, calls the real backend;
- * otherwise returns mock silent WAV for development.
+ * Voice Panel — TTS generation (bridged to Kokoro / VoxCPM2).
+ * Defaults to browser-native Kokoro (no server needed).
+ * Falls back to VoxCPM2 if available.
  */
 export async function generateTtsAudio(params: {
   text: string
   voiceConfig?: { instruct?: string; refAudioId?: string; refText?: string; speed?: number }
+  backend?: TtsBackend
 }): Promise<{ audioBlob: Blob }> {
-  const { text, voiceConfig } = params
+  const { text, voiceConfig, backend } = params
   if (!text?.trim()) {
     throw new TtsGenerationError("请输入要合成的台词")
   }
 
-  // Check if VoxCPM2 is available
+  // Use Kokoro if no explicit backend override
+  const useKokoro = !backend || backend === "kokoro"
+  if (useKokoro) {
+    const result = await generateTts({
+      text: text.trim(),
+      voiceDescription: voiceConfig?.instruct,
+      speed: voiceConfig?.speed,
+      backend: "kokoro",
+    })
+    const binaryStr = atob(result.audioBase64)
+    const bytes = new Uint8Array(binaryStr.length)
+    for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i)
+    return { audioBlob: new Blob([bytes], { type: "audio/wav" }) }
+  }
+
+  // Legacy path for VoxCPM2
   const hasVoxCpm = Boolean(
     (typeof process !== "undefined" && (process as any).env?.VOXCPM_BASE_URL) ||
     (typeof window !== "undefined" && (window as any).__ENV?.NEXT_PUBLIC_VOXCPM_URL)
   )
-
-  if (!hasVoxCpm) {
-    // Fallback: return silent WAV for development
-    const sampleRate = 16000
-    const numSamples = Math.max(1600, Math.round(text.length * 80))
-    const buffer = new ArrayBuffer(44 + numSamples * 2)
-    const view = new DataView(buffer)
-    const writeStr = (offset: number, str: string) => {
-      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i))
-    }
-    writeStr(0, "RIFF")
-    view.setUint32(4, 36 + numSamples * 2, true)
-    writeStr(8, "WAVE")
-    writeStr(12, "fmt ")
-    view.setUint32(16, 16, true)
-    view.setUint16(20, 1, true)
-    view.setUint16(22, 1, true)
-    view.setUint32(24, sampleRate, true)
-    view.setUint32(28, sampleRate * 2, true)
-    view.setUint16(32, 2, true)
-    view.setUint16(34, 16, true)
-    writeStr(36, "data")
-    view.setUint32(40, numSamples * 2, true)
-    const blob = new Blob([buffer], { type: "audio/wav" })
-    return { audioBlob: blob }
-  }
-
-  // Real backend: call VoxCPM2 via /api/ai/tts
   const voiceDescription = voiceConfig?.instruct || ""
   const refAudioId = voiceConfig?.refAudioId
 

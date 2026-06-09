@@ -7,6 +7,22 @@ const nextConfig: NextConfig = {
   // Keep both dev and build on webpack.
   // Turbopack currently panics when this workspace lives under a Chinese path.
   allowedDevOrigins: ["127.0.0.1", "localhost"],
+
+  webpack: (config, { isServer }) => {
+    // onnxruntime-node .node binaries must be external (native addon, not webpack-bundleable)
+    config.externals = [...(config.externals || []), "onnxruntime-node", "@lancedb/lancedb"]
+
+    // Ignore .node files from webpack processing (native addons)
+    config.module?.rules?.push({
+      test: /\.node$/,
+      use: "ignore-loader",
+    })
+
+    return config
+  },
+
+  // Dynamic imports of native-only packages should use require() at runtime
+  serverExternalPackages: ["kokoro-js", "@xenova/transformers", "onnxruntime-node", "@lancedb/lancedb"],
 }
 
 export default withSentryConfig(nextConfig, {

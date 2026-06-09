@@ -17,9 +17,13 @@
   },
   "dependencies": {
     "@creative-canvas/canvas": "workspace:*",
+    "@imgly/background-removal": "^1.7.0",
+    "@lancedb/lancedb": "^0.30.0",
     "@sentry/nextjs": "^10.56.0",
+    "@xenova/transformers": "^2.17.2",
     "@xyflow/react": "^12.10.0",
     "dagre": "^0.8.5",
+    "kokoro-js": "^1.2.1",
     "lucide-react": "^1.16.0",
     "mammoth": "^1.12.0",
     "next": "16.2.6",
@@ -38,6 +42,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
+    "ignore-loader": "^0.1.2",
     "react-scan": "^0.5.7",
     "tailwindcss": "^4",
     "typescript": "^5"

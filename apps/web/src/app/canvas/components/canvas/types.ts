@@ -219,6 +219,10 @@ export type CharacterIdentityAsset = {
   voiceProfileId?: string
   /** Voice profile status (synced from Voice Clone service) */
   voiceProfileStatus?: VoiceCloneStatus
+  /** 三视图生成结果 URL（CharacterViewPanel 渲染） */
+  frontViewUrl?: string
+  sideViewUrl?: string
+  backViewUrl?: string
 }
 
 export type StoryboardShotData = {
