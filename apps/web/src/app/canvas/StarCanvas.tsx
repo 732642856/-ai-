@@ -142,6 +142,7 @@ import ImageNode, {
   unregisterImageHoverHandlers,
 } from "./components/nodes/ImageNode";
 import ContentNode from "./components/nodes/ContentNode";
+import { ContinuityReportNode } from "./components/nodes/ContinuityReportNode";
 import WorkflowNode from "./components/nodes/WorkflowNode";
 import ShotNode from "./components/nodes/ShotNode";
 import StoryboardGridNode from "./components/nodes/StoryboardGridNode";
@@ -472,6 +473,7 @@ const nodeTypes = {
   image: ImageNode,
   content: ContentNode,
   text: ContentNode,
+  "continuity-report": ContinuityReportNode,
   workflow: WorkflowNode,
   shot: ShotNode,
   storyboardGrid: StoryboardGridNode,

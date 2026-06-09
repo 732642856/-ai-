@@ -11,6 +11,8 @@ import { X, Plus, UserRound, Trash2, Image as ImageIcon, Save, Sparkles, Loader2
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 import { useCanvasStore } from "../../stores/canvasStore"
 import type { CharacterBibleData } from "../canvas/types"
+import type { IdentityAnchors, CharacterNegativePrompt } from "../../types/identity-anchors"
+import { createDefaultIdentityAnchors, validateIdentityAnchors, compileIdentityPrompt, inferColorHex } from "../../types/identity-anchors"
 import { generateId } from "../../utils/generateId"
 
 // Tab 切换：角色列表 / 编辑表单
@@ -44,7 +46,10 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
   // 选中角色时自动切换到编辑视图
   useEffect(() => {
     if (selectedCharacter) {
-      setEdit(selectedCharacter)
+      setEdit({
+        ...selectedCharacter,
+        identityAnchors: selectedCharacter.identityAnchors || createDefaultIdentityAnchors(),
+      })
       setTab("edit")
     } else {
       setEdit({})
@@ -64,6 +69,14 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
 
   const handleSave = () => {
     if (!selectedBibleCharacterId || !edit.name?.trim()) return
+    // 验证六层锚点
+    if (edit.identityAnchors) {
+      const validation = validateIdentityAnchors(edit.identityAnchors)
+      if (!validation.valid) {
+        alert(`角色锚点不完整：\n${validation.errors.join("\n")}`)
+        return
+      }
+    }
     updateBibleCharacter(selectedBibleCharacterId, edit)
     setTab("list")
     selectBibleCharacter(null)
@@ -379,6 +392,232 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
                   className="w-full rounded-lg border bg-black/40 px-3 py-2 text-sm text-white outline-none resize-none"
                   style={{ borderColor: DESIGN_TOKENS.border }}
                 />
+              </div>
+
+              {/* ===== 六层身份锚点（对标 Moyin Creator）===== */}
+              <div className="border border-dashed rounded-xl p-3 space-y-3" style={{ borderColor: "rgba(168, 85, 247, 0.3)", backgroundColor: "rgba(168, 85, 247, 0.05)" }}>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium" style={{ color: "#a855f7" }}>
+                    ⚡ 六层身份锚点（高级 · 保证角色一致性）
+                  </label>
+                  {edit.identityAnchors && (
+                    <span className="text-xs" style={{ color: DESIGN_TOKENS.accent }}>
+                      {validateIdentityAnchors(edit.identityAnchors).valid ? "✓ 完整" : "⚠ 需完善第三层"}
+                    </span>
+                  )}
+                </div>
+
+                {/* 第一层：骨相 */}
+                <details className="text-xs">
+                  <summary className="cursor-pointer font-medium mb-1" style={{ color: DESIGN_TOKENS.textSecondary }}>第一层：骨相（脸型/下颌线/颧骨）</summary>
+                  <div className="grid grid-cols-3 gap-2 mt-1">
+                    <input
+                      type="text"
+                      value={edit.identityAnchors?.skeletal?.faceShape || ""}
+                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, skeletal: { ...prev.identityAnchors!.skeletal, faceShape: e.target.value } }))}
+                      placeholder="脸型：圆脸/方脸/鹅蛋脸"
+                      className="rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none"
+                      style={{ borderColor: DESIGN_TOKENS.border }}
+                    />
+                    <input
+                      type="text"
+                      value={edit.identityAnchors?.skeletal?.jawline || ""}
+                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, skeletal: { ...prev.identityAnchors!.skeletal, jawline: e.target.value } }))}
+                      placeholder="下颌线：分明/圆润"
+                      className="rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none"
+                      style={{ borderColor: DESIGN_TOKENS.border }}
+                    />
+                    <input
+                      type="text"
+                      value={edit.identityAnchors?.skeletal?.cheekbones || ""}
+                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, skeletal: { ...prev.identityAnchors!.skeletal, cheekbones: e.target.value } }))}
+                      placeholder="颧骨：高/平/宽"
+                      className="rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none"
+                      style={{ borderColor: DESIGN_TOKENS.border }}
+                    />
+                  </div>
+                </details>
+
+                {/* 第二层：五官 */}
+                <details className="text-xs">
+                  <summary className="cursor-pointer font-medium mb-1" style={{ color: DESIGN_TOKENS.textSecondary }}>第二层：五官（眼/鼻/唇）</summary>
+                  <div className="grid grid-cols-2 gap-2 mt-1">
+                    <input
+                      type="text"
+                      value={edit.identityAnchors?.features?.eyeShape || ""}
+                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, features: { ...prev.identityAnchors!.features, eyeShape: e.target.value } }))}
+                      placeholder="眼型：丹凤眼/杏眼/桃花眼"
+                      className="rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none"
+                      style={{ borderColor: DESIGN_TOKENS.border }}
+                    />
+                    <input
+                      type="text"
+                      value={edit.identityAnchors?.features?.eyeDetails || ""}
+                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, features: { ...prev.identityAnchors!.features, eyeDetails: e.target.value } }))}
+                      placeholder="眼细节：单眼皮/内双/外双"
+                      className="rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none"
+                      style={{ borderColor: DESIGN_TOKENS.border }}
+                    />
+                    <input
+                      type="text"
+                      value={edit.identityAnchors?.features?.noseShape || ""}
+                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, features: { ...prev.identityAnchors!.features, noseShape: e.target.value } }))}
+                      placeholder="鼻型：直鼻/翘鼻/蒜头鼻"
+                      className="rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none"
+                      style={{ borderColor: DESIGN_TOKENS.border }}
+                    />
+                    <input
+                      type="text"
+                      value={edit.identityAnchors?.features?.lipShape || ""}
+                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, features: { ...prev.identityAnchors!.features, lipShape: e.target.value } }))}
+                      placeholder="唇型：薄唇/厚唇/M字唇"
+                      className="rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none"
+                      style={{ borderColor: DESIGN_TOKENS.border }}
+                    />
+                  </div>
+                </details>
+
+                {/* 第三层：辨识标记（必填） */}
+                <details className="text-xs" open>
+                  <summary className="cursor-pointer font-medium mb-1 text-red-400">第三层：辨识标记（必填 · 最强一致性锚点）</summary>
+                  <div className="space-y-1 mt-1">
+                    <textarea
+                      value={(edit.identityAnchors?.uniqueMarks?.marks || []).join("\n")}
+                      onChange={(e) => setEdit((prev) => ({
+                        ...prev,
+                        identityAnchors: {
+                          ...prev.identityAnchors!,
+                          uniqueMarks: {
+                            ...prev.identityAnchors!.uniqueMarks,
+                            marks: e.target.value.split("\n").map((s) => s.trim()).filter(Boolean),
+                          },
+                        },
+                      }))}
+                      placeholder="每行一个辨识标记，例：\n左眼下方2cm处有一颗痣\n右眉尾有一道小疤痕"
+                      rows={2}
+                      className="w-full rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none resize-none"
+                      style={{ borderColor: "#f87171" }}
+                    />
+                    <p className="text-xs" style={{ color: DESIGN_TOKENS.textMuted }}>
+                      提示：这是防止 AI 生成时角色「漂移」的最强锚点，请务必填写
+                    </p>
+                  </div>
+                </details>
+
+                {/* 第四层：色彩锚点（Hex） */}
+                <details className="text-xs">
+                  <summary className="cursor-pointer font-medium mb-1" style={{ color: DESIGN_TOKENS.textSecondary }}>第四层：精确色值（Hex · 可直接对接 ComfyUI）</summary>
+                  <div className="grid grid-cols-2 gap-2 mt-1">
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs" style={{ color: DESIGN_TOKENS.textMuted }}>虹膜</span>
+                      <input
+                        type="text"
+                        value={edit.identityAnchors?.colorAnchors?.iris || ""}
+                        onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, colorAnchors: { ...prev.identityAnchors!.colorAnchors, iris: e.target.value } }))}
+                        placeholder="#4A2C2A"
+                        className="flex-1 rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none font-mono"
+                        style={{ borderColor: DESIGN_TOKENS.border }}
+                      />
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs" style={{ color: DESIGN_TOKENS.textMuted }}>发色</span>
+                      <input
+                        type="text"
+                        value={edit.identityAnchors?.colorAnchors?.hair || ""}
+                        onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, colorAnchors: { ...prev.identityAnchors!.colorAnchors, hair: e.target.value } }))}
+                        placeholder="#1A1A1A"
+                        className="flex-1 rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none font-mono"
+                        style={{ borderColor: DESIGN_TOKENS.border }}
+                      />
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs" style={{ color: DESIGN_TOKENS.textMuted }}>肤色</span>
+                      <input
+                        type="text"
+                        value={edit.identityAnchors?.colorAnchors?.skin || ""}
+                        onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, colorAnchors: { ...prev.identityAnchors!.colorAnchors, skin: e.target.value } }))}
+                        placeholder="#F5D0A6"
+                        className="flex-1 rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none font-mono"
+                        style={{ borderColor: DESIGN_TOKENS.border }}
+                      />
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs" style={{ color: DESIGN_TOKENS.textMuted }}>唇色</span>
+                      <input
+                        type="text"
+                        value={edit.identityAnchors?.colorAnchors?.lips || ""}
+                        onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, colorAnchors: { ...prev.identityAnchors!.colorAnchors, lips: e.target.value } }))}
+                        placeholder="#C86B6B"
+                        className="flex-1 rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none font-mono"
+                        style={{ borderColor: DESIGN_TOKENS.border }}
+                      />
+                    </div>
+                  </div>
+                </details>
+
+                {/* 第五层：皮肤纹理 */}
+                <details className="text-xs">
+                  <summary className="cursor-pointer font-medium mb-1" style={{ color: DESIGN_TOKENS.textSecondary }}>第五层：皮肤纹理（微观细节）</summary>
+                  <div className="grid grid-cols-2 gap-2 mt-1">
+                    <input
+                      type="text"
+                      value={edit.identityAnchors?.skinTexture?.skinTexture || ""}
+                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, skinTexture: { ...prev.identityAnchors!.skinTexture, skinTexture: e.target.value } }))}
+                      placeholder="皮肤纹理：细腻/有雀斑"
+                      className="rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none"
+                      style={{ borderColor: DESIGN_TOKENS.border }}
+                    />
+                    <input
+                      type="text"
+                      value={edit.identityAnchors?.skinTexture?.lightingReaction || ""}
+                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, skinTexture: { ...prev.identityAnchors!.skinTexture, lightingReaction: e.target.value } }))}
+                      placeholder="光线反应：反光明显/哑光"
+                      className="rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none"
+                      style={{ borderColor: DESIGN_TOKENS.border }}
+                    />
+                  </div>
+                </details>
+
+                {/* 第六层：发型锚点 */}
+                <details className="text-xs">
+                  <summary className="cursor-pointer font-medium mb-1" style={{ color: DESIGN_TOKENS.textSecondary }}>第六层：发型锚点（发际线/层次）</summary>
+                  <div className="grid grid-cols-2 gap-2 mt-1">
+                    <input
+                      type="text"
+                      value={edit.identityAnchors?.hair?.hairlineType || ""}
+                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, hair: { ...prev.identityAnchors!.hair, hairlineType: e.target.value } }))}
+                      placeholder="发际线：M字额/平额"
+                      className="rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none"
+                      style={{ borderColor: DESIGN_TOKENS.border }}
+                    />
+                    <input
+                      type="text"
+                      value={edit.identityAnchors?.hair?.hairTexture || ""}
+                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, hair: { ...prev.identityAnchors!.hair, hairTexture: e.target.value } }))}
+                      placeholder="发质：直/卷/波浪"
+                      className="rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none"
+                      style={{ borderColor: DESIGN_TOKENS.border }}
+                    />
+                    <input
+                      type="text"
+                      value={edit.identityAnchors?.hair?.uniqueHairMark || ""}
+                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, hair: { ...prev.identityAnchors!.hair, uniqueHairMark: e.target.value } }))}
+                      placeholder="独特发部标记（选填）"
+                      className="rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none col-span-2"
+                      style={{ borderColor: DESIGN_TOKENS.border }}
+                    />
+                  </div>
+                </details>
+
+                {/* 编译预览 */}
+                {edit.identityAnchors && validateIdentityAnchors(edit.identityAnchors).valid && (
+                  <div className="rounded-lg p-2 text-xs" style={{ backgroundColor: "rgba(16, 185, 129, 0.1)", border: "1px solid rgba(16, 185, 129, 0.2)" }}>
+                    <p className="font-medium mb-1" style={{ color: "rgb(52, 211, 153)" }}>编译后的身份提示词预览：</p>
+                    <p className="text-xs break-all" style={{ color: DESIGN_TOKENS.textMuted }}>
+                      {compileIdentityPrompt(edit.identityAnchors)}
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* 服装风格 */}

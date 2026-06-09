@@ -407,8 +407,95 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
         content: finalResult.trim(),
         prompt: finalResult.trim(),
         summary: finalResult.trim().slice(0, 200) + (finalResult.length > 200 ? "..." : ""),
-        runMeta: createSucceededRunMeta({ runId: runContext?.runId, message: "文本生成完成" }),
+        runMeta: createSucceededRunMeta({ runId: runContext?.runId, message: "Storyboard 生成完成" }),
       })
+
+      // ---- Continuity Check (storyboard only) ----
+      if (kind === "storyboard") {
+        try {
+          const { ContinuityGuard, formatContinuityReport } = await import("../utils/continuityGuard");
+          const guard = new ContinuityGuard();
+
+          let parsedScriptData: any = null;
+          let shotSequenceData: any = null;
+
+          // 1. Find upstream script node
+          for (const edge of upstreamEdges) {
+            const upstream = allNodes.find((n: any) => n.id === edge.source);
+            if (upstream?.type === "script" || upstream?.type === "text") {
+              const scriptContent = (upstream.data as any)?.content || (upstream.data as any)?.prompt || "";
+              if (scriptContent.trim()) {
+                try {
+                  const parsed = JSON.parse(scriptContent);
+                  if (Array.isArray(parsed.scenes)) {
+                    parsedScriptData = {
+                      scenes: parsed.scenes.map((s: any, i: number) => ({
+                        sceneId: s.sceneId || s.id || `scene_${i + 1}`,
+                        characters: Array.isArray(s.characters) ? s.characters.map((c: any) => typeof c === "string" ? c : c?.name || "").filter(Boolean) : [],
+                        location: s.location || "",
+                        timeOfDay: s.timeOfDay || "",
+                      }))
+                    };
+                  }
+                } catch {}
+              }
+              break;
+            }
+          }
+
+          // 2. Parse storyboard output as shotSequence
+          try {
+            const parsed = JSON.parse(finalResult.trim());
+            if (Array.isArray(parsed.scenes)) {
+              const shots: Array<{ shotId: string; sceneId: string; instructions: { fragments: Array<{ text: string; characterName?: string }> }> = [];
+              for (const scene of parsed.scenes) {
+                const sceneId = scene.sceneId || scene.id || "";
+                if (Array.isArray(scene.shots)) {
+                  for (const shot of scene.shots) {
+                    shots.push({
+                      shotId: shot.shotId || shot.id || `shot_${shots.length + 1}`,
+                      sceneId,
+                      instructions: {
+                        fragments: [
+                          { text: [shot.description, shot.action, shot.dialogue].filter(Boolean).join(" "), characterName: undefined as string | undefined },
+                          ...(shot.visualPrompt ? [{ text: shot.visualPrompt, characterName: undefined as string | undefined }] : []),
+                        ],
+                      },
+                    });
+                  }
+                }
+              }
+              shotSequenceData = { shots };
+            }
+          } catch {}
+
+          // 3. Run check and write results
+          if (parsedScriptData && shotSequenceData) {
+            const issues = guard.checkAllContinuity(parsedScriptData, shotSequenceData);
+            const report = formatContinuityReport(issues);
+            // 通过 setNodes 深层合并 runMeta（updateNodeData 只支持浅层更新）
+            setNodes((nds: any[]) =>
+              nds.map((n: any) => {
+                if (n.id !== node.id) return n;
+                return {
+                  ...n,
+                  data: {
+                    ...n.data,
+                    runMeta: {
+                      ...(n.data?.runMeta || {}),
+                      continuityChecked: true,
+                      continuityIssues: issues,
+                      continuityReport: report,
+                    },
+                  },
+                };
+              })
+            );
+          }
+        } catch (guardErr) {
+          console.warn("[ContinuityGuard] 连续性检查失败，不影响主流程:", guardErr);
+        }
+      }
 
       return finalResult.trim()
     }

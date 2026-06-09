@@ -80,6 +80,7 @@ export type CanvasNodeKind =
   | "subtitle-srt"
   | "handoff-report"
   | "tts"
+  | "continuity-report"
 
 // ============================================================================
 // Node Run Status (P1-3 六态模型)
@@ -167,6 +168,20 @@ export interface NodeRunMeta {
    * 例如：AI 请求自动运行，需要用户确认
    */
   pendingReason?: string
+
+  /**
+   * 连续性检查结果（六维）
+   */
+  continuityChecked?: boolean
+  continuityIssues?: Array<{
+    dimension: "character" | "scene" | "action" | "style" | "time" | "prop"
+    severity: "error" | "warning" | "info"
+    message: string
+    shotId?: string
+    sceneId?: string
+  }>
+  continuityReport?: string
+  dismissedIssues?: string[]
 }
 
 // @deprecated 旧五态模型，保留仅用于兼容读取，新代码请使用 NodeRunStatus
@@ -547,6 +562,11 @@ export type CharacterBibleData = {
   notes?: string
   referenceImageUrl?: string
   createdAt: number
+
+  /** 六层身份锚点（对标 Moyin Creator） */
+  identityAnchors?: import("../../types/identity-anchors").IdentityAnchors
+  /** 负面提示词互补系统 */
+  negativePrompt?: import("../../types/identity-anchors").CharacterNegativePrompt
 }
 
 export type SceneBibleData = {
@@ -1014,10 +1034,19 @@ export const nodeToneStyles: Record<CanvasNodeKind, {
     background: "rgba(249, 115, 22, 0.1)",
   },
   "camera-control": {
-    eyebrow: "text-indigo-300",
-    body: "text-indigo-200/75",
-    meta: "text-indigo-300/60",
-    border: "1px solid rgba(99, 102, 241, 0.25)",
-    background: "rgba(99, 102, 241, 0.1)",
   },
+  "continuity-report": {
+
+    eyebrow: "text-teal-300",
+
+    body: "text-teal-200/75",
+
+    meta: "text-teal-300/60",
+
+    border: "1px solid rgba(20, 184, 166, 0.25)",
+
+    background: "rgba(20, 184, 166, 0.1)",
+
+  },
+
 }

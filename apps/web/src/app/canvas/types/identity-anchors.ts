@@ -140,7 +140,7 @@ export function createDefaultIdentityAnchors(): IdentityAnchors {
 /** 验证六层锚点完整性 — 第三层（uniqueMarks）为必填 */
 export function validateIdentityAnchors(anchors: IdentityAnchors): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
-  const { uniqueMarks, colorAnchors } = anchars;
+  const { uniqueMarks, colorAnchors } = anchors;
 
   // 第三层：强制至少一个物理辨识标记
   const totalMarks = [
@@ -172,25 +172,25 @@ export function validateIdentityAnchors(anchors: IdentityAnchors): { valid: bool
 }
 
 /** 将六层锚点编译为 AI 提示词（正向） */
-export function compileIdentityPrompt(anchars: IdentityAnchors): string {
+export function compileIdentityPrompt(anchors: IdentityAnchors): string {
   const parts: string[] = [];
 
   // 第一层 + 第二层：外貌描述
-  const { skeletal, features } = anchars;
+  const { skeletal, features } = anchors;
   if (skeletal.faceShape) parts.push(`face shape: ${skeletal.faceShape}, jawline: ${skeletal.jawline}`);
   if (features.eyeShape) parts.push(`eyes: ${features.eyeShape}, ${features.eyeDetails}`);
   if (features.noseShape) parts.push(`nose: ${features.noseShape}`);
   if (features.lipShape) parts.push(`lips: ${features.lipShape}`);
 
   // 第三层：物理辨识标记（最强锚点，放在最前面）
-  const { uniqueMarks } = anchars;
+  const { uniqueMarks } = anchors;
   const allMarks = [...uniqueMarks.marks, ...uniqueMarks.scars, ...uniqueMarks.tattoos];
   if (allMarks.length > 0) {
     parts.unshift(`IDENTITY MARKS: ${allMarks.join('; ')}`);
   }
 
   // 第四层：精确色值
-  const { colorAnchors } = anchars;
+  const { colorAnchors } = anchors;
   const colorParts: string[] = [];
   if (colorAnchors.iris) colorParts.push(`iris ${colorAnchors.iris}`);
   if (colorAnchors.hair) colorParts.push(`hair ${colorAnchors.hair}`);
@@ -199,11 +199,11 @@ export function compileIdentityPrompt(anchars: IdentityAnchors): string {
   if (colorParts.length > 0) parts.push(`color references: ${colorParts.join(', ')}`);
 
   // 第五层：皮肤纹理
-  const { skinTexture } = anchars;
+  const { skinTexture } = anchors;
   if (skinTexture.skinTexture) parts.push(`skin texture: ${skinTexture.skinTexture}, ${skinTexture.lightingReaction}`);
 
   // 第六层：发型锚点
-  const { hair } = anchars;
+  const { hair } = anchors;
   if (hair.hairlineType) parts.push(`hair: ${hair.hairlineType}, ${hair.hairTexture}${hair.uniqueHairMark ? `, unique: ${hair.uniqueHairMark}` : ''}`);
 
   return parts.join('; ');
@@ -217,7 +217,7 @@ export function compileNegativePrompt(negative: CharacterNegativePrompt): string
 /** 从自然语言描述推断色值（简易映射表，可扩展为 AI 调用） */
 export function inferColorHex(description: string): string {
   const colorMap: Record<string, string> = {
-    '黑色': '#1A1A1A', '黑色': '#000000',
+    '深黑': '#1A1A1A', '黑色': '#000000',
     '深棕': '#3B2F2F', '棕色': '#4A3728', '浅棕': '#8B7355',
     '深蓝': '#1A2B4A', '蓝色': '#4A6FA5', '浅蓝': '#87CEEB',
     '深绿': '#1A3C2A', '绿色': '#4A7A5A', '浅绿': '#90EE90',
