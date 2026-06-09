@@ -1,6 +1,7 @@
 // ============================================================================
-// useCanvasPersistence — localStorage + IndexedDB canvas persistence
-// Node structure (no image data) → localStorage
+// useCanvasPersistence — supermemory + IndexedDB canvas persistence
+// Node structure (no image data) → supermemory IndexedDB adapter
+// Legacy localStorage payloads are migrated on first restore
 // Image blobs → IndexedDB (via localImageStore)
 // ============================================================================
 "use client";
@@ -253,15 +254,14 @@ export function useCanvasPersistence({
     (async () => {
       try {
         const saved = await supermemory.get<PersistedCanvas>(STORAGE_KEY);
-        const raw = saved ? JSON.stringify(saved) : null;
-        if (!raw) {
+        const legacyRaw = window.localStorage.getItem(STORAGE_KEY);
+        const data: PersistedCanvas | null = saved ?? (legacyRaw ? JSON.parse(legacyRaw) : null);
+        if (!data) {
           if (!cancelled) onRestored();
           restoredAtRef.current = Date.now();
           hasRestoredRef.current = true;
           return;
         }
-
-        const data: PersistedCanvas = JSON.parse(raw);
 
         if (
           !data ||
@@ -288,6 +288,14 @@ export function useCanvasPersistence({
           setNodes(hydratedNodes);
           setEdges(data.edges);
           setFitViewOnce(true);
+        }
+
+        if (legacyRaw && !saved) {
+          await supermemory.set(STORAGE_KEY, data, {
+            type: "canvas_state",
+            title: "Canvas autosave",
+          });
+          window.localStorage.removeItem(STORAGE_KEY);
         }
 
         console.log(

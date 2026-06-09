@@ -154,7 +154,7 @@ import BatchProgressBar, {
   type BatchProgressHandle,
 } from "./components/nodes/BatchProgressBar";
 import { generateImageFromPrompt, friendlyErrorMessage, retryWithBackoff, ImageGenerationError } from "./utils/imageGeneration";
-import { generateTtsAudio, type TtsGenerateInput } from "./utils/ttsService";
+import { generateTtsAudio, persistTtsAudio } from "./utils/ttsService";
 import { composeStoryboardGrid } from "./utils/storyboardGridComposer";
 import { buildVideoWorkflowTemplate } from "./utils/videoWorkflowTemplate";
 import { useWorkflowRunner } from "./hooks/useWorkflowRunner";
@@ -293,8 +293,9 @@ const NODE_DEFAULT_SIZE = {
   content: { width: 680, height: 560 },
   image: { width: 220, height: 172 },
   workflow: { width: 280, height: 170 },
+  agent: { width: 360, height: 300 },
 } satisfies Record<
-  "content" | "image" | "workflow",
+  "content" | "image" | "workflow" | "agent",
   { width: number; height: number }
 >;
 const ZOOM_CONSTRAINTS = {
@@ -437,6 +438,7 @@ CreativeEdge.displayName = "CreativeEdge";
 // Set once when the component mounts via StarCanvasInner.
 let _runAgentFn: ((nodeId: string) => void) | undefined;
 let _runBatchGenerateFn: ((nodeIds: string[]) => void) | undefined;
+let _updateAgentContentFn: ((nodeId: string, content: string) => void) | undefined;
 let _runVideoRetryFn: ((nodeId: string) => void) | undefined;
 let _doUndo: (() => void) | undefined;
 let _doRedo: (() => void) | undefined;
@@ -475,7 +477,12 @@ const nodeTypes = {
   storyboardGrid: StoryboardGridNode,
   video: (props: any) => <VideoNode {...props} onRetry={_runVideoRetryFn} />,
   agent: (props: any) => (
-    <AgentNode {...props} onRunAgent={_runAgentFn} onBatchGenerate={_runBatchGenerateFn} />
+    <AgentNode
+      {...props}
+      onRunAgent={_runAgentFn}
+      onBatchGenerate={_runBatchGenerateFn}
+      onUpdateAgentContent={_updateAgentContentFn}
+    />
   ),
 };
 
@@ -605,6 +612,7 @@ function StarCanvasInner() {
       // Clean up module-level bridge variables to prevent stale closures
       _runAgentFn = undefined;
       _runBatchGenerateFn = undefined;
+      _updateAgentContentFn = undefined;
       _runVideoRetryFn = undefined;
     };
   }, []);
@@ -971,6 +979,9 @@ function StarCanvasInner() {
                 text: dialogue,
                 voiceConfig,
               });
+              const persistedAudio = await persistTtsAudio(ttsResult.audioBlob, {
+                fileName: `${shotNode.data.title || "shot"}-voice.wav`,
+              });
 
               const audioNodeId = generateId();
               const nodeWidth =
@@ -989,8 +1000,9 @@ function StarCanvasInner() {
                     title: shotNode.data.title
                       ? `${shotNode.data.title} 配音`
                       : "配音",
-                    audioUrl: ttsResult.audioUrl,
-                    durationSeconds: ttsResult.durationSeconds,
+                    audioUrl: persistedAudio.objectUrl,
+                    audioAssetId: persistedAudio.assetId,
+                    durationSeconds: Math.max(1, Math.round(dialogue.length * 0.18)),
                     nodeKind: "tts-audio",
                     sourceShotId: shotNode.id,
                     sourceType: "shot",
@@ -2865,9 +2877,14 @@ function StarCanvasInner() {
             ),
           });
 
-          const persisted = await persistImageDataUrl(result.imageUrl, {
-            fileName: `storyboard-direct-${Date.now()}.png`,
-          });
+          const persisted = result.imageUrl.startsWith("data:image")
+            ? await persistImageDataUrl(result.imageUrl, {
+                fileName: `storyboard-direct-${Date.now()}.png`,
+              })
+            : {
+                objectUrl: result.imageUrl,
+                assetId: result.assetId,
+              };
 
           const imageNodeId = generateId();
           const latestNodes = nodesRef.current as Node<CanvasNodeData>[];
@@ -2894,7 +2911,7 @@ function StarCanvasInner() {
               isStoryboardProcessNode: false,
               hiddenByStoryboardProcessMode: false,
               source: "generated",
-              persistence: "indexeddb",
+              persistence: persisted.assetId ? "indexeddb" : "remote",
               displayWidth: 380,
               displayHeight: 214,
               createdAt: Date.now(),
@@ -5137,6 +5154,66 @@ function StarCanvasInner() {
         inputs: [{ label: "脚本/情绪" }],
         outputs: [{ label: "声音说明", type: "audio" }],
       },
+      bgm: {
+        title: "BGM 情绪设计",
+        workflowRole: "BGM Brief",
+        status: "draft",
+        runMeta: idleMeta,
+        summary: "参考 InspireMusic/Suno 类工作流，先沉淀音乐情绪、节拍、乐器与版权备注，再交给外部生成或后期制作。",
+        model: "BGM Brief",
+        inputs: [{ label: "分镜/情绪" }],
+        outputs: [{ label: "音乐提示词", type: "audio" }],
+      },
+      upscale: {
+        title: "高清放大",
+        workflowRole: "Upscale Brief",
+        status: "draft",
+        runMeta: idleMeta,
+        summary: "参考 Real-ESRGAN/视频超分流程，为图片或视频记录 2x/4x 放大、降噪、保细节要求。",
+        model: "Real-ESRGAN Reference",
+        inputs: [{ label: "图片/视频" }],
+        outputs: [{ label: "高清版本", type: "image" }],
+      },
+      poster: {
+        title: "AI 海报",
+        workflowRole: "Poster Generator",
+        status: "draft",
+        runMeta: idleMeta,
+        summary: "把角色、场景、片名、卖点和视觉风格合成为竖版/横版海报提示词，可接现有生图链路。",
+        model: "GPT-Image-2 / Ideogram",
+        inputs: [{ label: "角色/标题/风格" }],
+        outputs: [{ label: "海报图", type: "image" }],
+      },
+      "talking-photo": {
+        title: "照片说话 / 数字人",
+        workflowRole: "Talking Photo Brief",
+        status: "draft",
+        runMeta: idleMeta,
+        summary: "参考 LivePortrait/MuseTalk，记录头像、台词、声线和口型同步要求，形成后续数字人生成任务。",
+        model: "LivePortrait / MuseTalk Reference",
+        inputs: [{ label: "角色头像" }, { label: "台词/音频" }],
+        outputs: [{ label: "口播视频", type: "video" }],
+      },
+      "remix-analysis": {
+        title: "爆款拆解 / 复刻",
+        workflowRole: "Remix Analyst",
+        status: "draft",
+        runMeta: idleMeta,
+        summary: "拆解参考视频/文案的节奏、钩子、镜头结构、反转点和可复刻模板，不直接复制受版权保护内容。",
+        model: "Creative Analyst",
+        inputs: [{ label: "参考链接/脚本" }],
+        outputs: [{ label: "复刻结构", type: "text" }],
+      },
+      "camera-control": {
+        title: "摄影机控制",
+        workflowRole: "Camera Control",
+        status: "draft",
+        runMeta: idleMeta,
+        summary: "基于已有镜头语言类型，明确景别、机位、镜头运动、焦段、调度和一镜到底路径。",
+        model: "Cinematography Planner",
+        inputs: [{ label: "分镜/场景" }],
+        outputs: [{ label: "摄影机指令", type: "text" }],
+      },
       subtitle: {
         title: "对白/旁白草稿",
         workflowRole: "Dialogue Draft",
@@ -5183,17 +5260,19 @@ function StarCanvasInner() {
 
   const handleAddNode = useCallback(
     (
-      type: "content" | "image" | "workflow",
+      type: "content" | "image" | "workflow" | "agent",
       positionOverride?: { x: number; y: number },
       nodeKind?: CanvasNodeKind,
     ) => {
       pushUndo({ nodes: nodesRef.current, edges: edgesRef.current });
       const defaultSize =
-        type === "workflow"
-          ? NODE_DEFAULT_SIZE.workflow
-          : type === "image"
-            ? NODE_DEFAULT_SIZE.image
-            : NODE_DEFAULT_SIZE.content;
+        type === "agent"
+          ? NODE_DEFAULT_SIZE.agent
+          : type === "workflow"
+            ? NODE_DEFAULT_SIZE.workflow
+            : type === "image"
+              ? NODE_DEFAULT_SIZE.image
+              : NODE_DEFAULT_SIZE.content;
       const position = positionOverride || getCenteredFlowPosition(defaultSize);
       const resolvedNodeKind = nodeKind || getNodeKindFromType(type);
 
@@ -5208,17 +5287,30 @@ function StarCanvasInner() {
           height: defaultSize.height,
         },
         data:
-          type === "workflow"
-            ? getWorkflowDefaults(resolvedNodeKind)
-            : type === "image"
-              ? {
-                  title: "Image",
-                  nodeKind: "uploaded-image" as CanvasNodeKind,
-                  displayWidth: defaultSize.width,
-                  displayHeight: defaultSize.height,
-                  createdAt: Date.now(),
-                }
-              : {
+          type === "agent"
+            ? {
+                title: "Director Agent",
+                nodeKind: "agent" as CanvasNodeKind,
+                content: "读取当前画布素材和剧本，像 TapNow / ArcReel 一样创建可编辑的视频创作流水线。",
+                prompt: "请分析画布上下文，输出角色/场景/分镜/关键画面/视频/声音/项目包的下一步动作。",
+                agentStatus: "idle",
+                agentPhase: "orchestrator",
+                runMeta: createIdleRunMeta(),
+                displayWidth: defaultSize.width,
+                displayHeight: defaultSize.height,
+                createdAt: Date.now(),
+              }
+            : type === "workflow"
+              ? getWorkflowDefaults(resolvedNodeKind)
+              : type === "image"
+                ? {
+                    title: "Image",
+                    nodeKind: "uploaded-image" as CanvasNodeKind,
+                    displayWidth: defaultSize.width,
+                    displayHeight: defaultSize.height,
+                    createdAt: Date.now(),
+                  }
+                : {
                   title:
                     resolvedNodeKind === "storyboard"
                       ? "故事分镜"
@@ -5310,11 +5402,44 @@ function StarCanvasInner() {
 
   const handleCreateVideoWorkflow = useCallback(() => {
     const basePosition = getCenteredFlowPosition({ width: 1120, height: 540 });
-    const { nodes: newNodes, edges: newEdges } = buildVideoWorkflowTemplate({
+    const { nodes: templateNodes, edges: templateEdges } = buildVideoWorkflowTemplate({
       basePosition,
       generateId,
       edgeStyle: { stroke: DESIGN_TOKENS.nodeEdge, strokeWidth: 2 },
     });
+    const agentSize = NODE_DEFAULT_SIZE.agent;
+    const agentId = generateId();
+    const agentNode: Node<CanvasNodeData> = {
+      id: agentId,
+      type: "agent",
+      position: { x: basePosition.x - agentSize.width - 120, y: basePosition.y + 20 },
+      width: agentSize.width,
+      height: agentSize.height,
+      measured: agentSize,
+      data: {
+        title: "多智能体创作中控",
+        nodeKind: "agent",
+        content: "参考 ArcReel / FilmAgent：Director 统筹目标，Screenwriter 拆剧本，Storyboard Artist 拆镜头，Cinematographer 约束机位，Asset Router 维护角色/场景/道具一致性。",
+        prompt: "读取当前画布和素材，编排角色、场景、分镜、关键画面、图生视频、声音字幕和项目包交付。",
+        agentStatus: "idle",
+        agentPhase: "orchestrator",
+        runMeta: createIdleRunMeta(),
+        displayWidth: agentSize.width,
+        displayHeight: agentSize.height,
+        createdAt: Date.now(),
+      },
+    };
+    const orchestrationEdge: Edge = {
+      id: generateId(),
+      source: agentId,
+      target: templateNodes[0]?.id,
+      type: "creative",
+      animated: true,
+      style: { stroke: DESIGN_TOKENS.nodeEdge, strokeWidth: 2 },
+      data: { relation: "agent-orchestrates-template" },
+    };
+    const newNodes = [agentNode, ...templateNodes];
+    const newEdges = templateNodes[0] ? [orchestrationEdge, ...templateEdges] : templateEdges;
 
     setNodes((nds) => {
       const nextNodes = [...nds, ...newNodes];
@@ -5338,6 +5463,7 @@ function StarCanvasInner() {
   ]);
 
   const getNodeKindFromType = (type?: string): CanvasNodeKind => {
+    if (type === "agent") return "agent";
     if (type === "image") return "uploaded-image";
     if (type === "content") return "prompt";
     return "script";
@@ -5491,19 +5617,24 @@ function StarCanvasInner() {
         try {
           switch (act.action) {
             case "create_node": {
-              const type = act.nodeType ?? "content";
+              const requestedType = act.nodeType ?? "content";
+              const type = (requestedType === "agent" ? "agent" : requestedType) as "content" | "image" | "workflow" | "agent";
               const kind = (act.nodeKind ??
-                (type === "workflow"
-                  ? "script"
-                  : type === "image"
-                    ? "uploaded-image"
-                    : "text")) as CanvasNodeKind;
+                (type === "agent"
+                  ? "agent"
+                  : type === "workflow"
+                    ? "script"
+                    : type === "image"
+                      ? "uploaded-image"
+                      : "text")) as CanvasNodeKind;
               const defaultSize =
-                type === "workflow"
-                  ? NODE_DEFAULT_SIZE.workflow
-                  : type === "image"
-                    ? NODE_DEFAULT_SIZE.image
-                    : NODE_DEFAULT_SIZE.content;
+                type === "agent"
+                  ? NODE_DEFAULT_SIZE.agent
+                  : type === "workflow"
+                    ? NODE_DEFAULT_SIZE.workflow
+                    : type === "image"
+                      ? NODE_DEFAULT_SIZE.image
+                      : NODE_DEFAULT_SIZE.content;
               const position =
                 act.position ?? getCenteredFlowPosition(defaultSize);
               const nodeId = generateId();
@@ -5518,23 +5649,37 @@ function StarCanvasInner() {
                   height: defaultSize.height,
                 },
                 data:
-                  type === "workflow"
+                  type === "agent"
                     ? {
-                        ...getWorkflowDefaults(kind),
-                        ...(act.title ? { title: act.title } : {}),
-                        ...(act.prompt ? { prompt: act.prompt } : {}),
+                        title: act.title ?? "Director Agent",
+                        nodeKind: "agent",
+                        content: act.content ?? act.prompt ?? "",
+                        prompt: act.prompt ?? act.content ?? "",
+                        agentStatus: "idle",
+                        agentPhase: "planning",
+                        runMeta: createIdleRunMeta(),
+                        displayWidth: defaultSize.width,
+                        displayHeight: defaultSize.height,
+                        createdAt: Date.now(),
                         ...(act.data ?? {}),
                       }
-                    : type === "image"
+                    : type === "workflow"
                       ? {
-                          title: act.title ?? "Image",
-                          nodeKind: kind,
-                          displayWidth: defaultSize.width,
-                          displayHeight: defaultSize.height,
-                          createdAt: Date.now(),
+                          ...getWorkflowDefaults(kind),
+                          ...(act.title ? { title: act.title } : {}),
+                          ...(act.prompt ? { prompt: act.prompt } : {}),
                           ...(act.data ?? {}),
                         }
-                      : {
+                      : type === "image"
+                        ? {
+                            title: act.title ?? "Image",
+                            nodeKind: kind,
+                            displayWidth: defaultSize.width,
+                            displayHeight: defaultSize.height,
+                            createdAt: Date.now(),
+                            ...(act.data ?? {}),
+                          }
+                        : {
                           title:
                             act.title ??
                             (kind === "storyboard"
@@ -5738,6 +5883,219 @@ function StarCanvasInner() {
               break;
             }
 
+            case "create_workflow_template": {
+              const basePosition = act.template === "arc_reel_agent"
+                ? getCenteredFlowPosition({ width: 1460, height: 660 })
+                : getCenteredFlowPosition({ width: 1120, height: 540 });
+              const { nodes: templateNodes, edges: templateEdges } = buildVideoWorkflowTemplate({
+                basePosition,
+                generateId,
+                edgeStyle: { stroke: DESIGN_TOKENS.nodeEdge, strokeWidth: 2 },
+              });
+
+              let nextNodesToAdd = templateNodes;
+              let nextEdgesToAdd = templateEdges;
+
+              if (act.template === "arc_reel_agent") {
+                const agentId = generateId();
+                const agentSize = NODE_DEFAULT_SIZE.agent;
+                const agentNode: Node<CanvasNodeData> = {
+                  id: agentId,
+                  type: "agent",
+                  position: { x: basePosition.x - agentSize.width - 120, y: basePosition.y + 20 },
+                  width: agentSize.width,
+                  height: agentSize.height,
+                  measured: agentSize,
+                  data: {
+                    title: act.title ?? "ArcReel 式多智能体中控",
+                    nodeKind: "agent",
+                    content: "从小说/剧本出发，按 Director、Screenwriter、Storyboard Artist、Cinematographer、Asset Router 分工：先抽取角色/场景/线索，再生成分镜、关键画面、视频片段、旁白字幕与交付包。",
+                    prompt: "读取当前画布素材与剧本，生成 ArcReel 式视频创作流水线：角色一致性、场景/道具线索、分镜宫格、图生视频、声音字幕、项目包交付。",
+                    agentStatus: "idle",
+                    agentPhase: "orchestrator",
+                    runMeta: createIdleRunMeta(),
+                    displayWidth: agentSize.width,
+                    displayHeight: agentSize.height,
+                    createdAt: Date.now(),
+                  },
+                };
+                nextNodesToAdd = [agentNode, ...templateNodes];
+                const firstTemplateNodeId = templateNodes[0]?.id;
+                nextEdgesToAdd = firstTemplateNodeId
+                  ? [{
+                      id: generateId(),
+                      source: agentId,
+                      target: firstTemplateNodeId,
+                      type: "creative",
+                      animated: true,
+                      style: { stroke: DESIGN_TOKENS.nodeEdge, strokeWidth: 2 },
+                      data: { relation: "agent-orchestrates-template" },
+                    } as Edge, ...templateEdges]
+                  : templateEdges;
+              }
+
+              setNodes((nds) => {
+                const nextNodes = [...nds, ...nextNodesToAdd];
+                nodesRef.current = nextNodes;
+                return nextNodes;
+              });
+              setEdges((eds) => {
+                const nextEdges = [...eds, ...nextEdgesToAdd];
+                edgesRef.current = nextEdges;
+                return nextEdges;
+              });
+              dismissCanvasHint();
+              setChatOpen(true);
+              setTimeout(() => fitViewToVisibleCanvas(650), 80);
+              results.push({
+                index: i,
+                action: "create_workflow_template",
+                status: "applied",
+                nodeId: nextNodesToAdd[0]?.id,
+                reason: act.description ?? "已创建视频创作工作流模板",
+              });
+              break;
+            }
+
+            case "open_panel": {
+              switch (act.panel) {
+                case "chat":
+                  setChatOpen(true);
+                  break;
+                case "add_node":
+                  setShowAddNodePanel(true);
+                  break;
+                case "asset_library":
+                  openAssetLibrary();
+                  break;
+                case "project_bible":
+                  setShowProjectBiblePanel(true);
+                  break;
+                case "character_bible":
+                  setShowCharacterBiblePanel(true);
+                  break;
+                case "scene_bible":
+                  setShowSceneBiblePanel(true);
+                  break;
+                case "style_bible":
+                  setShowStyleBiblePanel(true);
+                  break;
+                case "run_queue":
+                  setShowRunPanel(true);
+                  break;
+                case "property":
+                  setShowPropertyPanel(true);
+                  break;
+                default:
+                  results.push({ index: i, action: "open_panel", status: "skipped", reason: "未知面板" });
+                  break;
+              }
+              if (results[results.length - 1]?.index !== i) {
+                results.push({ index: i, action: "open_panel", status: "applied", reason: act.description ?? `已打开 ${act.panel} 面板` });
+              }
+              break;
+            }
+
+            case "generate_storyboard": {
+              const shots = Array.isArray(act.shots) ? act.shots.slice(0, 12) : [];
+              if (shots.length === 0) {
+                results.push({ index: i, action: "generate_storyboard", status: "skipped", reason: "缺少 shots" });
+                break;
+              }
+              const sourceNode = act.sourceNodeId ? nodesRef.current.find((n) => n.id === act.sourceNodeId) : undefined;
+              const base = sourceNode?.position ?? getCenteredFlowPosition({ width: 1040, height: 460 });
+              const shotNodes: Node<CanvasNodeData>[] = shots.map((shot, shotIndex) => {
+                const shotId = generateId();
+                return {
+                  id: shotId,
+                  type: "shot",
+                  position: { x: base.x + shotIndex * 320, y: base.y + (sourceNode ? 260 : 0) },
+                  width: NODE_DEFAULT_SIZE.workflow.width,
+                  height: NODE_DEFAULT_SIZE.workflow.height,
+                  measured: NODE_DEFAULT_SIZE.workflow,
+                  data: {
+                    title: shot.title ?? `镜头 ${shotIndex + 1}`,
+                    nodeKind: "shot",
+                    content: shot.content ?? shot.prompt ?? "",
+                    prompt: shot.prompt ?? shot.content ?? "",
+                    summary: shot.content ?? shot.prompt ?? "AI Agent 生成的分镜镜头。",
+                    shot: {
+                      id: shotId,
+                      order: shotIndex + 1,
+                      title: shot.title ?? `镜头 ${shotIndex + 1}`,
+                      shotType: shot.shotType,
+                      cameraMovement: shot.cameraMovement,
+                      duration: shot.duration,
+                      description: shot.content ?? shot.prompt ?? "",
+                      visualPrompt: shot.prompt ?? shot.content ?? "",
+                      sourceStoryboardNodeId: sourceNode?.id,
+                      generationStatus: "idle",
+                    },
+                    runMeta: createIdleRunMeta(),
+                    createdAt: Date.now(),
+                  },
+                };
+              });
+              const storyboardEdges: Edge[] = shotNodes.slice(1).map((node, shotIndex) => ({
+                id: generateId(),
+                source: shotNodes[shotIndex].id,
+                target: node.id,
+                type: "creative",
+                animated: true,
+                style: { stroke: DESIGN_TOKENS.nodeEdge, strokeWidth: 1.5 },
+                data: { relation: "storyboard-sequence" },
+              }));
+              if (sourceNode && shotNodes[0]) {
+                storyboardEdges.unshift({
+                  id: generateId(),
+                  source: sourceNode.id,
+                  target: shotNodes[0].id,
+                  type: "creative",
+                  animated: true,
+                  style: { stroke: DESIGN_TOKENS.nodeEdge, strokeWidth: 1.5 },
+                  data: { relation: "source-to-storyboard" },
+                } as Edge);
+              }
+              setNodes((nds) => {
+                const nextNodes = [...nds, ...shotNodes];
+                nodesRef.current = nextNodes;
+                return nextNodes;
+              });
+              setEdges((eds) => {
+                const nextEdges = [...eds, ...storyboardEdges];
+                edgesRef.current = nextEdges;
+                return nextEdges;
+              });
+              dismissCanvasHint();
+              setSelectedNodeId(shotNodes[0]?.id ?? null);
+              setTimeout(() => fitViewToVisibleCanvas(650), 80);
+              results.push({
+                index: i,
+                action: "generate_storyboard",
+                status: "applied",
+                nodeId: shotNodes[0]?.id,
+                reason: act.description ?? `已生成 ${shotNodes.length} 个分镜镜头`,
+              });
+              break;
+            }
+
+            case "layout_canvas": {
+              setNodes((nds) => {
+                const columns = act.layout === "vertical" ? 1 : act.layout === "grid" ? 3 : Math.max(3, Math.ceil(Math.sqrt(nds.length || 1)));
+                const layoutedNodes = quickLayout(nds, edgesRef.current, columns);
+                nodesRef.current = layoutedNodes;
+                return layoutedNodes;
+              });
+              setTimeout(() => fitViewToVisibleCanvas(650), 40);
+              results.push({
+                index: i,
+                action: "layout_canvas",
+                status: "applied",
+                reason: act.description ?? "已整理画布布局",
+              });
+              break;
+            }
+
             case "run_node": {
               const rid = act.nodeId ?? act.id;
               if (!rid) {
@@ -5846,6 +6204,9 @@ function StarCanvasInner() {
       dismissCanvasHint,
       selectedNodeId,
       allowAIAutoRun,
+      fitViewToVisibleCanvas,
+      openAssetLibrary,
+      workflowRunner,
     ],
   );
 

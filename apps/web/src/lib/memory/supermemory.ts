@@ -163,28 +163,51 @@ function keywordSearch(
 export const supermemory = {
   /** Set a memory entry with semantic search capability */
   async set<T>(key: string, content: T, metadata: Record<string, string> = {}): Promise<void> {
+    const memoryKey = `${STORAGE_PREFIX}${key}`;
+    const now = Date.now();
+    const shouldEmbed = metadata.type !== "canvas_state";
+    const searchableText = `${key} ${JSON.stringify(content)} ${JSON.stringify(metadata)}`;
+    const embedding = shouldEmbed ? await generateEmbedding(searchableText) : null;
+
     const db = await openDB();
     const tx = db.transaction([STORE_NAME, INDEX_STORE], "readwrite");
     const store = tx.objectStore(STORE_NAME);
     const idxStore = tx.objectStore(INDEX_STORE);
 
-    // Generate embedding from content + metadata
-    const searchableText = `${key} ${JSON.stringify(content)} ${JSON.stringify(metadata)}`;
-    const embedding = await generateEmbedding(searchableText);
+    const existingEntries = await new Promise<MemoryEntry<T>[]>((resolve, reject) => {
+      const matches: MemoryEntry<T>[] = [];
+      const req = store.openCursor();
+      req.onsuccess = (event) => {
+        const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+        if (!cursor) {
+          resolve(matches);
+          return;
+        }
+        const entry = cursor.value as MemoryEntry<T>;
+        if (entry.key === memoryKey) {
+          matches.push(entry);
+          if (matches.length > 1) {
+            cursor.delete();
+          }
+        }
+        cursor.continue();
+      };
+      req.onerror = () => reject(req.error);
+    });
 
+    const existingEntry = existingEntries[0];
     const entry: MemoryEntry<T> = {
-      id: `mem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      key: `${STORAGE_PREFIX}${key}`,
+      id: existingEntry?.id ?? `mem_${now}_${Math.random().toString(36).slice(2, 8)}`,
+      key: memoryKey,
       content,
       metadata,
-      embedding: embedding || undefined,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      embedding: embedding || existingEntry?.embedding,
+      createdAt: existingEntry?.createdAt ?? now,
+      updatedAt: now,
     };
 
     store.put(entry);
 
-    // Update index
     const existingIndex = await new Promise<MemoryIndex | undefined>((resolve) => {
       const req = idxStore.get(INDEX_KEY);
       req.onsuccess = () => resolve(req.result?.content);
@@ -193,7 +216,7 @@ export const supermemory = {
 
     const index: MemoryIndex = existingIndex || { keys: [] };
     const existingKeyIndex = index.keys.findIndex((k) => k.key === key);
-    const idxEntry = { key, type: metadata.type || "general", title: metadata.title || key, updatedAt: Date.now() };
+    const idxEntry = { key, type: metadata.type || "general", title: metadata.title || key, updatedAt: now };
 
     if (existingKeyIndex >= 0) {
       index.keys[existingKeyIndex] = idxEntry;
@@ -205,8 +228,8 @@ export const supermemory = {
       key: INDEX_KEY,
       content: index,
       metadata: {},
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      createdAt: now,
+      updatedAt: now,
     });
 
     return new Promise((resolve, reject) => {

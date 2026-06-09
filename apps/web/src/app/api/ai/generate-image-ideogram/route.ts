@@ -3,6 +3,7 @@
 // 支持分镜数据直接翻译为 Ideogram 4 JSON prompt 进行生图
 // ============================================================================
 import { NextRequest, NextResponse } from "next/server"
+import { fetchWithTimeout } from "@/lib/ai/server-fetch"
 
 export async function POST(request: NextRequest) {
   try {
@@ -54,14 +55,14 @@ export async function POST(request: NextRequest) {
     }
 
     // 调用 Ideogram API
-    const imageRes = await fetch("https://api.ideogram.ai/v1/ideogram-v4/generate", {
+    const imageRes = await fetchWithTimeout("https://api.ideogram.ai/v1/ideogram-v4/generate", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Api-Key": apiKey,
       },
       body: JSON.stringify(requestBody),
-    })
+    }, 120000)
 
     if (!imageRes.ok) {
       const errorText = await imageRes.text()

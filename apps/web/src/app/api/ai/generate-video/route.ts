@@ -8,6 +8,7 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { normalizeUpstreamError, normalizeClientError } from "@/lib/ai/errors"
+import { fetchWithTimeout } from "@/lib/ai/server-fetch"
 
 // ---------------------------------------------------------------------------
 // Config & Types
@@ -156,12 +157,6 @@ function createVideoGenStream(
         estimatedSecondsRemaining: Math.round(duration * 8),
       })
 
-      const abortController = new AbortController()
-      const timeoutId = setTimeout(
-        () => abortController.abort(),
-        config.timeoutMs,
-      )
-
       // 构建 OpenAI 兼容格式的视频生成请求体
       // 预留字段：不同中转站可能要求不同的字段名，可在此调整。
       const requestPayload: Record<string, unknown> = {
@@ -183,7 +178,7 @@ function createVideoGenStream(
 
       let submitRes: Response | undefined
       try {
-        submitRes = await fetch(
+        submitRes = await fetchWithTimeout(
           `${config.baseUrl}/videos/generations`,
           {
             method: "POST",
@@ -192,11 +187,10 @@ function createVideoGenStream(
               Authorization: `Bearer ${config.apiKey}`,
             },
             body: JSON.stringify(requestPayload),
-            signal: abortController.signal,
           },
+          config.timeoutMs,
         )
       } catch (err: unknown) {
-        clearTimeout(timeoutId)
         const normalized = normalizeClientError(err)
         send({
           type: "error",
@@ -207,8 +201,6 @@ function createVideoGenStream(
         controller.close()
         return
       }
-
-      clearTimeout(timeoutId)
 
       if (!submitRes.ok) {
         const errorText = await submitRes.text()
@@ -327,12 +319,12 @@ function createVideoGenStream(
         })
 
         try {
-          const pollRes = await fetch(pollEndpoint, {
+          const pollRes = await fetchWithTimeout(pollEndpoint, {
             method: "GET",
             headers: {
               Authorization: `Bearer ${config.apiKey}`,
             },
-          })
+          }, Math.min(config.timeoutMs, 60_000))
 
           if (!pollRes.ok) {
             // 某些中转站可能不支持 GET 查询，直接跳过轮询

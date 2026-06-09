@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { normalizeGenerationError } from "@/lib/ai/normalizeGenerationError"
 import { getImageProviderCapability } from "@/lib/ai/imageProviderCapabilities"
+import { fetchWithTimeout } from "@/lib/ai/server-fetch"
 
 // ── Config ──────────────────────────────────────────────────────────────────
 const API_BASE_URL = process.env.AI_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL || "https://api.openai.com/v1"
@@ -13,20 +14,6 @@ const REQUEST_TIMEOUT_MS = Number(process.env.AI_REQUEST_TIMEOUT_MS || 120000)
 const ENHANCE_TIMEOUT_MS = Math.min(REQUEST_TIMEOUT_MS, 30000)
 const IMAGE_RETRY_ATTEMPTS = Math.max(1, Number(process.env.AI_IMAGE_RETRY_ATTEMPTS || 2))
 const RETRYABLE_UPSTREAM_STATUSES = new Set([429, 500, 502, 503, 504])
-
-async function fetchWithTimeout(input: string, init: RequestInit, timeoutMs: number): Promise<Response> {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), timeoutMs)
-
-  try {
-    return await fetch(input, {
-      ...init,
-      signal: controller.signal,
-    })
-  } finally {
-    clearTimeout(timeout)
-  }
-}
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))

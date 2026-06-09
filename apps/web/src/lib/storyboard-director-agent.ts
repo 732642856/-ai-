@@ -11,6 +11,7 @@ import type {
 } from "@/types/cinematic"
 import type { CharacterIdentityAsset, StoryboardShotData } from "@/app/canvas/components/canvas/types"
 import { EMOTION_SHOT_STRATEGY, createCinematicShotId, runAllChecks } from "./cinematic-rules.ts"
+import { validateStoryboardPlan, formatSchemaErrors } from "./ai/agent-output-schema.ts"
 
 export const STORYBOARD_DIRECTOR_SYSTEM_PROMPT = `你是一位专业影视分镜导演 AI。你的职责是将剧本文本转化为专业的、有导演意图的分镜方案。
 
@@ -116,6 +117,15 @@ export function postProcessStoryboard(
   raw: RawStoryboardDirectorOutput,
   meta: Partial<Pick<StoryboardPlan, "title" | "genre" | "style" | "targetPlatform" | "shotDensity">> = {},
 ): StoryboardPlan {
+  // ── P0-3: Zod Schema 校验 ──
+  // 在弱校验（normalize）之前先做强校验，以便上层决定是否重试
+  const validation = validateStoryboardPlan(raw)
+  if (!validation.valid) {
+    // 校验失败时仍用弱校验兜底（保证不崩溃），但记录警告
+    const warnMsg = formatSchemaErrors(validation.errors)
+    console.warn("[StoryboardDirector] Schema validation warning:", warnMsg)
+  }
+
   const scenes = normalizeScenes(raw.scenes ?? [])
   const fallbackSceneId = scenes[0]?.sceneId || "scene-1"
   const shots = normalizeShots(raw.shots ?? [], fallbackSceneId)
@@ -136,6 +146,25 @@ export function postProcessStoryboard(
     continuityReport,
     overallDuration,
   }
+}
+
+/**
+ * 带 Schema 校验的 postProcess，返回校验状态供调用方决定是否重试。
+ * 校验通过 → { valid: true, plan }
+ * 校验失败 → { valid: false, plan, errors }  (plan 仍用弱校验兜底返回)
+ */
+export function validateAndPostProcessStoryboard(
+  raw: RawStoryboardDirectorOutput,
+  meta: Partial<Pick<StoryboardPlan, "title" | "genre" | "style" | "targetPlatform" | "shotDensity">> = {},
+): { valid: boolean; plan: StoryboardPlan; errors?: string[] } {
+  const validation = validateStoryboardPlan(raw)
+  const plan = postProcessStoryboard(raw, meta)
+
+  if (validation.valid) {
+    return { valid: true, plan }
+  }
+
+  return { valid: false, plan, errors: validation.errors }
 }
 
 export function cinematicShotToStoryboardShot(

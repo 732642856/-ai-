@@ -3,6 +3,7 @@
 // Generates front/side/back views of a character via gpt-image-2
 // ============================================================================
 import { NextRequest } from "next/server"
+import { fetchWithTimeout } from "@/lib/ai/server-fetch"
 
 // ── Config ──────────────────────────────────────────────────────────────────
 const API_BASE_URL = process.env.AI_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL || "https://api.openai.com/v1"
@@ -42,21 +43,6 @@ const VIEW_PROMPTS: Record<string, (desc: string) => string> = {
     `Character design sheet, side view profile, full body, standing straight, facing left, ${desc}, uniform lighting, plain background, high quality, detailed`,
   back: (desc) =>
     `Character design sheet, back view, full body, standing straight, ${desc}, uniform lighting, plain background, high quality, detailed`,
-}
-
-// ── Fetch wrapper with timeout ──────────────────────────────────────────────
-async function fetchWithTimeout(
-  url: string,
-  init: RequestInit,
-  timeoutMs: number,
-): Promise<Response> {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), timeoutMs)
-  try {
-    return await fetch(url, { ...init, signal: controller.signal })
-  } finally {
-    clearTimeout(timeout)
-  }
 }
 
 // ── Single view image generation ────────────────────────────────────────────

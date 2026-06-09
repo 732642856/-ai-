@@ -9,6 +9,7 @@ import {
 } from "../../../../lib/ai/provider-config.ts"
 import type { AiProviderOverrides } from "../../../../lib/ai/provider-config.ts"
 import { normalizeUpstreamError } from "../../../../lib/ai/errors.ts"
+import { fetchWithTimeout } from "../../../../lib/ai/server-fetch.ts"
 
 export interface HealthResult {
   body: unknown
@@ -20,10 +21,7 @@ export interface HealthResult {
  * 向配置的 Base URL 发最小 chat 请求验证连通性。
  */
 async function runHealthCheck(baseUrl: string, apiKey: string, model: string) {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 15000)
-
-  const upstream = await fetch(`${baseUrl}/chat/completions`, {
+  const upstream = await fetchWithTimeout(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -35,10 +33,7 @@ async function runHealthCheck(baseUrl: string, apiKey: string, model: string) {
       temperature: 0,
       max_tokens: 5,
     }),
-    signal: controller.signal,
-  })
-
-  clearTimeout(timer)
+  }, 15000)
 
   const text = await upstream.text()
 

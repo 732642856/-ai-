@@ -12,6 +12,7 @@ import {
   X,
   Type,
   Sparkles,
+  Bot,
   FileText,
   Image,
   Upload,
@@ -19,6 +20,11 @@ import {
   Film,
   Video,
   Music,
+  Volume2,
+  Maximize2,
+  Megaphone,
+  Camera,
+  Repeat,
   Layers,
   MessageSquareText,
   FolderOpen,
@@ -39,7 +45,7 @@ import type { CanvasNodeKind } from "../canvas/types"
 // ============================================================================
 
 type AddNodeAction =
-  | { type: "add-node"; nodeType: "content" | "image" | "workflow"; nodeKind: CanvasNodeKind }
+  | { type: "add-node"; nodeType: "content" | "image" | "workflow" | "agent"; nodeKind: CanvasNodeKind }
   | { type: "upload-image" }
   | { type: "upload-document" }
   | { type: "import-script" }
@@ -64,7 +70,7 @@ interface AddNodeCategory {
 interface AddNodePanelProps {
   isOpen: boolean
   onClose: () => void
-  onAddNode: (nodeType: "content" | "image" | "workflow", nodeKind: CanvasNodeKind) => void
+  onAddNode: (nodeType: "content" | "image" | "workflow" | "agent", nodeKind: CanvasNodeKind) => void
   onUploadImage: () => void
   onUploadDocument?: () => void
   onImportScript?: () => void
@@ -78,6 +84,25 @@ interface AddNodePanelProps {
 // ============================================================================
 
 const CATEGORIES: AddNodeCategory[] = [
+  {
+    id: "agent",
+    icon: Bot,
+    label: "Agent",
+    items: [
+      {
+        icon: Bot,
+        title: "导演 Agent 中控",
+        description: "读取画布素材，编排剧本、分镜、角色一致性和生成链路",
+        action: { type: "add-node", nodeType: "agent", nodeKind: "agent" },
+      },
+      {
+        icon: Workflow,
+        title: "ArcReel 式流水线",
+        description: "小说/剧本 → 角色线索 → 分镜图 → 视频片段 → 项目包",
+        action: { type: "create-workflow" },
+      },
+    ],
+  },
   {
     id: "text",
     icon: Type,
@@ -138,6 +163,18 @@ const CATEGORIES: AddNodeCategory[] = [
         description: "文本到图像，用于生成角色、场景或首帧",
         action: { type: "add-node", nodeType: "workflow", nodeKind: "image-generation" },
       },
+      {
+        icon: Megaphone,
+        title: "AI 海报",
+        description: "整合角色、片名、卖点和风格，生成海报提示词",
+        action: { type: "add-node", nodeType: "workflow", nodeKind: "poster" },
+      },
+      {
+        icon: Maximize2,
+        title: "高清放大",
+        description: "参考 Real-ESRGAN 记录 2x/4x 放大和保细节要求",
+        action: { type: "add-node", nodeType: "workflow", nodeKind: "upscale" },
+      },
     ],
   },
   {
@@ -150,6 +187,24 @@ const CATEGORIES: AddNodeCategory[] = [
         title: "动效预演",
         description: "用关键画面验证动作、机位和氛围",
         action: { type: "add-node", nodeType: "workflow", nodeKind: "video-generation" },
+      },
+      {
+        icon: Camera,
+        title: "摄影机控制",
+        description: "规划景别、机位、镜头运动、焦段和一镜到底路径",
+        action: { type: "add-node", nodeType: "workflow", nodeKind: "camera-control" },
+      },
+      {
+        icon: Repeat,
+        title: "爆款拆解/复刻",
+        description: "拆节奏、钩子、镜头结构和可复刻模板",
+        action: { type: "add-node", nodeType: "workflow", nodeKind: "remix-analysis" },
+      },
+      {
+        icon: MessageSquareText,
+        title: "照片说话/数字人",
+        description: "记录头像、台词、声线和口型同步生成要求",
+        action: { type: "add-node", nodeType: "workflow", nodeKind: "talking-photo" },
       },
       {
         icon: Layers,
@@ -175,6 +230,12 @@ const CATEGORIES: AddNodeCategory[] = [
         title: "声音意图",
         description: "记录旁白、音乐、环境声和声音参考",
         action: { type: "add-node", nodeType: "workflow", nodeKind: "audio" },
+      },
+      {
+        icon: Volume2,
+        title: "BGM 情绪设计",
+        description: "记录音乐情绪、节拍、乐器和版权备注",
+        action: { type: "add-node", nodeType: "workflow", nodeKind: "bgm" },
       },
       {
         icon: MessageSquareText,

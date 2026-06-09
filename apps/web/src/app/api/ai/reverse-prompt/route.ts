@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server"
+import { fetchWithTimeout } from "@/lib/ai/server-fetch"
 
 const API_BASE_URL = process.env.AI_BASE_URL || ""
 const API_KEY = process.env.AI_API_KEY || ""
@@ -11,7 +12,7 @@ export async function POST(req: NextRequest) {
       return Response.json({ error: "imageUrl required" }, { status: 400 })
     }
 
-    const res = await fetch(`${API_BASE_URL}/chat/completions`, {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${API_KEY}` },
       body: JSON.stringify({
@@ -31,7 +32,7 @@ export async function POST(req: NextRequest) {
         ],
         max_tokens: 300,
       }),
-    })
+    }, 120000)
 
     if (!res.ok) {
       const err = await res.text().catch(() => "unknown")

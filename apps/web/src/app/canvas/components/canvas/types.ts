@@ -18,6 +18,12 @@ export type VideoWorkflowNodeKind =
   | "composition"
   | "video-result"
   | "tts"
+  | "bgm"
+  | "upscale"
+  | "poster"
+  | "talking-photo"
+  | "remix-analysis"
+  | "camera-control"
 export type StoryboardResultQuality = "composed-grid" | "single-shot" | "fallback-shot"
 
 export type BatchGenerationJobStatus =
@@ -223,6 +229,7 @@ export type CharacterIdentityAsset = {
   frontViewUrl?: string
   sideViewUrl?: string
   backViewUrl?: string
+  viewGenerationStatus?: "idle" | "generating" | "done" | "failed"
 }
 
 export type StoryboardShotData = {
@@ -967,5 +974,47 @@ export const nodeToneStyles: Record<CanvasNodeKind, {
     meta: "text-pink-300/60",
     border: "1px solid rgba(236, 72, 153, 0.25)",
     background: "rgba(236, 72, 153, 0.1)",
+  },
+  bgm: {
+    eyebrow: "text-emerald-300",
+    body: "text-emerald-200/75",
+    meta: "text-emerald-300/60",
+    border: "1px solid rgba(16, 185, 129, 0.25)",
+    background: "rgba(16, 185, 129, 0.1)",
+  },
+  upscale: {
+    eyebrow: "text-cyan-300",
+    body: "text-cyan-200/75",
+    meta: "text-cyan-300/60",
+    border: "1px solid rgba(6, 182, 212, 0.25)",
+    background: "rgba(6, 182, 212, 0.1)",
+  },
+  poster: {
+    eyebrow: "text-rose-300",
+    body: "text-rose-200/75",
+    meta: "text-rose-300/60",
+    border: "1px solid rgba(244, 63, 94, 0.25)",
+    background: "rgba(244, 63, 94, 0.1)",
+  },
+  "talking-photo": {
+    eyebrow: "text-fuchsia-300",
+    body: "text-fuchsia-200/75",
+    meta: "text-fuchsia-300/60",
+    border: "1px solid rgba(217, 70, 239, 0.25)",
+    background: "rgba(217, 70, 239, 0.1)",
+  },
+  "remix-analysis": {
+    eyebrow: "text-orange-300",
+    body: "text-orange-200/75",
+    meta: "text-orange-300/60",
+    border: "1px solid rgba(249, 115, 22, 0.25)",
+    background: "rgba(249, 115, 22, 0.1)",
+  },
+  "camera-control": {
+    eyebrow: "text-indigo-300",
+    body: "text-indigo-200/75",
+    meta: "text-indigo-300/60",
+    border: "1px solid rgba(99, 102, 241, 0.25)",
+    background: "rgba(99, 102, 241, 0.1)",
   },
 }

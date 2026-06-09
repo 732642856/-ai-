@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { mergeProviderConfig } from "@/lib/ai/provider-config"
 import { normalizeUpstreamError, normalizeClientError } from "@/lib/ai/errors"
+import { fetchWithTimeout } from "@/lib/ai/server-fetch"
 import {
   buildBibleDirectorSystemPrompt,
   buildBibleDirectorUserPrompt,
@@ -28,10 +29,7 @@ export async function POST(request: NextRequest) {
 
     // 调用 OpenAI 兼容 API
     const url = `${config.baseUrl.replace(/\/+$/, "")}/chat/completions`
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
-
-    const upstream = await fetch(url, {
+    const upstream = await fetchWithTimeout(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -46,10 +44,7 @@ export async function POST(request: NextRequest) {
         temperature: 0.7,
         max_tokens: 4096,
       }),
-      signal: controller.signal,
-    })
-
-    clearTimeout(timeoutId)
+    }, timeoutMs)
 
     if (!upstream.ok) {
       const errorText = await upstream.text().catch(() => "")

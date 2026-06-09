@@ -15,17 +15,25 @@ export function ReactScanInit() {
   useEffect(() => {
     if (process.env.NODE_ENV !== "development") return;
 
-    import("react-scan")
-      .then(({ scan }) => {
+    (async () => {
+      try {
+        const dynamicImport = new Function("specifier", "return import(specifier)") as <T = any>(specifier: string) => Promise<T>;
+        const [{ version: reactVersion }, { version: reactDomVersion }, { scan }] = await Promise.all([
+          import("react"),
+          import("react-dom"),
+          dynamicImport<{ scan: (options: { enabled: boolean; log: boolean; showToolbar: boolean }) => void }>("react-scan"),
+        ]);
+        if (reactVersion !== reactDomVersion) return;
         scan({
           enabled: true,
           log: false,
           showToolbar: true,
         });
-      })
-      .catch(() => {
-        // react-scan not installed — that's fine
-      });
+        (window as typeof window & { __REACT_SCAN__?: boolean }).__REACT_SCAN__ = true;
+      } catch {
+        // react-scan is optional in local dev and can lag behind React/Next bundling changes.
+      }
+    })();
   }, []);
 
   return null;

@@ -176,6 +176,7 @@ test("one-click storyboard image uses one direct grid request and never falls ba
   await page.addInitScript((storedCanvas) => {
     window.localStorage.clear()
     window.localStorage.setItem("startrails_canvas", JSON.stringify(storedCanvas))
+    indexedDB.deleteDatabase("supermemory")
   }, createStoredCanvas())
 
   await page.goto("/canvas")
@@ -193,7 +194,7 @@ test("one-click storyboard image uses one direct grid request and never falls ba
   await expect(page.getByTestId("storyboard-batch-status")).toHaveText("已完成", { timeout: 30_000 })
   await expect(page.getByTestId("storyboard-batch-message")).toContainText("分镜图已生成")
 
-  await expect(page.getByText("分镜图已生成")).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText("分镜图已生成").first()).toBeVisible({ timeout: 15_000 })
 
   expect(chatRequests, "direct storyboard image generation must not invoke storyboard text/chat flow").toHaveLength(0)
   expect(imageRequests, "multi-shot storyboard generation must use exactly one image API call").toHaveLength(1)

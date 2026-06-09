@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { mergeProviderConfig } from "@/lib/ai/provider-config"
 import type { AiProviderOverrides } from "@/lib/ai/provider-config"
+import { fetchWithTimeout } from "@/lib/ai/server-fetch"
 
 // ============================================================================
 // CONFIGURATION - read from environment (server-side only)
@@ -177,12 +178,16 @@ export type CanvasActionType =
   | "select_node"
   | "focus_node"
   | "run_node"
+  | "create_workflow_template"
+  | "open_panel"
+  | "generate_storyboard"
+  | "layout_canvas"
   | "delete_node"
 
 export interface CanvasAction {
   action: CanvasActionType
   // create_node
-  nodeType?: "content" | "image" | "workflow"
+  nodeType?: "content" | "image" | "workflow" | "agent"
   nodeKind?: string
   title?: string
   content?: string
@@ -197,6 +202,12 @@ export interface CanvasAction {
   targetId?: string
   // select_node / focus_node / run_node / delete_node
   id?: string
+  // create_workflow_template / open_panel / generate_storyboard / layout_canvas
+  template?: "tapnow_preproduction" | "arc_reel_agent" | "video_preproduction"
+  panel?: "chat" | "add_node" | "asset_library" | "project_bible" | "character_bible" | "scene_bible" | "style_bible" | "run_queue" | "property"
+  layout?: "horizontal" | "vertical" | "grid"
+  sourceNodeId?: string
+  shots?: Array<{ title?: string; content?: string; prompt?: string; duration?: string; cameraMovement?: string; shotType?: string }>
   description?: string
 }
 
@@ -209,10 +220,10 @@ const CANVAS_ACTION_SCHEMA = `
   "actions": [
     {
       "action": "create_node",
-      "nodeType": "content" | "image" | "workflow",
-      "nodeKind": "text" | "prompt" | "script" | "storyboard" | "image-generation" | "video-generation" | "audio" | "subtitle" | "composition" | "video-result",
+      "nodeType": "content" | "image" | "workflow" | "agent",
+      "nodeKind": "text" | "prompt" | "script" | "storyboard" | "image-generation" | "video-generation" | "audio" | "subtitle" | "composition" | "video-result" | "agent",
       "title": "节点标题",
-      "content": "文本内容（content节点）",
+      "content": "文本内容（content节点或 agent 指令）",
       "prompt": "提示词内容（prompt/workflow节点）",
       "position": { "x": 400, "y": 300 },
       "description": "告诉用户做了什么"
@@ -245,6 +256,29 @@ const CANVAS_ACTION_SCHEMA = `
       "description": "告诉用户已建议运行哪个节点"
     },
     {
+      "action": "create_workflow_template",
+      "template": "arc_reel_agent" | "tapnow_preproduction" | "video_preproduction",
+      "description": "创建可编辑的视频创作工作流模板"
+    },
+    {
+      "action": "generate_storyboard",
+      "title": "分镜标题",
+      "shots": [
+        { "title": "镜头 1", "content": "画面内容", "prompt": "首帧/视频提示词", "duration": "5s", "cameraMovement": "slow dolly in", "shotType": "medium shot" }
+      ],
+      "description": "把故事拆为可继续执行的分镜节点"
+    },
+    {
+      "action": "open_panel",
+      "panel": "chat" | "add_node" | "asset_library" | "project_bible" | "character_bible" | "scene_bible" | "style_bible" | "run_queue" | "property",
+      "description": "打开用户下一步需要的面板"
+    },
+    {
+      "action": "layout_canvas",
+      "layout": "horizontal" | "vertical" | "grid",
+      "description": "整理画布布局"
+    },
+    {
       "action": "delete_node",
       "nodeId": "节点ID",
       "description": "告诉用户删除了什么节点"
@@ -257,8 +291,11 @@ const CANVAS_ACTION_SCHEMA = `
 - actions 是数组，可以包含多个操作，它们会按顺序执行
 - 纯问答类回复不需要附加 actions，只在用户明确要求画布操作时才添加
 - nodeId 必须来自"画布节点摘要"中的真实 id，不能自行捏造
-- create_node 不需要 nodeId，系统会自动生成
+- create_node 不需要 nodeId，系统会自动生成；需要导演 Agent 时用 nodeType:"agent", nodeKind:"agent"
 - position 是画布坐标（不是屏幕坐标），可省略让系统自动居中
+- 用户要“一键做视频/从小说到视频/搭建完整流程/像 ArcReel 一样”时优先用 create_workflow_template，减少手写多个 create_node
+- 用户要“拆分镜/生成镜头表”时优先用 generate_storyboard，shots 必须能直接形成可运行的镜头节点
+- 用户要“打开素材库/Bible/队列/添加节点”时用 open_panel，不要只文字建议
 - run_node 建议运行节点（默认不会自动执行，需用户确认）
 - delete_node 仅当用户明确要求删除节点时使用
 `
@@ -278,6 +315,13 @@ function buildSystemPrompt(context?: {
 3. 生成首帧图像
 4. 组织文生视频 / 图生视频 / 音频 / 字幕 / 合成工作流
 5. 在画布上理解并串联创作节点
+
+你不是普通聊天机器人，而是 TapNow-like 画布 Agent 中控。工作方式参考：
+- TapNow：Chat 读取画布素材，直接创建/连接/运行节点，不停留在建议层。
+- ArcReel：小说/剧本 → 全局角色/线索提取 → 分集/剧本 JSON → 角色/道具/场景设计图 → 分镜图/宫格图 → 视频片段 → FFmpeg/剪映交付。
+- FilmAgent：Director / Screenwriter / Actor / Cinematographer 多角色协作，先验证脚本、角色、摄影与场景一致性，再推进生成。
+
+行动原则：用户要求优化、搭工作流、对标、继续完成任务时，优先输出 canvas-actions，让画布发生变化；不要只泛泛分析。能复用模板就用 create_workflow_template，能生成分镜就用 generate_storyboard，能打开面板就用 open_panel。
 
 请用中文简洁、专业的语言回答。若用户正在讨论画布，请优先基于下方画布上下文回答，不要假装没看见节点。
 
@@ -354,7 +398,8 @@ async function* streamFromRealAPI(
   messages: Array<{role: string; content: string}>,
   model: string,
   apiBaseUrl: string,
-  apiKey: string
+  apiKey: string,
+  timeoutMs = 120_000,
 ): AsyncGenerator<string> {
   const { endpoint, bodyTransformer } = getEndpointForModel(model, apiBaseUrl)
   
@@ -363,14 +408,14 @@ async function* streamFromRealAPI(
     model,
   })
 
-  const response = await fetch(endpoint, {
+  const response = await fetchWithTimeout(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
     },
     body: JSON.stringify(body),
-  })
+  }, timeoutMs)
 
   if (!response.ok) {
     const errorText = await response.text()
@@ -478,7 +523,7 @@ async function handleImageGeneration(
         { role: "user", content: message }
       ]
 
-      const enhanceResponse = await fetch(`${config.baseUrl}/chat/completions`, {
+      const enhanceResponse = await fetchWithTimeout(`${config.baseUrl}/chat/completions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -489,7 +534,7 @@ async function handleImageGeneration(
           messages: enhanceMessages,
           stream: false,
         }),
-      })
+      }, Math.min(config.timeoutMs, 30_000))
 
       if (enhanceResponse.ok) {
         const enhanceData = await enhanceResponse.json()
@@ -533,14 +578,14 @@ async function handleImageGeneration(
     return
   }
 
-  const imageResponse = await fetch(endpoint, {
+  const imageResponse = await fetchWithTimeout(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${config.apiKey}`,
     },
     body: JSON.stringify(imageBody),
-  })
+  }, config.timeoutMs)
 
   if (!imageResponse.ok) {
     const errorText = await imageResponse.text()
@@ -637,7 +682,7 @@ export async function POST(request: NextRequest) {
             }
           } else {
             // Call the actual AI API (text models, streaming) — uses config from outer scope
-            for await (const char of streamFromRealAPI(messages, model, config.baseUrl, config.apiKey)) {
+            for await (const char of streamFromRealAPI(messages, model, config.baseUrl, config.apiKey, config.timeoutMs)) {
               controller.enqueue(
                 encoder.encode(`data: ${JSON.stringify({ content: char })}\n\n`)
               )

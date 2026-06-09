@@ -20,6 +20,7 @@ import {
   Camera,
   Music,
   Sun,
+  Bot,
   type LucideIcon,
 } from "lucide-react"
 import type { SlashCommand, SlashCommandCategory, SlashCommandGroup } from "../../types/slash-commands"
@@ -31,6 +32,22 @@ import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 
 const ALL_COMMANDS: SlashCommand[] = [
   // --- Generation ---
+  {
+    id: "创建Agent工作流",
+    label: "创建Agent工作流",
+    description: "创建 ArcReel/FilmAgent 式多智能体视频创作流水线",
+    icon: "Bot",
+    category: "workflow",
+    modelType: "text",
+  },
+  {
+    id: "一键视频流水线",
+    label: "一键视频流水线",
+    description: "创建剧本、分镜、首帧、视频、音频、字幕和交付包节点",
+    icon: "Video",
+    category: "workflow",
+    modelType: "text",
+  },
   {
     id: "生成文本",
     label: "生成文本",
@@ -205,6 +222,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Camera,
   Music,
   Sun,
+  Bot,
 }
 
 // ============================================================================

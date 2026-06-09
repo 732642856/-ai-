@@ -630,6 +630,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
 
     // ------------------------------------------------------------------
     // AGENT STEP (Phase 1: DirectorAgent — story breakdown)
+    // P0-2: 支持自动重试（最多 2 次，指数退避 + jitter）
     // ------------------------------------------------------------------
     if (kind === "agent") {
       const input = node.data.content ?? ""
@@ -641,88 +642,198 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
         return ""
       }
 
-      updateNodeData(node.id, {
-        runMeta: createRunningRunMeta({ runId: runContext?.runId, source: runContext?.source, message: "Agent 分析中..." }),
-        summary: "正在分析剧本...",
-      })
-
       const _providerOverrides = getLocalProviderOverrides()
 
-      const agentPrompt = `你是一个专业的影视前期导演 AI（DirectorAgent）。
+      // ── P2-7: Multi-Agent Film Crew Pipeline ──
+      // 使用 7 角色 Agent 系统（DEV PLAN.md 设计）替代单一 DirectorAgent
+      // Agent 角色：Writer → StoryboardArtist → Cinematographer → Director → PromptEngineer → ProductionDesigner → Router
+      const agentPrompt = `你是一个专业的影视 AI 团队，包含以下 7 个专门角色协同工作：
 
-用户会给你一段剧本或故事文本，你需要将其拆解为结构化的分镜脚本。
+【编剧 Writer】
+- 分析剧本结构，提取角色关系和叙事弧线
+- 为每个角色创建详细设定（外观、性格、动机）
 
-请按以下 JSON 格式输出：
+【分镜师 Storyboard Artist】
+- 将剧本拆解为结构化的分镜方案
+- 识别场景边界（地点变化、时间跳跃、人物关系变化）
+- 为每个场景标注地点、时间、出场角色、场景功能
+
+【摄影师 Cinematographer】
+- 为每个镜头指定景别（extreme-wide/wide/medium/close-up/extreme-close-up）
+- 指定机位（eye-level/low-angle/high-angle/dutch/over-shoulder/POV）
+- 指定运镜方式（static/push-in/tracking/handheld/steadicam/drone等）
+- 遵守 180 度轴线规则
+
+【导演 Director】
+- 把控叙事节奏和视觉风格方向
+- 设计情绪曲线（calm/tense/fear/anger/joy/sadness/intimacy/isolation/suspense/revelation）
+- 确保每个场景有 start → peak → end 的情绪变化
+
+【Prompt 工程师 Prompt Engineer】
+- 为每个镜头生成可直接用于 AI 生图的 visualPrompt（英文）
+- 生成 negativePrompt 避免常见画面错误
+
+【美术指导 Production Designer】
+- 设计色彩方案和灯光方案
+- 确保场景间视觉连贯性
+
+【路由 Router】
+- 协调各 Agent 间数据传递
+- 确保完整输出链路
+
+请按以下 JSON 格式输出完整分镜方案：
 
 {
   "title": "作品标题",
   "characters": [
-    { "name": "角色名", "description": "外观描述", "role": "主角/配角/群演" }
+    {
+      "name": "角色名",
+      "description": "详细外观描述（年龄/身高/体型/发型/面部特征/服装）",
+      "role": "主角/配角/群演",
+      "traits": ["性格特征1", "性格特征2"]
+    }
   ],
   "scenes": [
     {
       "sceneNumber": 1,
       "location": "场景地点",
-      "timeOfDay": "日/夜/黄昏",
-      "mood": "氛围描述",
+      "timeOfDay": "日/夜/黄昏/清晨",
+      "mood": "整体氛围",
+      "emotionalCurve": { "start": "calm", "peak": "tense", "end": "suspense" },
+      "colorPalette": ["#色值1", "#色值2", "#色值3"],
+      "lighting": "灯光方案描述",
       "shots": [
         {
           "shotNumber": 1,
-          "shotType": "远景/全景/中景/近景/特写",
-          "cameraMovement": "固定/推/拉/摇/移/跟",
-          "description": "画面描述",
+          "shotType": "远景/全景/中景/近景/特写/大特写",
+          "cameraAngle": "平视/低角度/高角度/荷兰角/过肩/POV",
+          "cameraMovement": "固定/推近/拉远/横摇/竖摇/跟拍/手持/稳定器/无人机",
+          "description": "详细的画面描述（含构图、光线、情绪）",
           "dialogue": "对白（如有）",
-          "action": "角色动作描述",
-          "duration": "预估秒数"
+          "action": "角色动作和调度描述",
+          "duration": "预估秒数",
+          "visualPrompt": "英文 AI 生图提示词",
+          "negativePrompt": "英文负面提示词"
         }
       ]
     }
   ]
 }
 
-规则：
+关键规则：
 1. 每个场景至少 2 个分镜
-2. 角色描述要具体到可用于 AI 生图
-3. 只输出 JSON，不要其他文字`
+2. 角色描述要具体到可用于 AI 生图（面部特征、体型、服装细节）
+3. visualPrompt 和 negativePrompt 必须是英文
+4. 相邻镜头景别要有节奏变化
+5. 情绪曲线避免连续多个镜头情绪不变
+6. 只输出 JSON，不要其他文字`
 
-      const runRequest = buildRunRequest({
-        nodeKind: kind,
-        taskType: "text",
-        prompt: input,
-        upstreamContent: upstreamText || undefined,
-        localDefaultModel: localModels.textModel,
-        envDefaultModel: resolvedTextModel,
-        providerOverrides: _providerOverrides ? { ..._providerOverrides } as Record<string, unknown> : undefined,
-        systemOverride: agentPrompt,
-      })
+      // ── P0-2: Agent 重试循环 ──────────────────────────────
+      const MAX_AGENT_RETRIES = 2
+      let lastError: Error | null = null
+      let finalOutput = ""
 
-      const res = await fetch("/api/ai/chat/stream", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(runRequest),
-      })
+      for (let attempt = 0; attempt <= MAX_AGENT_RETRIES; attempt++) {
+        const isRetry = attempt > 0
+        const attemptLabel = isRetry ? `Agent 重试第 ${attempt} 次...` : "Agent 分析中..."
 
-      if (!res.ok) {
-        const text = await res.text().catch(() => "")
-        const normalized = normalizeGenerationError({ status: res.status, body: text, provider })
-        throw Object.assign(new Error(formatGenerationErrorForDisplay(normalized)), { generationError: normalized })
+        updateNodeData(node.id, {
+          runMeta: createRunningRunMeta({
+            runId: runContext?.runId,
+            source: runContext?.source,
+            message: attemptLabel,
+          }),
+          summary: isRetry ? `正在重新分析... (第 ${attempt} 次重试)` : "正在分析剧本...",
+        })
+
+        // 重试时添加 jitter 延迟（500ms/1000ms/2000ms）
+        if (isRetry) {
+          const jitterMs = 500 * Math.pow(2, attempt - 1) + Math.random() * 300
+          await new Promise((resolve) => setTimeout(resolve, jitterMs))
+        }
+
+        try {
+          const runRequest = buildRunRequest({
+            nodeKind: kind,
+            taskType: "text",
+            prompt: input,
+            upstreamContent: upstreamText || undefined,
+            localDefaultModel: localModels.textModel,
+            envDefaultModel: resolvedTextModel,
+            providerOverrides: _providerOverrides ? { ..._providerOverrides } as Record<string, unknown> : undefined,
+            systemOverride: isRetry
+              ? `${agentPrompt}\n\n【重要】上一次输出格式不正确或解析失败。请严格遵循 JSON 格式，确保所有必填字段完整。`
+              : agentPrompt,
+          })
+
+          const res = await fetch("/api/ai/chat/stream", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(runRequest),
+          })
+
+          if (!res.ok) {
+            const text = await res.text().catch(() => "")
+            const normalized = normalizeGenerationError({ status: res.status, body: text, provider })
+            const err = Object.assign(new Error(formatGenerationErrorForDisplay(normalized)), { generationError: normalized })
+            // Only retry on 5xx / 429, not on 4xx
+            if (res.status >= 500 || res.status === 429) {
+              if (attempt < MAX_AGENT_RETRIES) { lastError = err; continue }
+            }
+            throw err
+          }
+
+          const reader = res.body?.getReader()
+          if (!reader) {
+            const err = new Error("Agent 无响应流")
+            if (attempt < MAX_AGENT_RETRIES) { lastError = err; continue }
+            throw err
+          }
+
+          let fullOutput = ""
+          const { text: resultText, usage } = await readSSEStream(reader, (delta) => {
+            fullOutput += delta
+            updateNodeData(node.id, {
+              agentOutput: fullOutput,
+              summary: fullOutput.slice(0, 200) + (fullOutput.length > 200 ? "..." : ""),
+              runMeta: createRunningRunMeta({
+                runId: runContext?.runId,
+                source: runContext?.source,
+                message: isRetry ? `Agent 重试分析中...` : "Agent 分析中...",
+              }),
+            })
+          })
+
+          finalOutput = resultText || fullOutput
+          if (!finalOutput.trim()) {
+            const err = new Error("Agent 返回空结果")
+            if (attempt < MAX_AGENT_RETRIES) { lastError = err; continue }
+            throw err
+          }
+
+          // ── P0-3: 尝试 JSON 解析以验证输出 ──
+          // 解析失败也触发重试（可能是格式问题）
+          try {
+            JSON.parse(finalOutput.trim())
+          } catch {
+            const err = new Error("Agent 输出非有效 JSON")
+            if (attempt < MAX_AGENT_RETRIES) { lastError = err; continue }
+            throw err
+          }
+
+          // Success — break out of retry loop
+          break
+        } catch (err) {
+          lastError = err instanceof Error ? err : new Error(String(err))
+          if (attempt >= MAX_AGENT_RETRIES) throw lastError
+          // Otherwise continue to next retry attempt
+        }
       }
 
-      const reader = res.body?.getReader()
-      if (!reader) throw new Error("Agent 无响应流")
-
-      let fullOutput = ""
-      const { text: resultText, usage } = await readSSEStream(reader, (delta) => {
-        fullOutput += delta
-        updateNodeData(node.id, {
-          agentOutput: fullOutput,
-          summary: fullOutput.slice(0, 200) + (fullOutput.length > 200 ? "..." : ""),
-          runMeta: createRunningRunMeta({ runId: runContext?.runId, source: runContext?.source, message: "Agent 分析中..." }),
-        })
-      })
-
-      const finalOutput = resultText || fullOutput
-      if (!finalOutput.trim()) throw new Error("Agent 返回空结果")
+      // ── Retries exhausted? ──
+      if (!finalOutput.trim() && lastError) {
+        throw lastError
+      }
 
       // Store structured output and mark done
       updateNodeData(node.id, {
@@ -740,12 +851,9 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
         nodeId: node.id,
         runId: runContext?.runId,
         provider,
-        model: runRequest.model,
+        model: "agent-model",
         taskType: "text",
-        inputTokens: usage?.promptTokens,
-        outputTokens: usage?.completionTokens,
-        totalTokens: usage?.totalTokens,
-        estimatedCostUsd: estimateCostUsd({ provider, model: runRequest.model, taskType: "text", inputTokens: usage?.promptTokens, outputTokens: usage?.completionTokens }),
+        estimatedCostUsd: estimateCostUsd({ provider, model: "agent-model", taskType: "text" }),
         currency: "USD",
         startedAt: agentEndedAt,
         finishedAt: agentEndedAt,

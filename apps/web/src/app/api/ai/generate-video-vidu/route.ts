@@ -7,6 +7,7 @@
 // ============================================================================
 
 import { NextRequest } from "next/server"
+import { fetchWithTimeout } from "@/lib/ai/server-fetch"
 
 // ---------------------------------------------------------------------------
 // Config
@@ -15,6 +16,7 @@ import { NextRequest } from "next/server"
 const DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/api/v1"
 const POLL_INTERVAL_MS = 8_000  // 轮询间隔 8 秒（Vidu 生成约 1-5 分钟）
 const MAX_POLL_MINUTES = 10     // 最大轮询 10 分钟
+const VIDU_REQUEST_TIMEOUT_MS = 60_000
 
 /** Supported Vidu models for image-to-video */
 const VIDU_I2V_MODELS = {
@@ -105,7 +107,7 @@ async function createViduTask(params: ViduGenerateRequest, apiKey: string) {
     parameters,
   }
 
-  const res = await fetch(`${DASHSCOPE_BASE_URL}/services/aigc/video-generation/video-synthesis`, {
+  const res = await fetchWithTimeout(`${DASHSCOPE_BASE_URL}/services/aigc/video-generation/video-synthesis`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -113,7 +115,7 @@ async function createViduTask(params: ViduGenerateRequest, apiKey: string) {
       "X-DashScope-Async": "enable",
     },
     body: JSON.stringify(body),
-  })
+  }, VIDU_REQUEST_TIMEOUT_MS)
 
   if (!res.ok) {
     const errorText = await res.text().catch(() => "Unknown error")
@@ -142,12 +144,12 @@ async function createViduTask(params: ViduGenerateRequest, apiKey: string) {
 }
 
 async function queryViduTask(taskId: string, apiKey: string) {
-  const res = await fetch(`${DASHSCOPE_BASE_URL}/tasks/${taskId}`, {
+  const res = await fetchWithTimeout(`${DASHSCOPE_BASE_URL}/tasks/${taskId}`, {
     method: "GET",
     headers: {
       "Authorization": `Bearer ${apiKey}`,
     },
-  })
+  }, VIDU_REQUEST_TIMEOUT_MS)
 
   if (!res.ok) {
     const errorText = await res.text().catch(() => "Unknown error")

@@ -9,7 +9,7 @@
 
 export type CreateNodeAction = {
   action: "create_node"
-  nodeType?: "content" | "image" | "workflow"
+  nodeType?: "content" | "image" | "workflow" | "agent"
   nodeKind?: string
   title?: string
   content?: string
@@ -54,6 +54,49 @@ export type RunNodeAction = {
   description?: string
 }
 
+export type CreateWorkflowTemplateAction = {
+  action: "create_workflow_template"
+  template?: "tapnow_preproduction" | "arc_reel_agent" | "video_preproduction"
+  title?: string
+  description?: string
+}
+
+export type OpenPanelAction = {
+  action: "open_panel"
+  panel:
+    | "chat"
+    | "add_node"
+    | "asset_library"
+    | "project_bible"
+    | "character_bible"
+    | "scene_bible"
+    | "style_bible"
+    | "run_queue"
+    | "property"
+  description?: string
+}
+
+export type GenerateStoryboardAction = {
+  action: "generate_storyboard"
+  title?: string
+  sourceNodeId?: string
+  shots?: Array<{
+    title?: string
+    content?: string
+    prompt?: string
+    duration?: string
+    cameraMovement?: string
+    shotType?: string
+  }>
+  description?: string
+}
+
+export type LayoutCanvasAction = {
+  action: "layout_canvas"
+  layout?: "horizontal" | "vertical" | "grid"
+  description?: string
+}
+
 export type DeleteNodeAction = {
   action: "delete_node"
   nodeId?: string
@@ -72,6 +115,10 @@ export type ChatCanvasAction =
   | SelectNodeAction
   | FocusNodeAction
   | RunNodeAction
+  | CreateWorkflowTemplateAction
+  | OpenPanelAction
+  | GenerateStoryboardAction
+  | LayoutCanvasAction
   | DeleteNodeAction
 
 // Action type string literal union (for validation and schema)
@@ -120,6 +167,10 @@ export function getActionLabel(actionType: ChatCanvasActionType): string {
     select_node: "选中节点",
     focus_node: "聚焦节点",
     run_node: "运行节点",
+    create_workflow_template: "创建工作流模板",
+    open_panel: "打开面板",
+    generate_storyboard: "生成分镜",
+    layout_canvas: "整理画布",
     delete_node: "删除节点",
   }
   return labels[actionType] || actionType

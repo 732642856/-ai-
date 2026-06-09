@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { mergeProviderConfig, getAiProviderConfig } from "@/lib/ai/provider-config"
 import type { AiProviderOverrides } from "@/lib/ai/provider-config"
 import { normalizeUpstreamError, normalizeClientError } from "@/lib/ai/errors"
+import { fetchWithTimeout } from "@/lib/ai/server-fetch"
 
 export async function POST(req: NextRequest) {
   let body: Record<string, unknown>
@@ -50,11 +51,8 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), config.timeoutMs)
-
   try {
-    const upstream = await fetch(`${config.baseUrl}/chat/completions`, {
+    const upstream = await fetchWithTimeout(`${config.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${config.apiKey}`,
@@ -66,10 +64,7 @@ export async function POST(req: NextRequest) {
         temperature: temperature ?? 0.7,
         ...(body.response_format ? { response_format: body.response_format } : {}),
       }),
-      signal: controller.signal,
-    })
-
-    clearTimeout(timer)
+    }, config.timeoutMs)
 
     const text = await upstream.text()
 
@@ -89,7 +84,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ content: text, model })
     }
   } catch (error) {
-    clearTimeout(timer)
     const normalized = normalizeClientError(error, config.type)
     return NextResponse.json({ error: normalized }, { status: normalized.status ?? 500 })
   }

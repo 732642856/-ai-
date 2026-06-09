@@ -7,6 +7,7 @@
 // ============================================================================
 
 import { NextRequest } from "next/server"
+import { fetchWithTimeout } from "@/lib/ai/server-fetch"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -155,22 +156,13 @@ export async function POST(req: NextRequest) {
           estimatedDurationMs: estimatedDuration,
         })
 
-        const controllerObj = new AbortController()
-        const timeoutId = setTimeout(() => controllerObj.abort(), FETCH_TIMEOUT_MS)
-
-        let response: Response
-        try {
-          response = await fetch(`${VOXCPM_BASE_URL}/audio/speech`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(voxcpmBody),
-            signal: controllerObj.signal,
-          })
-        } finally {
-          clearTimeout(timeoutId)
-        }
+        const response = await fetchWithTimeout(`${VOXCPM_BASE_URL}/audio/speech`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(voxcpmBody),
+        }, FETCH_TIMEOUT_MS)
 
         if (!response.ok) {
           let errorText: string
