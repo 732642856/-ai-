@@ -22,6 +22,9 @@
     "lint:all": "turbo run lint",
     "typecheck:all": "turbo run typecheck",
     "test:all": "turbo run test",
+    "cli:start": "node scripts/starcanvas-cli.mjs server start",
+    "cli:stop": "node scripts/starcanvas-cli.mjs server stop",
+    "cli:status": "node scripts/starcanvas-cli.mjs server status",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,css}\""
   },
   "devDependencies": {

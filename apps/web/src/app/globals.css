@@ -127,3 +127,65 @@ body {
 .workflow-dragging .backdrop-blur-xl {
   backdrop-filter: none !important;
 }
+
+/* ========================================================================
+ * TASTE-SKILL DESIGN TOKENS
+ * Apple/Linear/Stripe-inspired design system for professional UI
+ * ======================================================================== */
+
+/* Design tokens: spacing, radius, shadow */
+:root {
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
+  --shadow-elevated: 0 4px 12px rgba(0,0,0,0.06), 0 2px 4px rgba(0,0,0,0.04);
+  --shadow-modal: 0 20px 60px rgba(0,0,0,0.12), 0 8px 20px rgba(0,0,0,0.06);
+
+  --color-neutral-50: #f9f9fb;
+  --color-neutral-100: #f2f2f5;
+  --color-neutral-200: #e8e8ed;
+  --color-neutral-600: #86868b;
+  --color-neutral-800: #1d1d1f;
+  --color-neutral-900: #000000;
+
+  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Refine existing styles using new tokens */
+.startrails-flow .react-flow__node {
+  transition: box-shadow var(--transition-fast), opacity var(--transition-fast);
+}
+
+.startrails-flow .react-flow__node:hover {
+  box-shadow: var(--shadow-elevated);
+}
+
+/* Subtle card style for panels */
+.startrails-panel {
+  background: rgba(9, 9, 11, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-modal);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+/* Smooth transitions for interactive elements */
+.startrails-flow-controls button {
+  transition: background var(--transition-fast), transform var(--transition-fast);
+}
+
+.startrails-flow-controls button:active {
+  transform: scale(0.95);
+}

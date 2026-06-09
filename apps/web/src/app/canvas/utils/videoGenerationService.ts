@@ -5,6 +5,8 @@
 // 支持 mock 模式用于本地开发测试。
 // ============================================================================
 
+import * as Sentry from "@sentry/nextjs";
+
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
@@ -12,7 +14,7 @@
 export const VIDEO_GENERATION_TIMEOUT_MS = 300_000  // 5 minutes (video gen is slow)
 
 /** Supported video generation backends */
-export type VideoGenBackend = "seedance" | "kling" | "runway" | "mock"
+export type VideoGenBackend = "seedance" | "kling" | "runway" | "vidu" | "mock"
 
 /** Video generation parameters */
 export interface VideoGenInput {
@@ -44,6 +46,7 @@ export interface VideoGenResult {
     framesGenerated?: number
     fps?: number
     modelVersion?: string
+    taskId?: string
   }
 }
 
@@ -220,6 +223,128 @@ async function klingGenerateVideo(
 }
 
 // ---------------------------------------------------------------------------
+// Vidu API client — 阿里云百炼 Vidu 图生视频
+// ---------------------------------------------------------------------------
+
+/**
+ * Vidu (阿里云百炼) image-to-video API client.
+ *
+ * Calls /api/ai/generate-video-vidu via SSE streaming.
+ * Supports I2V, T2V, and start-end modes.
+ */
+async function viduGenerateVideo(
+  input: VideoGenInput,
+  onProgress?: VideoGenProgressCallback,
+): Promise<VideoGenResult> {
+  return Sentry.startSpan(
+    { op: "video.generate", name: "Vidu SSE Call", attributes: { mode: input.backend || "i2v" } },
+    async (span) => {
+      const res = await fetch("/api/ai/generate-video-vidu", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      mode: "i2v",
+      prompt: input.motionPrompt || "Generate a cinematic video from the image",
+      imageUrl: input.imageUrl,
+      duration: input.durationSeconds ?? 5,
+      resolution: input.resolution === "1080p" ? "1080P" : "720P",
+      size: input.aspectRatio === "9:16" ? "720*1280" : input.aspectRatio === "1:1" ? "1024*1024" : "1280*720",
+    }),
+  })
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "Unknown error")
+    throw new VideoGenerationError({
+      message: `Vidu API error: ${text}`,
+      code: "API_ERROR",
+      status: res.status,
+      retryable: res.status >= 500,
+    })
+  }
+
+  if (!res.body) {
+    throw new VideoGenerationError({
+      message: "Vidu API returned empty body",
+      code: "NETWORK_ERROR",
+      retryable: true,
+    })
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+  let videoUrl = ""
+  let taskId = ""
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split("\n")
+      buffer = lines.pop() || ""
+
+      let eventName = ""
+      let eventData = ""
+
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (trimmed.startsWith("event:")) {
+          eventName = trimmed.slice(6).trim()
+        } else if (trimmed.startsWith("data:")) {
+          eventData = trimmed.slice(5).trim()
+        } else if (trimmed === "" && eventName && eventData) {
+          try {
+            const data = JSON.parse(eventData)
+            if (eventName === "progress") {
+              onProgress?.({
+                stage: data.stage,
+                percent: data.percent,
+                message: data.message,
+                estimatedSecondsRemaining: data.estimatedSecondsRemaining,
+              })
+            } else if (eventName === "result") {
+              videoUrl = data.videoUrl
+              taskId = data.taskId
+            } else if (eventName === "error") {
+              throw new VideoGenerationError({
+                message: data.message || "Vidu generation failed",
+                code: data.code || "API_ERROR",
+                retryable: false,
+              })
+            }
+          } catch (e) {
+            // Ignore malformed events or our own thrown errors
+            if (e instanceof VideoGenerationError) throw e
+          }
+          eventName = ""
+          eventData = ""
+        }
+      }
+    }
+
+    if (!videoUrl) {
+      throw new VideoGenerationError({
+        message: "Vidu API did not return video URL",
+        code: "API_ERROR",
+        retryable: true,
+      })
+    }
+
+    return {
+      videoUrl,
+      durationSeconds: input.durationSeconds ?? 5,
+      backend: "vidu",
+      metadata: { taskId },
+    }
+  } finally {
+    reader.releaseLock()
+  }
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Backend registry
 // ---------------------------------------------------------------------------
 
@@ -228,13 +353,17 @@ const BACKENDS: Record<VideoGenBackend, (input: VideoGenInput, onProgress?: Vide
   seedance: seedanceGenerateVideo,
   kling: klingGenerateVideo,
   runway: mockGenerateVideo, // Runway stub
+  vidu: viduGenerateVideo,
 }
 
 /** Resolve which backend to use */
 function resolveBackend(input: VideoGenInput): VideoGenBackend {
   if (input.backend) return input.backend
 
-  // Auto-detect: prefer seedance if key exists, fallback to mock
+  // Auto-detect: prefer vidu if key exists, then seedance, then kling, fallback to mock
+  if (process.env.NEXT_PUBLIC_DASHSCOPE_API_KEY || process.env.DASHSCOPE_API_KEY || process.env.HUIYAN_API_KEY) {
+    return "vidu"
+  }
   if (process.env.NEXT_PUBLIC_SEEDANCE_API_KEY || process.env.SEEDANCE_API_KEY) {
     return "seedance"
   }
@@ -286,6 +415,7 @@ export async function generateVideoFromImage(
     const result = await generator(input, onProgress)
     return { ...result, backend }
   } catch (error: any) {
+    Sentry.captureException(error)
     if (error?.name === "AbortError") {
       throw new VideoGenerationError({
         message: "视频生成超时，请稍后重试",

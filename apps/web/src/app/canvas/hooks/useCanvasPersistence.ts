@@ -5,6 +5,7 @@
 // ============================================================================
 "use client";
 
+import supermemory from "@/lib/memory/supermemory";
 import { useCallback, useEffect, useRef } from "react";
 import type { Node, Edge } from "@xyflow/react";
 import type { CanvasNodeData } from "../components/canvas/types";
@@ -251,7 +252,8 @@ export function useCanvasPersistence({
 
     (async () => {
       try {
-        const raw = localStorage.getItem(STORAGE_KEY);
+        const saved = await supermemory.get<PersistedCanvas>(STORAGE_KEY);
+        const raw = saved ? JSON.stringify(saved) : null;
         if (!raw) {
           if (!cancelled) onRestored();
           restoredAtRef.current = Date.now();
@@ -268,7 +270,7 @@ export function useCanvasPersistence({
           !Array.isArray(data.edges)
         ) {
           console.warn("[CanvasPersistence] Invalid stored data, clearing");
-          localStorage.removeItem(STORAGE_KEY);
+          await supermemory.delete(STORAGE_KEY);
           if (!cancelled) onRestored();
           restoredAtRef.current = Date.now();
           hasRestoredRef.current = true;
@@ -294,7 +296,7 @@ export function useCanvasPersistence({
       } catch (err) {
         console.error("[CanvasPersistence] Restore failed:", err);
         // If JSON is corrupted, clear it to prevent repeated failures
-        localStorage.removeItem(STORAGE_KEY);
+        await supermemory.delete(STORAGE_KEY);
       }
 
       if (!cancelled) {
@@ -327,7 +329,7 @@ export function useCanvasPersistence({
       clearTimeout(debounceRef.current);
     }
 
-    debounceRef.current = setTimeout(() => {
+    debounceRef.current = setTimeout(async () => {
       try {
         const sanitizedNodes = sanitizeNodesForPersistence(nodes);
 
@@ -362,7 +364,10 @@ export function useCanvasPersistence({
           return;
         }
 
-        localStorage.setItem(STORAGE_KEY, json);
+        await supermemory.set(STORAGE_KEY, payload, {
+          type: "canvas_state",
+          title: "Canvas autosave",
+        });
       } catch (err) {
         console.error("[CanvasPersistence] Save failed:", err);
       }
@@ -378,9 +383,9 @@ export function useCanvasPersistence({
   // ==========================================================================
   // CLEAR persisted canvas
   // ==========================================================================
-  const clearPersistedCanvas = useCallback(() => {
+  const clearPersistedCanvas = useCallback(async () => {
     try {
-      localStorage.removeItem(STORAGE_KEY);
+      await supermemory.delete(STORAGE_KEY);
     } catch {
       // ignore
     }

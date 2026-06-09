@@ -1,6 +1,15 @@
+import { scan } from "react-scan";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import * as Sentry from "@sentry/nextjs";
 import "./globals.css";
+
+if (typeof window !== "undefined") {
+  scan({
+    enabled: process.env.NODE_ENV === "development",
+    showToolbar: true,
+  });
+}
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -32,7 +41,9 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        {children}
+        <Sentry.ErrorBoundary fallback={<div>Something went wrong</div>}>
+          {children}
+        </Sentry.ErrorBoundary>
       </body>
     </html>
   );

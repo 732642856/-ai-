@@ -17,6 +17,7 @@ export type VideoWorkflowNodeKind =
   | "subtitle"
   | "composition"
   | "video-result"
+  | "tts"
 export type StoryboardResultQuality = "composed-grid" | "single-shot" | "fallback-shot"
 
 export type BatchGenerationJobStatus =
@@ -72,6 +73,7 @@ export type CanvasNodeKind =
   | "agent"
   | "subtitle-srt"
   | "handoff-report"
+  | "tts"
 
 // ============================================================================
 // Node Run Status (P1-3 六态模型)
@@ -513,6 +515,57 @@ export type AssetLibraryState = {
 }
 
 // ============================================================================
+// Bible System Types
+// ============================================================================
+export type CharacterBibleData = {
+  id: string
+  name: string
+  aliases?: string[]
+  role?: string
+  visualSignature?: string
+  costume?: string
+  props?: string[]
+  physicalTraits?: string[]
+  colorPalette?: string[]
+  referenceAssetIds?: string[]
+  backstory?: string
+  arcDescription?: string
+  notes?: string
+  referenceImageUrl?: string
+  createdAt: number
+}
+
+export type SceneBibleData = {
+  id: string
+  sceneNumber: number
+  location: string
+  timeOfDay?: string
+  weather?: string
+  atmosphere?: string
+  characters?: string[]
+  props?: string[]
+  lightingStyle?: string
+  colorPalette?: string[]
+  description?: string
+  referenceImageUrl?: string
+  createdAt: number
+}
+
+export type VisualStyleBibleData = {
+  id: string
+  name: string
+  description?: string
+  colorPalette?: string[]
+  lightingStyle?: string
+  aspectRatio?: string
+  filmStock?: string
+  cameraNotes?: string
+  referenceUrls?: string[]
+  moodboardAssetIds?: string[]
+  createdAt: number
+}
+
+// ============================================================================
 // Context Menu Types
 // ============================================================================
 export type ContextMenuState =
@@ -903,5 +956,12 @@ export const nodeToneStyles: Record<CanvasNodeKind, {
     meta: "text-yellow-300/60",
     border: "1px solid rgba(234, 179, 8, 0.3)",
     background: "rgba(234, 179, 8, 0.1)",
+  },
+  tts: {
+    eyebrow: "text-pink-300",
+    body: "text-pink-200/75",
+    meta: "text-pink-300/60",
+    border: "1px solid rgba(236, 72, 153, 0.25)",
+    background: "rgba(236, 72, 153, 0.1)",
   },
 }

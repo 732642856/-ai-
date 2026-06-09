@@ -1,8 +1,17 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useCallback, useState } from "react";
 import type { CharacterAssetLibraryItem, CharacterAssetLibraryPatch } from "@/lib/storyboard/characterAssetLibrary";
 import { formatCharacterIdentityListInput, parseCharacterIdentityListInput } from "@/lib/storyboard/characterIdentitySummary";
+import { CharacterViewPanel } from "./CharacterViewPanel";
+import { PoseReferenceEditor } from "./PoseReferenceEditor";
+
+// FocusEditPanel uses react-canvas-masker which references browser "self" — load client-side only
+const FocusEditPanel = dynamic(
+  () => import("./FocusEditPanel").then((mod) => mod.FocusEditPanel),
+  { ssr: false },
+);
 
 type CharacterAssetLibraryPanelProps = {
   items: CharacterAssetLibraryItem[];
@@ -47,6 +56,8 @@ export function CharacterAssetLibraryPanel({
   onApplyAssetPatch,
 }: CharacterAssetLibraryPanelProps) {
   const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [poseEditorKey, setPoseEditorKey] = useState<string | null>(null);
+  const [focusEditKey, setFocusEditKey] = useState<string | null>(null);
   const [draftByKey, setDraftByKey] = useState<Record<string, CharacterAssetDraft>>({});
   const totalReferences = items.reduce((sum, item) => sum + item.shotCount, 0);
 
@@ -211,6 +222,61 @@ export function CharacterAssetLibraryPanel({
                           {detail}
                         </span>
                       ))}
+                    </div>
+
+                    {/* CharacterViewPanel — 三视图 */}
+                    <div className="mt-2">
+                      <CharacterViewPanel
+                        identity={item as any}
+                        onUpdateViewUrls={(urls) => {
+                          onApplyAssetPatch?.(key, urls as any);
+                        }}
+                      />
+                    </div>
+
+                    {/* PoseReferenceEditor — 姿势参考 */}
+                    {poseEditorKey === key && (
+                      <div className="mt-2 rounded-lg border p-2" style={{ borderColor: "rgba(99,102,241,0.2)", backgroundColor: "rgba(99,102,241,0.04)" }}>
+                        <PoseReferenceEditor onPoseData={(data) => {
+                          console.log("[PoseReference] Generated pose data:", data)
+                          setPoseEditorKey(null)
+                        }} />
+                      </div>
+                    )}
+
+                    {/* FocusEditPanel — 焦点编辑 */}
+                    {focusEditKey === key && item.frontViewUrl && (
+                      <div className="mt-2">
+                        <FocusEditPanel
+                          imageUrl={item.frontViewUrl}
+                          onApplyEdit={(imgUrl, mask, prompt) => {
+                            console.log("[FocusEdit] Apply:", { imgUrl, mask: mask.slice(0, 40) + "...", prompt })
+                            setFocusEditKey(null)
+                          }}
+                          onClose={() => setFocusEditKey(null)}
+                        />
+                      </div>
+                    )}
+
+                    <div className="mt-2 flex gap-1.5">
+                      <button
+                        type="button"
+                        className="rounded-md border px-2 py-0.5 text-[10px] transition-colors hover:bg-white/10"
+                        style={{ borderColor: "rgba(99,102,241,0.3)", color: "#a5b4fc" }}
+                        onClick={() => setPoseEditorKey(poseEditorKey === key ? null : key)}
+                      >
+                        {poseEditorKey === key ? "收起姿势" : "姿势参考"}
+                      </button>
+                      {item.frontViewUrl && (
+                        <button
+                          type="button"
+                          className="rounded-md border px-2 py-0.5 text-[10px] transition-colors hover:bg-white/10"
+                          style={{ borderColor: "rgba(168,85,247,0.3)", color: "#d8b4fe" }}
+                          onClick={() => setFocusEditKey(focusEditKey === key ? null : key)}
+                        >
+                          {focusEditKey === key ? "收起" : "焦点编辑"}
+                        </button>
+                      )}
                     </div>
 
                     <div className="mt-2 line-clamp-2 text-[11px] text-slate-500">

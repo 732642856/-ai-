@@ -62,6 +62,10 @@ import {
   Subtitles,
   Printer,
   Clapperboard,
+  Palette,
+  TrendingUp,
+  UserRound,
+  X,
   type LucideIcon,
 } from "lucide-react";
 
@@ -108,6 +112,8 @@ import { EdgeContextMenu } from "./components/menus/EdgeContextMenu";
 import { ImageHoverToolbar } from "./components/toolbar/ImageHoverToolbar";
 import SelectionToolbar from "./components/toolbar/SelectionToolbar";
 import { LeftToolbar } from "./components/toolbar/LeftToolbar";
+import { ExportDropdown, type ExportActions } from "./components/toolbar/ExportDropdown";
+import { BibleDropdown, type BibleActions } from "./components/toolbar/BibleDropdown";
 import { WorkflowTemplatesDialog } from "./components/toolbar/WorkflowTemplatesDialog";
 import { useWorkflowTemplates, type WorkflowTemplate } from "./hooks/useWorkflowTemplates";
 import { AddNodePanel } from "./components/toolbar/AddNodePanel";
@@ -121,6 +127,11 @@ import {
   type ProjectVisualBible,
   type ProjectVisualBiblePatch,
 } from "./components/panels/ProjectBiblePanel";
+import { CharacterBiblePanel } from "./components/panels/CharacterBiblePanel";
+import { SceneBiblePanel } from "./components/panels/SceneBiblePanel";
+import { VisualStyleBiblePanel } from "./components/panels/VisualStyleBiblePanel";
+import { EmotionCurvePanel } from "./components/panels/EmotionCurvePanel";
+import type { EmotionCurveDataPoint } from "./components/panels/EmotionCurvePanel";
 import { NodeHistoryPanel } from "./components/history/NodeHistoryPanel";
 import { WorkspaceHistoryPanel } from "./components/history/WorkspaceHistoryPanel";
 import { WorkflowRunPanel } from "./components/workflow/WorkflowRunPanel";
@@ -667,6 +678,10 @@ function StarCanvasInner() {
   const [showNodeHistory, setShowNodeHistory] = useState(false);
   const [showScriptImportPanel, setShowScriptImportPanel] = useState(false);
   const [showProjectBiblePanel, setShowProjectBiblePanel] = useState(false);
+  const [showCharacterBiblePanel, setShowCharacterBiblePanel] = useState(false);
+  const [showSceneBiblePanel, setShowSceneBiblePanel] = useState(false);
+  const [showStyleBiblePanel, setShowStyleBiblePanel] = useState(false);
+  const [showEmotionCurve, setShowEmotionCurve] = useState(false);
   const [showCharacterLibrary, setShowCharacterLibrary] = useState(false);
   const [showProductionQueue, setShowProductionQueue] = useState(false);
   const [historyNodeId, setHistoryNodeId] = useState<string | null>(null);
@@ -751,6 +766,48 @@ function StarCanvasInner() {
 
     return [...itemById.values()].sort((a, b) => (a.sceneNumber ?? 9999) - (b.sceneNumber ?? 9999));
   }, [nodes]);
+
+  // 情绪曲线数据：从分镜中的 dramaticWeight / dramaticTension 汇总
+  const emotionCurveData = useMemo<EmotionCurveDataPoint[]>(() => {
+    // 优先从 cinematic shot 的 dramaticWeight 收集
+    const shotWeights = nodes
+      .map((node) => node.data.shot?.cinematicShot?.dramaticWeight)
+      .filter((w): w is number => typeof w === "number");
+
+    if (shotWeights.length > 0) {
+      // 如果已有 cinematic shot 数据，按场景分组
+      const sceneMap = new Map<string, number[]>();
+      for (const node of nodes) {
+        const shot = node.data.shot;
+        if (!shot?.cinematicShot) continue;
+        const sceneId = shot.cinematicShot.sceneId || "default";
+        if (!sceneMap.has(sceneId)) sceneMap.set(sceneId, []);
+        sceneMap.get(sceneId)!.push(shot.cinematicShot.dramaticWeight);
+      }
+      if (sceneMap.size > 0) {
+        return Array.from(sceneMap.entries()).map(([sceneId, weights], index) => {
+          const maxWeight = Math.max(...weights);
+          const avgWeight = weights.reduce((a, b) => a + b, 0) / weights.length;
+          return {
+            sceneIndex: index,
+            tension: Math.round((maxWeight * 0.6 + avgWeight * 0.4) * 10) / 10,
+            label: sceneBibleItems.find((item) => item.id === sceneId)?.location || `场景 ${index + 1}`,
+          };
+        });
+      }
+    }
+
+    // fallback: 用 sceneBibleItems 生成基本曲线
+    return sceneBibleItems.map((item, index) => {
+      const baseTension = Math.min(5 + (index / Math.max(sceneBibleItems.length, 1)) * 4, 9);
+      return {
+        sceneIndex: index,
+        tension: Math.round(baseTension * 10) / 10,
+        label: item.location || `场景 ${index + 1}`,
+        function: item.summary,
+      };
+    });
+  }, [nodes, sceneBibleItems]);
 
   const projectVisualBible = useMemo<ProjectVisualBible>(() => {
     const sourceVisuals = nodes.map((node) => node.data.projectVisualBible).filter(Boolean) as NonNullable<CanvasNodeData["projectVisualBible"]>[];
@@ -6357,168 +6414,64 @@ function StarCanvasInner() {
         onUpdateData={handlePropertyUpdate}
       />
       <div className="relative h-screen w-screen overflow-hidden startrails-flow">
-      <div className="fixed left-20 top-3 z-20 flex items-center gap-2">
+      <div
+        className="fixed left-20 top-3 z-20 flex items-center overflow-x-auto scrollbar-none"
+        style={{ right: chatOpen ? CHAT_PANEL_WIDTH : 0 }}
+      >
+        {/* ── Logo / Title ── */}
         <div
-          className="pointer-events-none rounded-2xl border px-4 py-2 text-xs shadow-lg backdrop-blur-xl"
+          className="pointer-events-none flex items-center gap-2 rounded-2xl border px-3.5 py-2 shadow-lg backdrop-blur-xl"
           style={{
             borderColor: DESIGN_TOKENS.border,
             backgroundColor: "rgba(18,18,24,0.7)",
-            color: DESIGN_TOKENS.textSecondary,
           }}
         >
-          <div className="font-semibold" style={{ color: DESIGN_TOKENS.text }}>
-            星轨画布（前期）
-          </div>
           <div
-            className="mt-0.5 text-[11px]"
-            style={{ color: DESIGN_TOKENS.textMuted }}
+            className="flex h-6 w-6 items-center justify-center rounded-lg"
+            style={{
+              backgroundColor: DESIGN_TOKENS.card,
+            }}
           >
-            创意构思 / 分镜草稿 / 视觉设计 / 项目包交接
+            <Sparkles size={13} strokeWidth={1.8} style={{ color: DESIGN_TOKENS.accent }} />
+          </div>
+          <div>
+            <div className="text-xs font-medium" style={{ color: DESIGN_TOKENS.text }}>
+              星轨画布
+            </div>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={handleExportProjectPackage}
-          className="flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-medium backdrop-blur-xl transition hover:bg-white/10"
-          style={{
-            borderColor: DESIGN_TOKENS.border,
-            backgroundColor: DESIGN_TOKENS.accentSoft,
-            color: DESIGN_TOKENS.textSecondary,
-          }}
-          title="导出 startrails-project.json，交给星轨画布（后期）继续制作"
-        >
-          <Download size={14} strokeWidth={1.7} />
-          <span>导出项目包</span>
-        </button>
-        <button
-          type="button"
-          onClick={handleExportStoryboardPdf}
-          className="flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-medium backdrop-blur-xl transition hover:bg-white/10"
-          style={{
-            borderColor: DESIGN_TOKENS.border,
-            backgroundColor: DESIGN_TOKENS.accentSoft,
-            color: DESIGN_TOKENS.textSecondary,
-          }}
-          title="导出打印优化的分镜本 HTML，浏览器直接「另存为 PDF」即可获得专业分镜本"
-          data-testid="export-storyboard-pdf"
-        >
-          <BookOpen size={14} strokeWidth={1.7} />
-          <span>导出分镜本</span>
-        </button>
-        <button
-          type="button"
-          onClick={handlePrintStoryboardPdf}
-          className="flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-medium backdrop-blur-xl transition hover:bg-white/10"
-          style={{
-            borderColor: DESIGN_TOKENS.border,
-            backgroundColor: DESIGN_TOKENS.accentSoft,
-            color: DESIGN_TOKENS.textSecondary,
-          }}
-          title="一键打印为 PDF，浏览器直接弹出保存对话框"
-          data-testid="print-storyboard-pdf"
-        >
-          <Printer size={14} strokeWidth={1.7} />
-          <span>打印 PDF</span>
-        </button>
-        {/* ── P2: 额外导出格式 ── */}
-        <button
-          type="button"
-          onClick={handleExportScreenplay}
-          className="flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-medium backdrop-blur-xl transition hover:bg-white/10"
-          style={{
-            borderColor: DESIGN_TOKENS.border,
-            backgroundColor: "rgba(18,18,24,0.7)",
-            color: DESIGN_TOKENS.textSecondary,
-          }}
-          title="导出 Markdown 剧本格式，可在任意编辑器打开"
-          data-testid="export-screenplay"
-        >
-          <FileText size={14} strokeWidth={1.7} />
-          <span>剧本</span>
-        </button>
-        <button
-          type="button"
-          onClick={handleExportStoryboardCsv}
-          className="flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-medium backdrop-blur-xl transition hover:bg-white/10"
-          style={{
-            borderColor: DESIGN_TOKENS.border,
-            backgroundColor: "rgba(18,18,24,0.7)",
-            color: DESIGN_TOKENS.textSecondary,
-          }}
-          title="导出分镜表 CSV，可在 Excel / Numbers 中打开"
-          data-testid="export-storyboard-csv"
-        >
-          <Table2 size={14} strokeWidth={1.7} />
-          <span>分镜表</span>
-        </button>
-        <button
-          type="button"
-          onClick={handleExportCharacterCsv}
-          className="flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-medium backdrop-blur-xl transition hover:bg-white/10"
-          style={{
-            borderColor: DESIGN_TOKENS.border,
-            backgroundColor: "rgba(18,18,24,0.7)",
-            color: DESIGN_TOKENS.textSecondary,
-          }}
-          title="导出角色一致性资产表 CSV"
-          data-testid="export-character-csv"
-        >
-          <Table2 size={14} strokeWidth={1.7} />
-          <span>角色表</span>
-        </button>
-        <button
-          type="button"
-          onClick={handleExportSubtitles}
-          className="flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-medium backdrop-blur-xl transition hover:bg-white/10"
-          style={{
-            borderColor: DESIGN_TOKENS.border,
-            backgroundColor: "rgba(18,18,24,0.7)",
-            color: DESIGN_TOKENS.textSecondary,
-          }}
-          title="导出 SRT + VTT 字幕文件（按分镜时间轴）"
-          data-testid="export-subtitles"
-        >
-          <Subtitles size={14} strokeWidth={1.7} />
-          <span>字幕</span>
-        </button>
-        <button
-          type="button"
-          onClick={handleExportCompositionScript}
-          className="flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-medium backdrop-blur-xl transition hover:bg-white/10"
-          style={{
-            borderColor: DESIGN_TOKENS.border,
-            backgroundColor: "rgba(18,18,24,0.7)",
-            color: DESIGN_TOKENS.textSecondary,
-          }}
-          title="导出 FFmpeg 视频合成脚本，本地运行即可生成完整视频"
-          data-testid="export-composition"
-        >
-          <Clapperboard size={14} strokeWidth={1.7} />
-          <span>合成</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setShowProjectBiblePanel((value) => !value)}
-          className="flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-medium backdrop-blur-xl transition hover:bg-white/10"
-          style={{
-            borderColor: showProjectBiblePanel ? "rgba(168, 85, 247, 0.5)" : DESIGN_TOKENS.border,
-            backgroundColor: showProjectBiblePanel ? "rgba(168, 85, 247, 0.18)" : "rgba(18,18,24,0.7)",
-            color: DESIGN_TOKENS.textSecondary,
-          }}
-          title="查看并编辑当前画布汇总出的角色、场景和视觉风格圣经"
-          data-testid="project-bible-toggle"
-        >
-          <BookOpen size={14} strokeWidth={1.7} />
-          <span>Bible {characterLibraryItems.length}/{sceneBibleItems.length}</span>
-        </button>
+
+        {/* ── Separator ── */}
+        <div className="mx-2 h-6 w-px" style={{ backgroundColor: DESIGN_TOKENS.border }} />
+        <ExportDropdown
+          onExportProjectPackage={handleExportProjectPackage}
+          onExportStoryboardPdf={handleExportStoryboardPdf}
+          onPrintStoryboardPdf={handlePrintStoryboardPdf}
+          onExportScreenplay={handleExportScreenplay}
+          onExportStoryboardCsv={handleExportStoryboardCsv}
+          onExportCharacterCsv={handleExportCharacterCsv}
+          onExportSubtitles={handleExportSubtitles}
+          onExportCompositionScript={handleExportCompositionScript}
+        />
+        {/* ── Separator ── */}
+        <div className="mx-2 h-6 w-px" style={{ backgroundColor: DESIGN_TOKENS.border }} />
+        <BibleDropdown
+          characterLibraryCount={characterLibraryItems.length}
+          sceneCount={sceneBibleItems.length}
+          onOpenProjectBible={() => setShowProjectBiblePanel((v) => !v)}
+          onOpenCharacterBible={() => setShowCharacterBiblePanel(true)}
+          onOpenSceneBible={() => setShowSceneBiblePanel(true)}
+          onOpenStyleBible={() => setShowStyleBiblePanel(true)}
+          onToggleEmotionCurve={() => setShowEmotionCurve((v) => !v)}
+        />
         {productionRunQueue && (
           <button
             type="button"
             onClick={() => setShowProductionQueue((value) => !value)}
             className="flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-medium backdrop-blur-xl transition hover:bg-white/10"
             style={{
-              borderColor: showProductionQueue ? "rgba(59, 130, 246, 0.5)" : DESIGN_TOKENS.border,
-              backgroundColor: showProductionQueue ? "rgba(59, 130, 246, 0.18)" : "rgba(18,18,24,0.7)",
+              borderColor: showProductionQueue ? DESIGN_TOKENS.borderStrong : DESIGN_TOKENS.border,
+              backgroundColor: showProductionQueue ? "rgba(255,255,255,0.08)" : "rgba(18,18,24,0.7)",
               color: DESIGN_TOKENS.textSecondary,
             }}
             title="查看当前画布的生产运行队列（视觉/配音/字幕）"
@@ -7521,6 +7474,66 @@ function StarCanvasInner() {
         onApplyScenePatch={handleApplySceneBiblePatch}
         onApplyVisualPatch={handleApplyProjectVisualPatch}
       />
+
+      {/* 详细角色圣经面板 */}
+      {showCharacterBiblePanel && typeof document !== "undefined" &&
+        createPortal(
+          <CharacterBiblePanel
+            isOpen={showCharacterBiblePanel}
+            onClose={() => setShowCharacterBiblePanel(false)}
+          />,
+          document.body,
+        )}
+
+      {/* 详细场景圣经面板 */}
+      {showSceneBiblePanel && typeof document !== "undefined" &&
+        createPortal(
+          <SceneBiblePanel
+            isOpen={showSceneBiblePanel}
+            onClose={() => setShowSceneBiblePanel(false)}
+          />,
+          document.body,
+        )}
+
+      {/* 视觉风格圣经面板 */}
+      {showStyleBiblePanel && typeof document !== "undefined" &&
+        createPortal(
+          <VisualStyleBiblePanel
+            isOpen={showStyleBiblePanel}
+            onClose={() => setShowStyleBiblePanel(false)}
+          />,
+          document.body,
+        )}
+
+      {/* 情绪曲线面板 */}
+      {showEmotionCurve && typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className="fixed bottom-20 right-4 z-50 w-[420px] rounded-xl border shadow-2xl"
+            style={{
+              backgroundColor: "rgba(15, 15, 30, 0.96)",
+              borderColor: "rgba(168, 85, 247, 0.3)",
+              backdropFilter: "blur(12px)",
+            }}
+          >
+            <div className="flex items-center justify-between px-4 pt-3 pb-1">
+              <span className="text-xs font-medium" style={{ color: "rgba(255,255,255,0.8)" }}>
+                情绪曲线
+              </span>
+              <button
+                onClick={() => setShowEmotionCurve(false)}
+                className="rounded p-1 transition hover:bg-white/10"
+                style={{ color: "rgba(255,255,255,0.5)" }}
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <div className="px-4 pb-4">
+              <EmotionCurvePanel data={emotionCurveData} />
+            </div>
+          </div>,
+          document.body,
+        )}
 
       {/* Legacy Character Asset Library Panel */}
       {showCharacterLibrary &&

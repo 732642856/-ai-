@@ -23,16 +23,13 @@ test.describe("StarCanvas startup smoke", () => {
 
     await expect(page.getByRole("heading", { name: "欢迎使用星轨画布" })).toBeVisible()
     await expect(page.getByTestId("empty-guide-import-script")).toBeVisible()
-    await expect(page.getByTestId("empty-guide-create-ai-film-workflow")).toBeVisible()
-
-    await page.getByTestId("canvas-diagnostics-toggle").click()
-    await expect(page.getByTestId("canvas-diagnostics-toggle")).toBeVisible()
+    await expect(page.getByTestId("empty-guide-create-text")).toBeVisible()
 
     await page.evaluate(() => {
       const button = document.querySelector('[data-testid="empty-guide-import-script"]') as HTMLButtonElement | null
       button?.click()
     })
-    await expect(page.getByText("拖拽剧本文件到此处")).toBeVisible()
+    await expect(page.getByTestId("script-import-panel")).toBeVisible()
 
     expect(consoleErrors).toEqual([])
   })

@@ -6,6 +6,7 @@
 import { useCallback, useRef, useState } from "react"
 import { useReactFlow } from "@xyflow/react"
 import type { Node, Edge } from "@xyflow/react"
+import * as Sentry from "@sentry/nextjs"
 import type { CanvasNodeData, CanvasNodeKind, NodeRunMeta, NodeRunSource } from "../components/canvas/types"
 import { useAIUsageStore } from "../features/canvas/usage/useAIUsageStore"
 import { estimateCostUsd } from "../features/canvas/usage/estimateCost"
@@ -31,6 +32,7 @@ import { buildRunRequest } from "@/lib/ai/run-request"
 import { normalizeGenerationError, formatGenerationErrorForDisplay } from "@/lib/ai/normalizeGenerationError"
 import { persistImageDataUrl } from "@/lib/assets/localImageStore"
 import { generateVideoFromImage, VideoGenerationError, videoResultToNodeData } from "../utils/videoGenerationService"
+import { generateTts, ttsResultToNodeData, TtsError, type TtsInput, type TtsProgressCallback } from "../utils/ttsService"
 
 interface RunContext {
   runId: string
@@ -129,8 +131,12 @@ function isVideoGenerationStep(kind: CanvasNodeKind): boolean {
   return kind === "video-generation"
 }
 
+function isTtsStep(kind: CanvasNodeKind): boolean {
+  return kind === "audio"
+}
+
 function isPassThroughStep(kind: CanvasNodeKind): boolean {
-  return ["audio", "composition", "video-result"].includes(kind)
+  return ["composition", "video-result"].includes(kind)
 }
 
 // Build system prompts for each step
@@ -291,7 +297,10 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
     const kind = (node.data.nodeKind || "script") as CanvasNodeKind
     const stepLabel: string = node.data.title || String(kind)
 
-    // Get upstream content from connected nodes
+    return await Sentry.startSpan(
+      { op: "workflow.step.execute", name: stepLabel, attributes: { nodeKind: kind, nodeId: node.id } },
+      async (span) => {
+        // Get upstream content from connected nodes
     const upstreamEdges = edges.filter((e) => e.target === node.id)
     const upstreamContent: string[] = []
 
@@ -470,6 +479,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
           assetId = persisted.assetId
         } catch (err) {
           console.error("[WorkflowRunner] Failed to persist generated image:", err)
+          Sentry.captureException(err)
         }
       }
 
@@ -865,6 +875,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
         }
       } catch (parseErr) {
         console.warn("[Agent] auto-orchestrate failed (JSON parse), Agent output still displayed:", parseErr)
+        Sentry.captureException(parseErr)
       }
 
       return finalOutput
@@ -913,7 +924,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
             imageUrl: sourceImageUrl,
             motionPrompt: motionPrompt || undefined,
             durationSeconds: 5,
-            backend: "mock", // Falls back to mock when no API key
+            backend: (process.env.NEXT_PUBLIC_VIDEO_BACKEND as any) || undefined, // Auto-detect from env, fallback to mock
           },
           (progress) => {
             updateNodeData(node.id, {
@@ -980,7 +991,68 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
     }
 
     // ------------------------------------------------------------------
-    // PASS-THROUGH STEP (audio, composition, video-result)
+    // TTS STEP (audio)
+    // ------------------------------------------------------------------
+    if (isTtsStep(kind)) {
+      try {
+        // 1. 从节点数据中获取文本和声音描述
+        const text = node.data.content || ""
+        const voiceDescription = (node.data as any).voiceDescription || 
+          node.data.shot?.voiceConfig?.instruct || ""
+        
+        if (!text.trim()) {
+          throw new TtsError({
+            message: "文本为空，无法生成配音",
+            code: "TEXT_EMPTY",
+            retryable: false,
+          })
+        }
+
+        updateNodeData(node.id, {
+          runMeta: createRunningRunMeta({ runId: runContext?.runId, message: "语音合成中..." }),
+        })
+
+        const input: TtsInput = {
+          text: text.trim(),
+          voiceDescription: voiceDescription || undefined,
+        }
+
+        const result = await generateTts(input, (progress) => {
+          // 更新进度（通过 message 传递进度信息）
+          updateNodeData(node.id, {
+            runMeta: createRunningRunMeta({
+              runId: runContext?.runId,
+              message: `语音合成中... ${progress.percent}%`,
+            }),
+          })
+        })
+
+        const nodeData = ttsResultToNodeData(result)
+        
+        updateNodeData(node.id, {
+          ...nodeData,
+          content: text.trim(),
+          runMeta: createSucceededRunMeta({
+            runId: runContext?.runId,
+            message: `配音已生成 (${(result.durationMs / 1000).toFixed(1)}s, ${result.backend})`,
+          }),
+        })
+
+        return result.audioBase64
+      } catch (error: any) {
+        updateNodeData(node.id, {
+          runMeta: createFailedRunMeta({
+            runId: runContext?.runId,
+            error: error.message || "TTS 生成失败",
+          }),
+        })
+        Sentry.captureException(error)
+        return ""
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // PASS-THROUGH STEP (composition, video-result)
     // ------------------------------------------------------------------
     if (isPassThroughStep(kind)) {
       updateNodeData(node.id, {
@@ -1000,6 +1072,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
         : "等待上游输入",
     })
     return upstreamText
+      })
   }, [updateNodeData, setNodes, setEdges])
 
   // ==========================================================================
@@ -1151,6 +1224,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
       const normalized = err?.generationError || normalizeGenerationError({ error: err, provider: "copse" })
       const safeError = formatGenerationErrorForDisplay(normalized)
       console.debug("[WorkflowRunner] runNode failed raw:", normalized.raw)
+      Sentry.captureException(err)
 
       const failedRunMeta = createFailedRunMeta({
         error: safeError,
@@ -1359,6 +1433,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
       const normalized = err?.generationError || normalizeGenerationError({ error: err, provider: "copse" })
       const safeError = formatGenerationErrorForDisplay(normalized)
       console.debug("[WorkflowRunner] workflow failed raw:", normalized.raw)
+      Sentry.captureException(err)
       // ── P2-3A: emit run-finished (failed) ───────────────
       onRunEvent?.({
         type: "run-finished",

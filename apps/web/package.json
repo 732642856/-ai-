@@ -17,12 +17,17 @@
   },
   "dependencies": {
     "@creative-canvas/canvas": "workspace:*",
+    "@sentry/nextjs": "^10.56.0",
     "@xyflow/react": "^12.10.0",
     "dagre": "^0.8.5",
     "lucide-react": "^1.16.0",
+    "mammoth": "^1.12.0",
     "next": "16.2.6",
     "react": "19.2.4",
+    "react-canvas-masker": "1.2.0",
     "react-dom": "19.2.4",
+    "react-dropzone": "14.3.0",
+    "recharts": "2.15.0",
     "zustand": "^5.0.9"
   },
   "devDependencies": {

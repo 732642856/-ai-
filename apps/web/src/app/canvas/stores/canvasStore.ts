@@ -14,6 +14,9 @@ import type {
   AssetType,
   AssetItem,
   AssetLibraryState,
+  CharacterBibleData,
+  SceneBibleData,
+  VisualStyleBibleData,
 } from '../components/canvas/types'
 import {
   getPersistedFlag,
@@ -103,6 +106,33 @@ interface CanvasStore {
   // AI auto-run safety
   allowAIAutoRun: boolean
   setAllowAIAutoRun: (value: boolean) => void
+
+  // === Bible System ===
+  bibleCharacters: CharacterBibleData[]
+  selectedBibleCharacterId: string | null
+  biblePanelOpen: boolean
+  openBiblePanel: () => void
+  closeBiblePanel: () => void
+  addBibleCharacter: (character: CharacterBibleData) => void
+  updateBibleCharacter: (id: string, data: Partial<CharacterBibleData>) => void
+  removeBibleCharacter: (id: string) => void
+  selectBibleCharacter: (id: string | null) => void
+
+  bibleScenes: SceneBibleData[]
+  sceneBiblePanelOpen: boolean
+  openSceneBiblePanel: () => void
+  closeSceneBiblePanel: () => void
+  addBibleScene: (scene: SceneBibleData) => void
+  updateBibleScene: (id: string, data: Partial<SceneBibleData>) => void
+  removeBibleScene: (id: string) => void
+
+  bibleStyles: VisualStyleBibleData[]
+  styleBiblePanelOpen: boolean
+  openStyleBiblePanel: () => void
+  closeStyleBiblePanel: () => void
+  addBibleStyle: (style: VisualStyleBibleData) => void
+  updateBibleStyle: (id: string, data: Partial<VisualStyleBibleData>) => void
+  removeBibleStyle: (id: string) => void
 }
 
 // Shared helper for persisting asset library
@@ -216,6 +246,49 @@ export const useCanvasStore = create<CanvasStore>()(
         setPersistedFlag(AI_AUTO_RUN_KEY, String(value))
         set({ allowAIAutoRun: value }, false, 'setAllowAIAutoRun')
       },
+
+      // === Bible System ===
+      bibleCharacters: [],
+      selectedBibleCharacterId: null,
+      biblePanelOpen: false,
+      openBiblePanel: () => set({ biblePanelOpen: true }),
+      closeBiblePanel: () => set({ biblePanelOpen: false, selectedBibleCharacterId: null }),
+      addBibleCharacter: (character) => set((state) => ({
+        bibleCharacters: [...state.bibleCharacters, character],
+        selectedBibleCharacterId: character.id,
+      })),
+      updateBibleCharacter: (id, data) => set((state) => ({
+        bibleCharacters: state.bibleCharacters.map((c) => (c.id === id ? { ...c, ...data } : c)),
+      })),
+      removeBibleCharacter: (id) => set((state) => ({
+        bibleCharacters: state.bibleCharacters.filter((c) => c.id !== id),
+        selectedBibleCharacterId: state.selectedBibleCharacterId === id ? null : state.selectedBibleCharacterId,
+      })),
+      selectBibleCharacter: (id) => set({ selectedBibleCharacterId: id }),
+
+      bibleScenes: [],
+      sceneBiblePanelOpen: false,
+      openSceneBiblePanel: () => set({ sceneBiblePanelOpen: true }),
+      closeSceneBiblePanel: () => set({ sceneBiblePanelOpen: false }),
+      addBibleScene: (scene) => set((state) => ({ bibleScenes: [...state.bibleScenes, scene] })),
+      updateBibleScene: (id, data) => set((state) => ({
+        bibleScenes: state.bibleScenes.map((s) => (s.id === id ? { ...s, ...data } : s)),
+      })),
+      removeBibleScene: (id) => set((state) => ({
+        bibleScenes: state.bibleScenes.filter((s) => s.id !== id),
+      })),
+
+      bibleStyles: [],
+      styleBiblePanelOpen: false,
+      openStyleBiblePanel: () => set({ styleBiblePanelOpen: true }),
+      closeStyleBiblePanel: () => set({ styleBiblePanelOpen: false }),
+      addBibleStyle: (style) => set((state) => ({ bibleStyles: [...state.bibleStyles, style] })),
+      updateBibleStyle: (id, data) => set((state) => ({
+        bibleStyles: state.bibleStyles.map((s) => (s.id === id ? { ...s, ...data } : s)),
+      })),
+      removeBibleStyle: (id) => set((state) => ({
+        bibleStyles: state.bibleStyles.filter((s) => s.id !== id),
+      })),
     }),
     { name: 'canvas' },
   ),
