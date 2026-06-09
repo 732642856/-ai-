@@ -84,12 +84,15 @@ export type CanvasNodeKind =
 // ============================================================================
 // Node Run Status (P1-3 六态模型)
 // ============================================================================
+/** 对标 TapNow 7 状态机: idle → ready → queued → running → done/error + stale */
 export type NodeRunStatus =
   | "idle"
-  | "pending"
+  | "ready"
+  | "queued"
   | "running"
   | "succeeded"
   | "failed"
+  | "stale"
   | "cancelled"
 
 export type NodeRunSource =

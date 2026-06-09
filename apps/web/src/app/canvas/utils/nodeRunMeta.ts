@@ -16,6 +16,35 @@ export function createIdleRunMeta(): NodeRunMeta {
   return { runStatus: "idle" }
 }
 
+/** 对标 TapNow: ready 状态 — 所有必填端口均已连线，可以执行 */
+export function createReadyRunMeta(params?: { message?: string }): NodeRunMeta {
+  return { runStatus: "ready", message: params?.message ?? "待执行" }
+}
+
+/** 对标 TapNow: queued 状态 — 已提交到执行队列，等待资源 */
+export function createQueuedRunMeta(params?: {
+  message?: string
+  source?: NodeRunSource
+}): NodeRunMeta {
+  return {
+    runStatus: "queued",
+    message: params?.message ?? "队列中...",
+    source: params?.source,
+  }
+}
+
+/** 对标 TapNow: stale 状态 — 上游节点已变更，需要重跑 */
+export function createStaleRunMeta(params?: {
+  message?: string
+  upstreamNodeId?: string
+}): NodeRunMeta {
+  return {
+    runStatus: "stale",
+    message: params?.message ?? `上游节点已变更，数据可能过时`,
+    pendingReason: params?.upstreamNodeId,
+  }
+}
+
 export function normalizeRunMeta(
   runMeta?: Partial<NodeRunMeta>,
 ): NodeRunMeta {
@@ -215,7 +244,7 @@ export function normalizeExternalRunStatus(raw: string): NodeRunStatus {
 // ---- 查询函数 ----
 
 export function isNodeBusy(runStatus: NodeRunStatus): boolean {
-  return runStatus === "pending" || runStatus === "running"
+  return runStatus === "pending" || runStatus === "queued" || runStatus === "running"
 }
 
 export function isNodeFinished(runStatus: NodeRunStatus): boolean {
@@ -224,6 +253,10 @@ export function isNodeFinished(runStatus: NodeRunStatus): boolean {
     runStatus === "failed" ||
     runStatus === "cancelled"
   )
+}
+
+export function isNodeStale(runStatus: NodeRunStatus): boolean {
+  return runStatus === "stale"
 }
 
 // ---- 旧字段兼容 ----
