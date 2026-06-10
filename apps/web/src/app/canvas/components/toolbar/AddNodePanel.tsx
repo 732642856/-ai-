@@ -36,6 +36,8 @@ import {
   Workflow,
   Lightbulb,
   BookOpen,
+  ShieldCheck,
+  PenLine,
 } from "lucide-react"
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 import type { CanvasNodeKind } from "../canvas/types"
@@ -45,7 +47,7 @@ import type { CanvasNodeKind } from "../canvas/types"
 // ============================================================================
 
 type AddNodeAction =
-  | { type: "add-node"; nodeType: "content" | "image" | "workflow" | "agent"; nodeKind: CanvasNodeKind }
+  | { type: "add-node"; nodeType: "content" | "image" | "workflow" | "agent" | "sketch"; nodeKind: CanvasNodeKind }
   | { type: "upload-image" }
   | { type: "upload-document" }
   | { type: "import-script" }
@@ -70,7 +72,7 @@ interface AddNodeCategory {
 interface AddNodePanelProps {
   isOpen: boolean
   onClose: () => void
-  onAddNode: (nodeType: "content" | "image" | "workflow" | "agent", nodeKind: CanvasNodeKind) => void
+  onAddNode: (nodeType: "content" | "image" | "workflow" | "agent" | "sketch", nodeKind: CanvasNodeKind) => void
   onUploadImage: () => void
   onUploadDocument?: () => void
   onImportScript?: () => void
@@ -156,6 +158,12 @@ const CATEGORIES: AddNodeCategory[] = [
         title: "空白图片节点",
         description: "先放一个图片容器，再上传或输入提示生成",
         action: { type: "add-node", nodeType: "image", nodeKind: "uploaded-image" },
+      },
+      {
+        icon: PenLine,
+        title: "手绘分镜",
+        description: "鼠标/触控笔画构图草图，自动保存并可导出 PNG",
+        action: { type: "add-node", nodeType: "sketch", nodeKind: "sketch" },
       },
       {
         icon: Wand2,
@@ -267,6 +275,12 @@ const CATEGORIES: AddNodeCategory[] = [
         title: "素材库",
         description: "浏览和管理当前项目素材",
         action: { type: "open-asset-library" },
+      },
+      {
+        icon: ShieldCheck,
+        title: "连续性检查",
+        description: "六维连续性校验：角色/场景/动作/风格/时间/道具",
+        action: { type: "add-node", nodeType: "workflow", nodeKind: "continuity-report" },
       },
     ],
   },

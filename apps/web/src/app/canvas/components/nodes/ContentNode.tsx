@@ -7,6 +7,7 @@ import { memo, useState, useEffect, useRef, useCallback, useMemo } from "react"
 import {
   Sparkles,
   ChevronDown,
+  ChevronUp,
   ArrowUp,
   Loader2,
   X,
@@ -17,6 +18,9 @@ import {
   MessageSquareText,
   Image,
   Download,
+  AlertTriangle,
+  CheckCircle,
+  Info,
 } from "lucide-react"
 import { Handle, Position, NodeResizer, type NodeProps, useReactFlow } from "@xyflow/react"
 import { DESIGN_TOKENS } from "../../styles/designSystem"
@@ -77,12 +81,147 @@ const IMAGE_SIZE_OPTIONS = [
   { value: "1024x1792", label: "竖图", desc: "1024×1792" },
 ]
 
+// ---- 六维连续性检查面板（内嵌组件） ----
+
+interface ContinuityCheckPanelProps {
+  issues: Array<{
+    dimension: string
+    severity: "error" | "warning" | "info"
+    message: string
+    shotId?: string
+    sceneId?: string
+  }>
+  report: string
+}
+
+const DIMENSION_LABELS: Record<string, string> = {
+  character: "角色连续性",
+  scene: "场景连续性",
+  action: "动作连续性",
+  style: "风格连续性",
+  time: "时间连续性",
+  prop: "道具连续性",
+}
+
+const SEVERITY_COLORS = {
+  error: { icon: AlertTriangle, color: "#f87171", bg: "rgba(248, 113, 113, 0.08)", label: "错误" },
+  warning: { icon: AlertTriangle, color: "#fbbf24", bg: "rgba(251, 191, 36, 0.08)", label: "警告" },
+  info: { icon: Info, color: "#60a5fa", bg: "rgba(96, 165, 250, 0.08)", label: "提示" },
+} as const
+
+function ContinuityCheckPanel({ issues, report }: ContinuityCheckPanelProps) {
+  const [expanded, setExpanded] = useState(true)
+  const [showReport, setShowReport] = useState(false)
+
+  const errorCount = issues.filter((i) => i.severity === "error").length
+  const warningCount = issues.filter((i) => i.severity === "warning").length
+  const infoCount = issues.filter((i) => i.severity === "info").length
+  const hasIssues = issues.length > 0
+
+  return (
+    <div className="border-b" style={{ borderColor: "rgba(15, 23, 42, 0.08)" }}>
+      {/* Header */}
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center justify-between px-4 py-2.5 transition-colors hover:bg-slate-50"
+      >
+        <div className="flex items-center gap-2">
+          {hasIssues ? (
+            <AlertTriangle size={14} style={{ color: errorCount > 0 ? "#f87171" : "#fbbf24" }} />
+          ) : (
+            <CheckCircle size={14} style={{ color: "#34d399" }} />
+          )}
+          <span className="text-xs font-medium text-slate-700">六维连续性检查</span>
+          {hasIssues && (
+            <span
+              className="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+              style={{
+                backgroundColor: errorCount > 0 ? "rgba(248,113,113,0.12)" : "rgba(251,191,36,0.12)",
+                color: errorCount > 0 ? "#dc2626" : "#d97706",
+              }}
+            >
+              {issues.length} 项
+            </span>
+          )}
+          {!hasIssues && (
+            <span className="text-[10px] text-emerald-600">全部通过</span>
+          )}
+        </div>
+        {expanded ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
+      </button>
+
+      {/* Body */}
+      {expanded && (
+        <div className="px-4 pb-3">
+          {/* 统计 */}
+          <div className="mb-2 flex items-center gap-3 text-[11px]">
+            {errorCount > 0 && <span style={{ color: "#f87171" }}>● {errorCount} 错误</span>}
+            {warningCount > 0 && <span style={{ color: "#fbbf24" }}>▲ {warningCount} 警告</span>}
+            {infoCount > 0 && <span style={{ color: "#60a5fa" }}>◆ {infoCount} 提示</span>}
+          </div>
+
+          {/* 问题列表 */}
+          {hasIssues && (
+            <div className="flex flex-col gap-1.5 max-h-[240px] overflow-y-auto">
+              {issues.map((issue, idx) => {
+                const config = SEVERITY_COLORS[issue.severity] ?? SEVERITY_COLORS.info
+                const Icon = config.icon
+                const dimLabel = DIMENSION_LABELS[issue.dimension] ?? issue.dimension
+                return (
+                  <div
+                    key={idx}
+                    className="rounded-lg p-2 flex flex-col gap-0.5"
+                    style={{ backgroundColor: config.bg, border: `1px solid ${config.color}22` }}
+                  >
+                    <div className="flex items-center gap-1">
+                      <Icon size={11} style={{ color: config.color }} />
+                      <span className="text-[10px] font-medium" style={{ color: config.color }}>
+                        {dimLabel}
+                      </span>
+                      {issue.shotId && (
+                        <span className="text-[10px] ml-auto text-slate-400">{issue.shotId}</span>
+                      )}
+                    </div>
+                    <p className="text-[11px] leading-4 text-slate-600">{issue.message}</p>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* 完整报告 */}
+          {report && (
+            <div className="mt-2">
+              <button
+                type="button"
+                onClick={() => setShowReport((v) => !v)}
+                className="text-[10px] text-teal-600 underline"
+              >
+                {showReport ? "隐藏" : "查看"}完整报告
+              </button>
+              {showReport && (
+                <pre className="mt-1 whitespace-pre-wrap text-[10px] leading-4 rounded-lg p-2 overflow-x-auto bg-slate-100 text-slate-500">
+                  {report}
+                </pre>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 const STORYBOARD_RUN_STATUS_LABELS: Record<NodeRunStatus, string> = {
   idle: "待开始",
+  ready: "已就绪",
   pending: "准备中",
+  queued: "排队中",
   running: "生成中",
   succeeded: "已完成",
   failed: "失败",
+  stale: "需更新",
   cancelled: "已取消",
 }
 
@@ -811,6 +950,14 @@ export const ContentNode = memo(function ContentNode({ id, data, selected, width
               </div>
             )}
           </div>
+        )}
+
+        {/* 六维连续性检查结果 */}
+        {data.runMeta?.continuityChecked && (
+          <ContinuityCheckPanel
+            issues={data.runMeta.continuityIssues ?? []}
+            report={data.runMeta.continuityReport ?? ""}
+          />
         )}
 
         <div className="relative min-h-0 flex-1 overflow-visible bg-slate-100 px-4 py-4">

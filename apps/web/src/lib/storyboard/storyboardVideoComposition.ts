@@ -20,6 +20,41 @@ import { parseDurationToSeconds } from "./subtitleFormatter";
 // Types
 // ============================================================================
 
+export type TransitionEffect =
+  | "none"
+  | "fade"
+  | "crossfade"
+  | "dissolve"
+  | "slide"
+  | "crosswarp"
+  | "circleopen"
+  | "directionalWipe"
+  | "cube"
+
+export const TRANSITION_EFFECTS: TransitionEffect[] = [
+  "none",
+  "fade",
+  "crossfade",
+  "dissolve",
+  "slide",
+  "crosswarp",
+  "circleopen",
+  "directionalWipe",
+  "cube",
+]
+
+export const TRANSITION_LABELS: Record<TransitionEffect, string> = {
+  none: "无转场",
+  fade: "淡入淡出",
+  crossfade: "交叉溶解",
+  dissolve: "溶解",
+  slide: "滑动",
+  crosswarp: "交叉扭曲",
+  circleopen: "圆形展开",
+  directionalWipe: "方向擦除",
+  cube: "立方体旋转",
+}
+
 export type VideoCompositionInput = {
   /** All shots in composition order */
   briefs: ShotProductionBrief[];
@@ -37,7 +72,7 @@ export type VideoCompositionInput = {
   /** Whether to burn subtitles into video (default true) */
   burnSubtitles?: boolean;
   /** Transition effect between shots */
-  transition?: "none" | "fade" | "dissolve";
+  transition?: TransitionEffect;
   /** Transition duration in seconds (default 0.5) */
   transitionDuration?: number;
 };

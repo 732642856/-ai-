@@ -26,6 +26,21 @@ export type VideoWorkflowNodeKind =
   | "camera-control"
 export type StoryboardResultQuality = "composed-grid" | "single-shot" | "fallback-shot"
 
+export type CameraCommandType = "none" | "push" | "pull" | "pan" | "truck" | "follow"
+
+export type CameraCommand = {
+  type: CameraCommandType
+  startValue?: number
+  endValue?: number
+  duration?: number
+  easing?: "linear" | "ease-in" | "ease-out"
+}
+
+export type ShotCameraConfig = {
+  commands: CameraCommand[]
+  enabled: boolean
+}
+
 export type BatchGenerationJobStatus =
   | "queued"
   | "preparing"
@@ -66,6 +81,7 @@ export type CanvasNodeKind =
   | AgentNodeType
   | VideoWorkflowNodeKind
   | "previs"
+  | "sketch"
   | "uploaded-image"
   | "uploaded-video"
   | "uploaded-audio"
@@ -89,6 +105,7 @@ export type CanvasNodeKind =
 export type NodeRunStatus =
   | "idle"
   | "ready"
+  | "pending"
   | "queued"
   | "running"
   | "succeeded"
@@ -366,6 +383,20 @@ export interface RuntimeMeta {
   childNodeIds?: string[]
 }
 
+export type SketchPoint = {
+  x: number
+  y: number
+  pressure?: number
+  t?: number
+}
+
+export type SketchStroke = {
+  id: string
+  color: string
+  size: number
+  points: SketchPoint[]
+}
+
 export type CanvasNodeData = {
   label?: ReactNode
   title?: string
@@ -403,6 +434,8 @@ export type CanvasNodeData = {
   displayWidth?: number
   displayHeight?: number
   aspectRatio?: number
+  sketchStrokes?: SketchStroke[]
+  sketchImageDataUrl?: string
   createdAt?: number
   uploadedAt?: string
   assetKind?: string
@@ -844,6 +877,13 @@ export const nodeToneStyles: Record<CanvasNodeKind, {
     border: "1px dashed rgba(148, 163, 184, 0.25)",
     background: "rgba(100, 116, 139, 0.06)",
   },
+  sketch: {
+    eyebrow: "text-indigo-300",
+    body: "text-indigo-200/75",
+    meta: "text-indigo-300/60",
+    border: "1px solid rgba(129, 140, 248, 0.25)",
+    background: "rgba(129, 140, 248, 0.1)",
+  },
   previs: {
     eyebrow: "text-slate-300",
     body: "text-slate-200/75",
@@ -1034,6 +1074,11 @@ export const nodeToneStyles: Record<CanvasNodeKind, {
     background: "rgba(249, 115, 22, 0.1)",
   },
   "camera-control": {
+    eyebrow: "text-sky-300",
+    body: "text-sky-200/75",
+    meta: "text-sky-300/60",
+    border: "1px solid rgba(56, 189, 248, 0.25)",
+    background: "rgba(56, 189, 248, 0.1)",
   },
   "continuity-report": {
 

@@ -396,8 +396,8 @@ function extractUpstreamMedia(
       })
     })
 
-    // 兜底：单字段 URL
-    const singleUrl = d.imageUrl ?? d.resultUrl ?? d.assetUrl
+    // 兜底：单字段 URL；SketchNode 的 sketchImageDataUrl 是手绘草图参考图
+    const singleUrl = d.sketchImageDataUrl ?? d.imageUrl ?? d.resultUrl ?? d.assetUrl
     if (singleUrl && outputImages.length === 0 && outputVideos.length === 0) {
       if (isUploadedVideo) {
         videos.push({
@@ -527,8 +527,8 @@ function resolveNodeOutputMention(
     }
   }
 
-  // 兜底：单字段
-  const singleUrl = d?.imageUrl ?? d?.resultUrl
+  // 兜底：单字段；SketchNode 的 sketchImageDataUrl 可作为 @node-output 参考图
+  const singleUrl = d?.sketchImageDataUrl ?? d?.imageUrl ?? d?.resultUrl
   if (singleUrl) {
     return {
       id: `mention-${mention.nodeId}-0`,
@@ -599,7 +599,7 @@ function shouldIncludeSelfImages(
 function extractSelfImages(data: CanvasNodeData): RawMedia[] {
   const images: RawMedia[] = []
 
-  const singleUrl = data.imageUrl ?? data.resultUrl
+  const singleUrl = data.sketchImageDataUrl ?? data.imageUrl ?? data.resultUrl
   if (singleUrl) {
     images.push({
       id: "self-0",
@@ -819,9 +819,9 @@ function buildUpstreamSummaries(
     const imageUrls = extractOutputUrls(d, "image")
     const videoUrls = extractOutputUrls(d, "video")
 
-    // 兜底单字段
+    // 兜底单字段；手绘草图优先作为图片输出摘要
     if (imageUrls.length === 0) {
-      const u = d.imageUrl ?? d.resultUrl
+      const u = d.sketchImageDataUrl ?? d.imageUrl ?? d.resultUrl
       if (u) imageUrls.push(u)
     }
     if (videoUrls.length === 0) {

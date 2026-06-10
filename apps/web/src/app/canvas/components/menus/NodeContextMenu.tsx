@@ -38,6 +38,7 @@ interface NodeContextMenuProps {
   onPreviewImage: () => void
   onCropImage: () => void
   onSaveToAssetLibrary: () => void
+  onAIVariant?: () => void
   onEdit: () => void
   onViewHistory?: () => void
   onRunCurrentNode?: () => void
@@ -118,6 +119,7 @@ export const NodeContextMenu = memo(function NodeContextMenu({
   onPreviewImage,
   onCropImage,
   onSaveToAssetLibrary,
+  onAIVariant,
   onEdit,
   onViewHistory,
   onRunCurrentNode,
@@ -166,7 +168,9 @@ export const NodeContextMenu = memo(function NodeContextMenu({
 
   if (!state || state.type !== "node") return null
 
+  const isSketchNode = nodeKind === "sketch"
   const isImageNode = nodeKind?.includes("image") || nodeKind === "image"
+  const isReferenceImageNode = isImageNode || isSketchNode
   const isDocumentNode = nodeKind === "document"
   const isInspirationNode = nodeKind === "script"
   const isStoryboardSource = nodeKind === "storyboard" || nodeKind === "text" || nodeKind === "prompt"
@@ -429,8 +433,8 @@ export const NodeContextMenu = memo(function NodeContextMenu({
         />
       </div>
 
-      {/* Image-specific Section */}
-      {isImageNode && (
+      {/* Image / Sketch reference Section */}
+      {isReferenceImageNode && (
         <>
           <div
             className="border-b px-3 py-2"
@@ -444,22 +448,36 @@ export const NodeContextMenu = memo(function NodeContextMenu({
             </p>
           </div>
           <div className="py-1">
-            <MenuItem
-              icon={<Eye size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
-              label="预览大图"
-              onClick={() => {
-                onPreviewImage()
-                onClose()
-              }}
-            />
-            <MenuItem
-              icon={<Crop size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
-              label="裁剪"
-              onClick={() => {
-                onCropImage()
-                onClose()
-              }}
-            />
+            {isImageNode && (
+              <>
+                <MenuItem
+                  icon={<Eye size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
+                  label="预览大图"
+                  onClick={() => {
+                    onPreviewImage()
+                    onClose()
+                  }}
+                />
+                <MenuItem
+                  icon={<Crop size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
+                  label="裁剪"
+                  onClick={() => {
+                    onCropImage()
+                    onClose()
+                  }}
+                />
+              </>
+            )}
+            {onAIVariant && (
+              <MenuItem
+                icon={<Wand2 size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
+                label={isSketchNode ? "草图生成参考图" : "AI 变体"}
+                onClick={() => {
+                  onAIVariant()
+                  onClose()
+                }}
+              />
+            )}
             <MenuItem
               icon={<FolderHeart size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
               label="保存到素材库"

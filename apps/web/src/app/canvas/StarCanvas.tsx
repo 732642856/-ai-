@@ -143,6 +143,7 @@ import ImageNode, {
 } from "./components/nodes/ImageNode";
 import ContentNode from "./components/nodes/ContentNode";
 import { ContinuityReportNode } from "./components/nodes/ContinuityReportNode";
+import SketchNode from "./components/nodes/SketchNode";
 import WorkflowNode from "./components/nodes/WorkflowNode";
 import ShotNode from "./components/nodes/ShotNode";
 import StoryboardGridNode from "./components/nodes/StoryboardGridNode";
@@ -295,8 +296,9 @@ const NODE_DEFAULT_SIZE = {
   image: { width: 220, height: 172 },
   workflow: { width: 280, height: 170 },
   agent: { width: 360, height: 300 },
+  sketch: { width: 560, height: 430 },
 } satisfies Record<
-  "content" | "image" | "workflow" | "agent",
+  "content" | "image" | "workflow" | "agent" | "sketch",
   { width: number; height: number }
 >;
 const ZOOM_CONSTRAINTS = {
@@ -473,6 +475,7 @@ const nodeTypes = {
   image: ImageNode,
   content: ContentNode,
   text: ContentNode,
+  sketch: SketchNode,
   "continuity-report": ContinuityReportNode,
   workflow: WorkflowNode,
   shot: ShotNode,
@@ -5262,7 +5265,7 @@ function StarCanvasInner() {
 
   const handleAddNode = useCallback(
     (
-      type: "content" | "image" | "workflow" | "agent",
+      type: "content" | "image" | "workflow" | "agent" | "sketch",
       positionOverride?: { x: number; y: number },
       nodeKind?: CanvasNodeKind,
     ) => {
@@ -5274,7 +5277,9 @@ function StarCanvasInner() {
             ? NODE_DEFAULT_SIZE.workflow
             : type === "image"
               ? NODE_DEFAULT_SIZE.image
-              : NODE_DEFAULT_SIZE.content;
+              : type === "sketch"
+                ? NODE_DEFAULT_SIZE.sketch
+                : NODE_DEFAULT_SIZE.content;
       const position = positionOverride || getCenteredFlowPosition(defaultSize);
       const resolvedNodeKind = nodeKind || getNodeKindFromType(type);
 
@@ -5302,6 +5307,17 @@ function StarCanvasInner() {
                 displayHeight: defaultSize.height,
                 createdAt: Date.now(),
               }
+            : type === "sketch"
+              ? {
+                  title: "手绘分镜",
+                  nodeKind: "sketch" as CanvasNodeKind,
+                  summary: "用手绘快速确定构图、人物站位、镜头运动和动作节奏，可导出 PNG 作为后续 AI 生图参考。",
+                  content: "手绘草图",
+                  sketchStrokes: [],
+                  displayWidth: defaultSize.width,
+                  displayHeight: defaultSize.height,
+                  createdAt: Date.now(),
+                }
             : type === "workflow"
               ? getWorkflowDefaults(resolvedNodeKind)
               : type === "image"
@@ -5467,6 +5483,7 @@ function StarCanvasInner() {
   const getNodeKindFromType = (type?: string): CanvasNodeKind => {
     if (type === "agent") return "agent";
     if (type === "image") return "uploaded-image";
+    if (type === "sketch") return "sketch";
     if (type === "content") return "prompt";
     return "script";
   };
@@ -6354,9 +6371,10 @@ function StarCanvasInner() {
       const node = nodesRef.current.find((n) => n.id === nodeId);
       if (!node) return;
 
-      // Don't persist runtime-only URLs to localStorage
-      let src = node.data.imageUrl || node.data.assetUrl;
-      if (src && (src.startsWith("blob:") || src.startsWith("data:"))) {
+      // Don't persist runtime-only URLs to localStorage, except sketchImageDataUrl:
+      // sketches are intentionally used as lightweight image-to-image references.
+      let src = node.data.sketchImageDataUrl || node.data.imageUrl || node.data.assetUrl;
+      if (src && !node.data.sketchImageDataUrl && (src.startsWith("blob:") || src.startsWith("data:"))) {
         src = undefined;
       }
 
@@ -6380,7 +6398,7 @@ function StarCanvasInner() {
   );
 
   // ========================================================================
-  // AI VARIANT FOR IMAGE NODE
+  // AI VARIANT FOR IMAGE / SKETCH NODE
   // ========================================================================
   const handleAIVariant = useCallback(
     async (nodeId: string) => {
@@ -6388,7 +6406,10 @@ function StarCanvasInner() {
       if (!node) return;
 
       const title = node.data.title || node.data.fileName || "图片";
-      const promptText = `Generate a variation of this image: ${title}`;
+      const isSketchNode = node.data.nodeKind === "sketch" || node.type === "sketch";
+      const promptText = isSketchNode
+        ? `Use this storyboard sketch as composition and blocking reference. Turn it into a polished cinematic key frame while preserving the main layout, camera angle, character positions, action direction, and framing: ${title}`
+        : `Generate a variation of this image: ${title}`;
       const model = await getDefaultImageModel() || "gpt-image-2";
       const size = "1792x1024";
       const requestId = crypto.randomUUID();
@@ -6396,34 +6417,53 @@ function StarCanvasInner() {
 
       try {
         assertImageToImageSupported(capability);
-        if (!node.data.assetId) {
-          throw new Error(
-            "当前图片没有可用的本地资源，请重新上传后再生成变体。",
-          );
-        }
+        let sourceImage: string;
+        let sourceAssetId: string | undefined;
+        let referenceImage: Record<string, unknown>;
 
-        const asset = await getLocalImageAsset(node.data.assetId);
-        if (!asset?.blob) {
-          throw new Error("参考图资源不存在，请重新上传图片。");
-        }
+        if (node.data.sketchImageDataUrl) {
+          sourceImage = node.data.sketchImageDataUrl;
+          referenceImage = {
+            sourceNodeId: nodeId,
+            sourceType: "sketch",
+            mimeType: "image/png",
+            strokeCount: node.data.sketchStrokes?.length ?? 0,
+          };
+        } else {
+          if (!node.data.assetId) {
+            throw new Error(
+              isSketchNode
+                ? "当前手绘节点还没有可用草图，请先绘制草图后再生成参考图。"
+                : "当前图片没有可用的本地资源，请重新上传后再生成变体。",
+            );
+          }
 
-        const prepared = await prepareReferenceImageForGeneration(asset.blob, {
-          maxBytes: capability.maxInputImageBytes,
-          maxSide: capability.maxInputImageSide,
-          mimeType: capability.acceptedInputMimeTypes.includes("image/jpeg")
-            ? "image/jpeg"
-            : "image/webp",
-        });
-        const referenceImage = {
-          assetId: node.data.assetId,
-          sourceNodeId: nodeId,
-          mimeType: prepared.mimeType,
-          width: prepared.width,
-          height: prepared.height,
-          originalByteSize: prepared.originalByteSize,
-          sentByteSize: prepared.byteSize,
-          compressed: prepared.compressed,
-        };
+          const asset = await getLocalImageAsset(node.data.assetId);
+          if (!asset?.blob) {
+            throw new Error("参考图资源不存在，请重新上传图片。");
+          }
+
+          const prepared = await prepareReferenceImageForGeneration(asset.blob, {
+            maxBytes: capability.maxInputImageBytes,
+            maxSide: capability.maxInputImageSide,
+            mimeType: capability.acceptedInputMimeTypes.includes("image/jpeg")
+              ? "image/jpeg"
+              : "image/webp",
+          });
+          sourceImage = prepared.dataUrl;
+          sourceAssetId = node.data.assetId;
+          referenceImage = {
+            assetId: node.data.assetId,
+            sourceNodeId: nodeId,
+            sourceType: "asset",
+            mimeType: prepared.mimeType,
+            width: prepared.width,
+            height: prepared.height,
+            originalByteSize: prepared.originalByteSize,
+            sentByteSize: prepared.byteSize,
+            compressed: prepared.compressed,
+          };
+        }
 
         const generation = createImageGenerationSnapshot({
           requestId,
@@ -6432,7 +6472,7 @@ function StarCanvasInner() {
           model,
           size,
           sourceNodeId: nodeId,
-          sourceAssetId: node.data.assetId,
+          sourceAssetId,
           referenceImage,
         });
 
@@ -6452,7 +6492,7 @@ function StarCanvasInner() {
             model,
             size,
             requestId,
-            sourceImage: prepared.dataUrl,
+            sourceImage,
           }),
         });
 
@@ -6513,7 +6553,7 @@ function StarCanvasInner() {
               revisedPrompt: result.revisedPrompt,
               model: result.model || model,
               size,
-              sourceImageAssetId: node.data.assetId,
+              sourceImageAssetId: sourceAssetId,
               referenceImage,
               requestId,
               endpoint: result.endpoint,
@@ -7669,6 +7709,11 @@ function StarCanvasInner() {
             onSaveToAssetLibrary={() => {
               if (contextMenu?.type === "node") {
                 handleSaveToAssetLibrary(contextMenu.nodeId);
+              }
+            }}
+            onAIVariant={() => {
+              if (contextMenu?.type === "node") {
+                handleAIVariant(contextMenu.nodeId);
               }
             }}
             onEdit={() => {

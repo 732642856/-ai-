@@ -32,6 +32,7 @@ import { buildRunRequest } from "@/lib/ai/run-request"
 import { normalizeGenerationError, formatGenerationErrorForDisplay } from "@/lib/ai/normalizeGenerationError"
 import { persistImageDataUrl } from "@/lib/assets/localImageStore"
 import { generateVideoFromImage, VideoGenerationError, videoResultToNodeData } from "../utils/videoGenerationService"
+import { generateImageFromPrompt } from "../utils/imageGeneration"
 import { generateTts, ttsResultToNodeData, TtsError, type TtsInput, type TtsProgressCallback } from "../utils/ttsService"
 
 interface RunContext {
@@ -137,6 +138,33 @@ function isTtsStep(kind: CanvasNodeKind): boolean {
 
 function isPassThroughStep(kind: CanvasNodeKind): boolean {
   return ["composition", "video-result"].includes(kind)
+}
+
+function collectReferenceImageUrls(
+  node: Node<CanvasNodeData>,
+  allNodes: Node<CanvasNodeData>[],
+  edges: Edge[],
+): string[] {
+  const refs: string[] = []
+  const seen = new Set<string>()
+  const pushRef = (value?: string) => {
+    if (!value || seen.has(value)) return
+    if (value.startsWith("blob:")) return
+    refs.push(value)
+    seen.add(value)
+  }
+
+  pushRef(node.data.sketchImageDataUrl)
+
+  for (const edge of edges.filter((e) => e.target === node.id)) {
+    const upstreamNode = allNodes.find((n) => n.id === edge.source)
+    const data = upstreamNode?.data
+    pushRef(data?.sketchImageDataUrl)
+    pushRef(data?.imageUrl)
+    pushRef(data?.resultUrl)
+  }
+
+  return refs
 }
 
 // Build system prompts for each step
@@ -447,7 +475,8 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
           try {
             const parsed = JSON.parse(finalResult.trim());
             if (Array.isArray(parsed.scenes)) {
-              const shots: Array<{ shotId: string; sceneId: string; instructions: { fragments: Array<{ text: string; characterName?: string }> }> = [];
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const shots: any[] = [];
               for (const scene of parsed.scenes) {
                 const sceneId = scene.sceneId || scene.id || "";
                 if (Array.isArray(scene.shots)) {
@@ -523,40 +552,27 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
       })
 
       const model = runRequest.model
-      const res = await fetch("/api/ai/chat/stream", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(runRequest),
+      const referenceImages = collectReferenceImageUrls(node, allNodes, edges)
+      const finalPrompt = referenceImages.length > 0
+        ? [
+            runRequest.message,
+            "",
+            "Use the connected sketch/reference image(s) as composition and visual guidance. Preserve layout, blocking, camera angle, and action direction unless the prompt explicitly changes them.",
+          ].join("\n")
+        : runRequest.message
+
+      const result = await generateImageFromPrompt({
+        prompt: finalPrompt,
+        model,
+        size: "1792x1024",
+        sourceImage: referenceImages.length > 0 ? referenceImages : undefined,
       })
 
-      if (!res.ok) {
-        const text = await res.text().catch(() => "")
-        const normalized = normalizeGenerationError({ status: res.status, body: text, provider })
-        throw Object.assign(new Error(formatGenerationErrorForDisplay(normalized)), { generationError: normalized })
-      }
-
-      const reader = res.body?.getReader()
-      if (!reader) throw new Error("No response stream")
-
-      let generatedImageUrl: string | null = null
-
-      await readSSEStream(
-        reader,
-        undefined,
-        (imgData) => {
-          generatedImageUrl = imgData.imageUrl
-        }
-      )
-
-      if (!generatedImageUrl) {
-        throw new Error("No image generated")
-      }
-
-      const imageUrl: string = generatedImageUrl
+      const imageUrl: string = result.imageUrl
 
       // Persist base64 image to IndexedDB before storing in node data
       let displayUrl = imageUrl
-      let assetId: string | undefined
+      let assetId: string | undefined = result.assetId
       if (imageUrl.startsWith("data:image")) {
         try {
           const persisted = await persistImageDataUrl(imageUrl, {
@@ -609,7 +625,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
             displayWidth: 280,
             displayHeight: 200,
             runMeta: createSucceededRunMeta({ runId: runContext?.runId, message: "图片已生成" }),
-            summary: `已生成图片 (${runRequest.message.slice(0, 50)}...)`,
+            summary: `已生成图片 (${finalPrompt.slice(0, 50)}...)`,
           })
         } else {
           // Create a new image-result node
@@ -648,7 +664,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
         summary: `图片已生成`,
       })
 
-      return imageUrl
+      return displayUrl
     }
 
     // ------------------------------------------------------------------

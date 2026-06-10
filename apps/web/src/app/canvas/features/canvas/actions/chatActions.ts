@@ -9,7 +9,7 @@
 
 export type CreateNodeAction = {
   action: "create_node"
-  nodeType?: "content" | "image" | "workflow" | "agent"
+  nodeType?: "content" | "image" | "workflow" | "agent" | "sketch"
   nodeKind?: string
   title?: string
   content?: string
@@ -51,6 +51,7 @@ export type RunNodeAction = {
   action: "run_node"
   nodeId?: string
   id?: string
+  title?: string
   description?: string
 }
 

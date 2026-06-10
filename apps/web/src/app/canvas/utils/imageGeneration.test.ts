@@ -65,6 +65,30 @@ describe("generateImageFromPrompt", () => {
     assert.equal(requestBody?.prompt, "a character")
     globalThis.fetch = originalFetch
   })
+
+  it("passes multiple source images for reference-image generation", async () => {
+    let requestBody: Record<string, unknown> | null = null
+    globalThis.fetch = async (_url, opts) => {
+      requestBody = JSON.parse((opts?.body as string) ?? "{}")
+      return new Response(JSON.stringify({
+        imageUrl: "blob:mock",
+        prompt: "test",
+        model: "gpt-image-2",
+      }), { status: 200 })
+    }
+
+    const sourceImages = [
+      "data:image/png;base64,sketch",
+      "data:image/png;base64,character",
+    ]
+    await generateImageFromPrompt({
+      prompt: "turn sketch into cinematic key frame",
+      sourceImage: sourceImages,
+    })
+
+    assert.deepEqual(requestBody?.sourceImage, sourceImages)
+    globalThis.fetch = originalFetch
+  })
 })
 
 describe("retryWithBackoff", () => {

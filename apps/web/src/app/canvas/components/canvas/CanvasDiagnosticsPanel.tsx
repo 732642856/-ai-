@@ -28,10 +28,13 @@ type DiagnosticItem = {
 
 const STATUS_LABELS: Record<NodeRunStatus, string> = {
   idle: "空闲",
+  ready: "就绪",
   pending: "等待确认",
+  queued: "排队中",
   running: "运行中",
   succeeded: "成功",
   failed: "失败",
+  stale: "已过期",
   cancelled: "已取消",
 }
 

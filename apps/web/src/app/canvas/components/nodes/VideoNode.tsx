@@ -28,10 +28,13 @@ interface VideoNodeProps extends NodeProps {
 // ── Status labels ─────────────────────────────────────────────
 const runStatusLabels: Record<NodeRunStatus, string> = {
   idle: "就绪",
+  ready: "已就绪",
   pending: "待确认",
+  queued: "排队中",
   running: "生成中",
   succeeded: "完成",
   failed: "失败",
+  stale: "需更新",
   cancelled: "已取消",
 };
 

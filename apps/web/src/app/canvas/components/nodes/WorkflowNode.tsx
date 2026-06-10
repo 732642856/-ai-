@@ -54,19 +54,25 @@ const workflowLabels: Partial<Record<CanvasNodeKind, string>> = {
 // ── 六态标签 & 样式 ────────────────────────────────────────
 const runStatusLabels: Record<NodeRunStatus, string> = {
   idle: "空闲",
+  ready: "就绪",
   pending: "待确认",
+  queued: "排队中",
   running: "运行中",
   succeeded: "成功",
   failed: "失败",
+  stale: "需更新",
   cancelled: "已取消",
 }
 
 const runStatusClasses: Record<NodeRunStatus, string> = {
   idle: "border-white/10 bg-white/5 text-white/40",
+  ready: "border-emerald-300/20 bg-emerald-400/8 text-emerald-200/70",
   pending: "border-amber-300/30 bg-amber-400/10 text-amber-200/80",
+  queued: "border-sky-300/20 bg-sky-400/8 text-sky-200/70",
   running: "border-amber-300/20 bg-amber-400/8 text-amber-200/80",
   succeeded: "border-emerald-300/20 bg-emerald-400/8 text-emerald-200/80",
   failed: "border-red-300/20 bg-red-400/8 text-red-200/80",
+  stale: "border-orange-300/20 bg-orange-400/10 text-orange-200/75",
   cancelled: "border-zinc-300/20 bg-zinc-400/8 text-zinc-200/60",
 }
 

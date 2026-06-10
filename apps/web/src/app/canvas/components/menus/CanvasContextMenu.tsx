@@ -15,6 +15,7 @@ import {
   Upload,
   Clapperboard,
   Lightbulb,
+  PenLine,
 } from "lucide-react"
 import type { ContextMenuState } from "../canvas/types"
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
@@ -22,7 +23,7 @@ import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 interface CanvasContextMenuProps {
   state: ContextMenuState
   onClose: () => void
-  onAddNode: (type: "content" | "image" | "workflow", position: { x: number; y: number }, nodeKind?: string) => void
+  onAddNode: (type: "content" | "image" | "workflow" | "sketch", position: { x: number; y: number }, nodeKind?: string) => void
   onUploadImage: (position: { x: number; y: number }) => void
   onUploadDocument?: (position: { x: number; y: number }) => void
   onPaste: () => void
@@ -168,6 +169,14 @@ export const CanvasContextMenu = memo(function CanvasContextMenu({
           label="灵感碎片"
           onClick={() => {
             onAddNode("workflow", canvasPosition, "script")
+            onClose()
+          }}
+        />
+        <MenuItem
+          icon={<PenLine size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
+          label="手绘分镜"
+          onClick={() => {
+            onAddNode("sketch", canvasPosition, "sketch")
             onClose()
           }}
         />

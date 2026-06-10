@@ -7,7 +7,7 @@ import { Handle, Position, type HandleProps } from "@xyflow/react";
 import type { PortType } from "../../types/port-types";
 import { PORT_TYPE_COLORS, PORT_TYPE_LABELS } from "../../types/port-types";
 
-interface PortHandleProps extends Omit<HandleProps, "type"> {
+interface PortHandleProps extends HandleProps {
   portType?: PortType;
   portLabel?: string;
 }
