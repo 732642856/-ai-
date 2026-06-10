@@ -84,11 +84,59 @@ function toCanvasNodeContext(node: Node): CanvasNodeContextSnapshot {
   }
 }
 
+/**
+ * 解析 @ 引用格式：@[节点名](node:节点ID)
+ * 同时兼容旧格式 @title 和 @nodeId
+ */
+function parseMentions(input: string): string[] {
+  const ids: string[] = []
+
+  // 匹配新格式 @[title](node:id)
+  const newFormatRegex = /@\[.*?\]\(node:([a-zA-Z0-9_-]+)\)/g
+  let match
+  while ((match = newFormatRegex.exec(input)) !== null) {
+    ids.push(match[1])
+  }
+
+  return ids
+}
+
+/**
+ * 展开消息中的 @ 引用为节点上下文文本
+ * 将 @[title](node:id) 替换为包含节点详细信息的上下文块
+ */
+function expandMentionsInMessage(input: string, nodes: Node[]): string {
+  if (!input.includes("@[")) return input
+
+  let expanded = input
+  const regex = /@\[(.*?)\]\(node:([a-zA-Z0-9_-]+)\)/g
+  let m
+  while ((m = regex.exec(input)) !== null) {
+    const [, title, nodeId] = m
+    const node = nodes.find((n) => n.id === nodeId)
+    if (node) {
+      const data = node.data as Record<string, unknown> | undefined
+      const contextParts: string[] = [`[引用节点: ${title}]`]
+      if (data?.summary) contextParts.push(`摘要: ${data.summary}`)
+      if (data?.content) contextParts.push(`内容: ${typeof data.content === "string" ? data.content.slice(0, 500) : ""}`)
+      if (data?.prompt) contextParts.push(`提示词: ${typeof data.prompt === "string" ? data.prompt.slice(0, 300) : ""}`)
+      if (data?.nodeKind) contextParts.push(`类型: ${data.nodeKind}`)
+      expanded = expanded.replace(m[0], contextParts.filter(Boolean).join("\n"))
+    }
+  }
+  return expanded
+}
+
 function getMentionedNodes(input: string, nodes: Node[]): CanvasNodeContextSnapshot[] {
   if (!input.includes("@")) return []
 
+  const mentionedIds = parseMentions(input)
+
   return nodes
     .filter((node) => {
+      // 精确匹配 node id（新格式）
+      if (mentionedIds.includes(node.id)) return true
+      // 兼容旧格式：@title 或 @nodeId
       const title = getNodeTitle(node)
       return input.includes(`@${title}`) || input.includes(`@${node.id}`)
     })
@@ -345,8 +393,10 @@ export function ChatPanel({
 
       const canvasContext = canvasNodes.slice(0, 30).map(toCanvasNodeContext)
       const mentionedNodes = getMentionedNodes(userMessage.content, canvasNodes)
+      // 展开 @[title](node:id) 引用为详细上下文，再发送给 AI
+      const expandedContent = expandMentionsInMessage(userMessage.content, canvasNodes)
 
-      await sendMessage(userMessage.content, {
+      await sendMessage(expandedContent, {
         selectedNodeId,
         selectedNode: selectedNode ? toCanvasNodeContext(selectedNode) : undefined,
         nodes: canvasContext,

@@ -1,501 +1,373 @@
-// ============================================================================
-// AngleControlPanel - 多角度控制面板组件（TapNow 风格）
-// 通过提示词角度描述合成方案，调整角色朝向和姿态角度
-// ============================================================================
-"use client";
+/**
+ * AngleControlPanel — 运镜参数化控制面板
+ * 独立于节点，提供运镜参数调节、Prompt 自动组合、应用到选中节点
+ */
+"use client"
 
-import { useState, useCallback } from "react";
-import {
-  X,
-  Loader2,
-  RotateCw,
-  ArrowUpDown,
-  Check,
-  Eye,
-} from "lucide-react";
-import { DESIGN_TOKENS } from "../../styles/designSystem";
-import { toDataUrl } from "../../utils/toDataUrl";
+import { useState, useMemo } from "react"
+import { createPortal } from "react-dom"
+import { X, Camera, Check, Sparkles, RotateCcw } from "lucide-react"
+import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
+
+// ============================================================================
+// 参数类型定义
+// ============================================================================
+
+export interface CameraControlParams {
+  /** 景别 */
+  shotSize: string
+  /** 镜头运动 */
+  cameraMovement: string
+  /** 光线类型 */
+  lighting: string
+  /** 色调 */
+  colorTone: string
+  /** 景深 */
+  depthOfField: string
+  /** 画幅比 */
+  aspectRatio: string
+}
 
 interface AngleControlPanelProps {
-  /** 原始图片 URL */
-  imageUrl: string;
-  /** 原始 prompt（用于合成角度提示词） */
-  basePrompt: string;
-  /** 原始 assetId（用于 img2img 参考图） */
-  assetId?: string;
-  /** 生成成功回调（返回新图片 URL） */
-  onResult: (resultImageUrl: string, angleDescription: string) => void;
-  /** 关闭弹窗 */
-  onClose: () => void;
+  isOpen: boolean
+  onClose: () => void
+  /** 选中节点的 ID，用于"应用到选中节点" */
+  selectedNodeId?: string | null
+  /** 应用到节点的回调：参数 + 组合后的 Prompt */
+  onApplyToNode?: (nodeId: string, prompt: string, params: CameraControlParams) => void
 }
 
-// ── 角度描述映射 ──────────────────────────────────────────────────────────
+// ============================================================================
+// 参数选项
+// ============================================================================
 
-/** 水平旋转角度 → 英文角度描述词 */
-function yawToDescription(degrees: number): string {
-  if (degrees <= 15) return "front view, facing the camera directly";
-  if (degrees <= 60) return "three-quarter view, slightly turned to the side";
-  if (degrees <= 120) return "side view, profile, looking to the side";
-  if (degrees <= 165) return "three-quarter back view, mostly seen from behind";
-  return "back view, seen from behind, facing away from camera";
+const SHOT_SIZE_OPTIONS = [
+  { value: "close-up", label: "特写", promptDesc: "close-up shot, strong facial emotion and details" },
+  { value: "medium", label: "中景", promptDesc: "medium shot, upper body visible, balanced composition" },
+  { value: "full", label: "全景", promptDesc: "full body shot, character and environment in frame" },
+  { value: "wide", label: "远景", promptDesc: "wide establishing shot, emphasizes environment scale" },
+]
+
+const CAMERA_MOVEMENT_OPTIONS = [
+  { value: "static", label: "固定", promptDesc: "locked-off camera, stable composition" },
+  { value: "dolly-in", label: "推", promptDesc: "slow dolly in, draws attention to subject" },
+  { value: "dolly-out", label: "拉", promptDesc: "gentle dolly out, reveals broader context" },
+  { value: "pan", label: "摇", promptDesc: "slow pan, horizontal reveal" },
+  { value: "truck", label: "移", promptDesc: "lateral tracking move, side-to-side motion" },
+  { value: "follow", label: "跟", promptDesc: "following camera movement, keeps subject in frame" },
+]
+
+const LIGHTING_OPTIONS = [
+  { value: "natural", label: "自然光", promptDesc: "natural lighting, soft daylight, realistic shadows" },
+  { value: "hard", label: "硬光", promptDesc: "hard lighting, strong contrast, dramatic shadows" },
+  { value: "soft", label: "柔光", promptDesc: "soft lighting, diffused, gentle transitions" },
+  { value: "backlight", label: "逆光", promptDesc: "backlit, rim light, silhouette effect" },
+  { value: "side", label: "侧光", promptDesc: "side lighting, chiaroscuro, deep shadows" },
+]
+
+const COLOR_TONE_OPTIONS = [
+  { value: "warm", label: "暖调", promptDesc: "warm color palette, golden hour tones, amber highlights" },
+  { value: "cool", label: "冷调", promptDesc: "cool color palette, blue tones, clinical feel" },
+  { value: "vintage", label: "复古", promptDesc: "vintage color grade, faded tones, retro film look" },
+  { value: "film", label: "胶片", promptDesc: "film stock aesthetic, cinematic color grading" },
+]
+
+const DEPTH_OF_FIELD_OPTIONS = [
+  { value: "shallow", label: "浅景深", promptDesc: "shallow depth of field, bokeh background" },
+  { value: "medium", label: "中等", promptDesc: "moderate depth of field, subject in focus with readable background" },
+  { value: "deep", label: "深景深", promptDesc: "deep depth of field, everything in sharp focus" },
+]
+
+const ASPECT_RATIO_OPTIONS = [
+  { value: "16:9", label: "16:9 横屏", size: "1920x1080" },
+  { value: "9:16", label: "9:16 竖屏", size: "1080x1920" },
+  { value: "4:3", label: "4:3 经典", size: "1600x1200" },
+  { value: "1:1", label: "1:1 方形", size: "1024x1024" },
+]
+
+// ============================================================================
+// 默认参数
+// ============================================================================
+
+const DEFAULT_PARAMS: CameraControlParams = {
+  shotSize: "medium",
+  cameraMovement: "static",
+  lighting: "natural",
+  colorTone: "warm",
+  depthOfField: "medium",
+  aspectRatio: "16:9",
 }
 
-/** 水平旋转角度 → 中文角度描述 */
-function yawToChinese(degrees: number): string {
-  if (degrees <= 15) return "正面";
-  if (degrees <= 60) return "四分之三侧面";
-  if (degrees <= 120) return "正侧面";
-  if (degrees <= 165) return "四分之三背面";
-  return "背面";
-}
+// ============================================================================
+// 组件
+// ============================================================================
 
-/** 俯仰角度 → 英文描述词 */
-function pitchToDescription(degrees: number): string | null {
-  if (degrees <= -20) return "view from above, looking down, high angle shot";
-  if (degrees <= -8) return "slightly from above, looking down slightly";
-  if (degrees >= 20) return "view from below, looking up, low angle shot";
-  if (degrees >= 8) return "slightly from below, looking up slightly";
-  return null;
-}
-
-/** 俯仰角度 → 中文描述 */
-function pitchToChinese(degrees: number): string | null {
-  if (degrees <= -20) return "俯视";
-  if (degrees <= -8) return "微俯";
-  if (degrees >= 20) return "仰视";
-  if (degrees >= 8) return "微仰";
-  return null;
-}
-
-/** 合成完整的角度描述文本（中文，用于展示） */
-function buildAngleLabel(yaw: number, pitch: number): string {
-  const yawLabel = yawToChinese(yaw);
-  const pitchLabel = pitchToChinese(pitch);
-  if (pitchLabel) return `${yawLabel} · ${pitchLabel}`;
-  return yawLabel;
-}
-
-/** 合成角度英文描述（用于注入 prompt） */
-function buildAnglePromptSuffix(yaw: number, pitch: number): string {
-  const parts: string[] = [];
-  const pitchDesc = pitchToDescription(pitch);
-  if (pitchDesc) parts.push(pitchDesc);
-  parts.push(yawToDescription(yaw));
-  return parts.join(", ");
-}
-
-// ── 角度刻度标记 ──────────────────────────────────────────────────────────
-
-const YAW_MARKS = [
-  { value: 0, label: "0°" },
-  { value: 45, label: "45°" },
-  { value: 90, label: "90°" },
-  { value: 135, label: "135°" },
-  { value: 180, label: "180°" },
-];
-
-const PITCH_MARKS = [
-  { value: -30, label: "-30°" },
-  { value: -15, label: "-15°" },
-  { value: 0, label: "0°" },
-  { value: 15, label: "15°" },
-  { value: 30, label: "30°" },
-];
-
-// ── 组件 ──────────────────────────────────────────────────────────────────
-
-export default function AngleControlPanel({
-  imageUrl,
-  basePrompt,
-  onResult,
+export function AngleControlPanel({
+  isOpen,
   onClose,
+  selectedNodeId,
+  onApplyToNode,
 }: AngleControlPanelProps) {
-  const [yaw, setYaw] = useState(0); // 0~180 水平旋转
-  const [pitch, setPitch] = useState(0); // -30~+30 俯仰
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [resultUrl, setResultUrl] = useState<string | null>(null);
-  const [resultAngleDesc, setResultAngleDesc] = useState("");
+  const [params, setParams] = useState<CameraControlParams>(DEFAULT_PARAMS)
+  const [applied, setApplied] = useState(false)
 
-  const angleLabel = buildAngleLabel(yaw, pitch);
-  const anglePromptSuffix = buildAnglePromptSuffix(yaw, pitch);
+  // 自动组合 Prompt
+  const combinedPrompt = useMemo(() => {
+    const shot = SHOT_SIZE_OPTIONS.find((o) => o.value === params.shotSize)!
+    const move = CAMERA_MOVEMENT_OPTIONS.find((o) => o.value === params.cameraMovement)!
+    const light = LIGHTING_OPTIONS.find((o) => o.value === params.lighting)!
+    const tone = COLOR_TONE_OPTIONS.find((o) => o.value === params.colorTone)!
+    const dof = DEPTH_OF_FIELD_OPTIONS.find((o) => o.value === params.depthOfField)!
 
-  // 点击"生成"按钮
-  const handleGenerate = useCallback(async () => {
-    setIsGenerating(true);
-    setError(null);
+    const parts = [
+      `Shot: ${shot.promptDesc}.`,
+      `Camera: ${move.promptDesc}.`,
+      `Lighting: ${light.promptDesc}.`,
+      `Color: ${tone.promptDesc}.`,
+      `Depth of field: ${dof.promptDesc}.`,
+      `Aspect ratio: ${params.aspectRatio}`,
+    ]
 
-    try {
-      // 合成最终 prompt: base prompt + 角度描述
-      const angleDesc = buildAnglePromptSuffix(yaw, pitch);
-      const finalPrompt = basePrompt.trim()
-        ? `${basePrompt.trim()}, ${angleDesc}`
-        : angleDesc;
+    return parts.join(" ")
+  }, [params])
 
-      const body: Record<string, unknown> = {
-        prompt: finalPrompt,
-        model: "gpt-image-2",
-        size: "1024x1024",
-        requestId: crypto.randomUUID(),
-      };
-
-      // 将 imageUrl 转为 data URL，作为 img2img 参考图以保持角色一致性
-      try {
-        const sourceImage = await toDataUrl(imageUrl);
-        body.sourceImage = sourceImage;
-      } catch {
-        // 转换失败则降级为纯文本生成
-        console.warn("[AngleControl] 无法获取参考图 data URL，降级为纯文本生成");
-      }
-
-      const res = await fetch("/api/ai/generate-image", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(
-          typeof errData.error === "string"
-            ? errData.error
-            : errData.error?.userMessage || "生成失败",
-        );
-      }
-
-      const result = await res.json();
-      if (!result.imageUrl) throw new Error("No image data returned");
-
-      setResultUrl(result.imageUrl);
-      setResultAngleDesc(angleLabel);
-    } catch (err: any) {
-      setError(err?.message || "生成失败");
-    } finally {
-      setIsGenerating(false);
+  // 应用到选中节点
+  const handleApply = () => {
+    if (selectedNodeId && onApplyToNode) {
+      onApplyToNode(selectedNodeId, combinedPrompt, params)
+      setApplied(true)
+      setTimeout(() => setApplied(false), 2000)
     }
-  }, [yaw, pitch, basePrompt, imageUrl, angleLabel]);
+  }
 
-  const handleApply = useCallback(() => {
-    if (resultUrl) {
-      onResult(resultUrl, resultAngleDesc);
-      onClose();
-    }
-  }, [resultUrl, resultAngleDesc, onResult, onClose]);
+  // 重置参数
+  const handleReset = () => {
+    setParams(DEFAULT_PARAMS)
+    setApplied(false)
+  }
 
-  return (
-    <>
+  // 更新参数辅助函数
+  const updateParam = <K extends keyof CameraControlParams>(
+    key: K,
+    value: CameraControlParams[K]
+  ) => {
+    setParams((prev) => ({ ...prev, [key]: value }))
+    setApplied(false)
+  }
+
+  if (!isOpen) return null
+  if (typeof document === "undefined") return null
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
       <div
-        className="fixed inset-0 z-40"
-        style={{
-          backgroundColor: "rgba(0,0,0,0.6)",
-          backdropFilter: "blur(4px)",
-        }}
+        className="absolute inset-0"
+        style={{ backgroundColor: "rgba(0,0,0,0.6)" }}
         onClick={onClose}
       />
 
-      {/* Dialog */}
+      {/* Panel */}
       <div
-        className="fixed left-1/2 top-1/2 z-50 flex max-h-[85vh] w-[720px] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border shadow-2xl"
+        className="relative z-10 w-[480px] max-h-[90vh] overflow-hidden rounded-2xl border flex flex-col"
         style={{
           backgroundColor: DESIGN_TOKENS.panelSolid,
           borderColor: DESIGN_TOKENS.border,
         }}
       >
-        {/* ── Header ── */}
+        {/* Header */}
         <div
-          className="flex items-center justify-between border-b px-4 py-3"
+          className="flex items-center justify-between p-4 border-b shrink-0"
           style={{ borderColor: DESIGN_TOKENS.border }}
         >
           <div className="flex items-center gap-2">
-            <RotateCw
-              size={18}
-              strokeWidth={1.5}
-              style={{ color: DESIGN_TOKENS.accent }}
-            />
-            <span
-              className="text-sm font-medium"
-              style={{ color: DESIGN_TOKENS.textPrimary }}
-            >
-              多角度控制
-            </span>
-            <span
-              className="text-xs"
-              style={{ color: DESIGN_TOKENS.textMuted }}
-            >
-              · 拖拽滑条调整角色朝向
-            </span>
+            <Camera size={18} strokeWidth={ICON_CONFIG.strokeWidth} style={{ color: DESIGN_TOKENS.accent }} />
+            <h3 className="text-sm font-medium" style={{ color: DESIGN_TOKENS.text }}>
+              运镜参数控制
+            </h3>
           </div>
-          <button
-            onClick={onClose}
-            className="rounded-lg p-1.5 transition-colors hover:bg-white/10"
-            style={{ color: DESIGN_TOKENS.textMuted }}
-          >
-            <X size={16} strokeWidth={1.5} />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={handleReset}
+              className="rounded-lg p-1.5 transition-colors hover:bg-white/10"
+              title="重置参数"
+            >
+              <RotateCcw size={14} strokeWidth={1.5} style={{ color: DESIGN_TOKENS.textMuted }} />
+            </button>
+            <button onClick={onClose} className="rounded-lg p-1 transition-colors hover:bg-white/10">
+              <X size={16} strokeWidth={ICON_CONFIG.strokeWidth} style={{ color: DESIGN_TOKENS.textMuted }} />
+            </button>
+          </div>
         </div>
 
-        {/* ── Body ── */}
-        <div className="flex flex-1 gap-5 overflow-auto p-5">
-          {/* Left: Original image + control sliders */}
-          <div className="flex min-w-0 flex-1 flex-col gap-4">
-            {/* Original image preview */}
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* 景别 */}
+          <ParamSelectField
+            label="景别"
+            options={SHOT_SIZE_OPTIONS}
+            value={params.shotSize}
+            onChange={(v) => updateParam("shotSize", v)}
+          />
+
+          {/* 镜头运动 */}
+          <ParamSelectField
+            label="镜头运动"
+            options={CAMERA_MOVEMENT_OPTIONS}
+            value={params.cameraMovement}
+            onChange={(v) => updateParam("cameraMovement", v)}
+          />
+
+          {/* 光线类型 */}
+          <ParamSelectField
+            label="光线类型"
+            options={LIGHTING_OPTIONS}
+            value={params.lighting}
+            onChange={(v) => updateParam("lighting", v)}
+          />
+
+          {/* 色调 */}
+          <ParamSelectField
+            label="色调"
+            options={COLOR_TONE_OPTIONS}
+            value={params.colorTone}
+            onChange={(v) => updateParam("colorTone", v)}
+          />
+
+          {/* 景深 */}
+          <ParamSelectField
+            label="景深"
+            options={DEPTH_OF_FIELD_OPTIONS}
+            value={params.depthOfField}
+            onChange={(v) => updateParam("depthOfField", v)}
+          />
+
+          {/* 画幅比 */}
+          <div>
+            <label className="mb-1.5 block text-xs font-medium" style={{ color: DESIGN_TOKENS.textSecondary }}>
+              画幅比
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              {ASPECT_RATIO_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => updateParam("aspectRatio", opt.value)}
+                  className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-all"
+                  style={{
+                    borderColor: params.aspectRatio === opt.value ? DESIGN_TOKENS.accent : DESIGN_TOKENS.border,
+                    backgroundColor: params.aspectRatio === opt.value ? DESIGN_TOKENS.accentSoft : "transparent",
+                    color: params.aspectRatio === opt.value ? DESIGN_TOKENS.accent : DESIGN_TOKENS.textSecondary,
+                  }}
+                >
+                  <span className="font-medium">{opt.label}</span>
+                  <span className="text-[10px]" style={{ color: DESIGN_TOKENS.textMuted }}>
+                    {opt.size}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 组合 Prompt 预览 */}
+          <div>
+            <label className="mb-1.5 block text-xs font-medium" style={{ color: DESIGN_TOKENS.textSecondary }}>
+              组合 Prompt 预览
+            </label>
             <div
-              className="flex items-center justify-center overflow-hidden rounded-xl"
+              className="rounded-xl border p-3"
               style={{
                 backgroundColor: "rgba(0,0,0,0.3)",
-                border: `1px solid ${DESIGN_TOKENS.border}`,
-                minHeight: "260px",
-                maxHeight: "320px",
+                borderColor: DESIGN_TOKENS.border,
               }}
             >
-              <img
-                src={imageUrl}
-                alt="原始图片"
-                className="max-h-[320px] w-full object-contain"
-              />
-            </div>
-
-            {/* Horizontal (yaw) slider */}
-            <div className="rounded-xl border p-4" style={{ borderColor: DESIGN_TOKENS.border }}>
-              <div className="mb-2 flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <RotateCw size={14} strokeWidth={1.5} style={{ color: DESIGN_TOKENS.textSecondary }} />
-                  <span
-                    className="text-xs font-medium"
-                    style={{ color: DESIGN_TOKENS.textSecondary }}
-                  >
-                    水平旋转
-                  </span>
-                </div>
-                <span
-                  className="text-xs font-mono"
-                  style={{ color: DESIGN_TOKENS.accentHover }}
-                >
-                  {yaw}°
-                </span>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={180}
-                value={yaw}
-                onChange={(e) => setYaw(Number(e.target.value))}
-                className="w-full accent-slate-400"
-                style={{ cursor: "pointer", height: "6px" }}
-              />
-              {/* Marks */}
-              <div className="mt-1 flex justify-between px-0.5">
-                {YAW_MARKS.map((mark) => (
-                  <button
-                    key={mark.value}
-                    onClick={() => setYaw(mark.value)}
-                    className="text-[10px] transition-colors hover:text-white/80"
-                    style={{
-                      color:
-                        yaw === mark.value
-                          ? DESIGN_TOKENS.accentHover
-                          : DESIGN_TOKENS.textMuted,
-                      fontWeight: yaw === mark.value ? 600 : 400,
-                    }}
-                  >
-                    {mark.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Vertical (pitch) slider */}
-            <div className="rounded-xl border p-4" style={{ borderColor: DESIGN_TOKENS.border }}>
-              <div className="mb-2 flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <ArrowUpDown size={14} strokeWidth={1.5} style={{ color: DESIGN_TOKENS.textSecondary }} />
-                  <span
-                    className="text-xs font-medium"
-                    style={{ color: DESIGN_TOKENS.textSecondary }}
-                  >
-                    俯仰角度
-                  </span>
-                </div>
-                <span
-                  className="text-xs font-mono"
-                  style={{ color: DESIGN_TOKENS.accentHover }}
-                >
-                  {pitch > 0 ? `+${pitch}°` : `${pitch}°`}
-                </span>
-              </div>
-              <input
-                type="range"
-                min={-30}
-                max={30}
-                value={pitch}
-                onChange={(e) => setPitch(Number(e.target.value))}
-                className="w-full accent-slate-400"
-                style={{ cursor: "pointer", height: "6px" }}
-              />
-              {/* Marks */}
-              <div className="mt-1 flex justify-between px-0.5">
-                {PITCH_MARKS.map((mark) => (
-                  <button
-                    key={mark.value}
-                    onClick={() => setPitch(mark.value)}
-                    className="text-[10px] transition-colors hover:text-white/80"
-                    style={{
-                      color:
-                        pitch === mark.value
-                          ? DESIGN_TOKENS.accentHover
-                          : DESIGN_TOKENS.textMuted,
-                      fontWeight: pitch === mark.value ? 600 : 400,
-                    }}
-                  >
-                    {mark.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Right: Control info + Generate + Preview */}
-          <div className="flex w-[240px] flex-shrink-0 flex-col gap-3">
-            {/* Angle description display */}
-            <div
-              className="rounded-xl border p-3"
-              style={{ borderColor: DESIGN_TOKENS.border }}
-            >
-              <div className="mb-1.5 flex items-center gap-1.5">
-                <Eye size={13} strokeWidth={1.5} style={{ color: DESIGN_TOKENS.textSecondary }} />
-                <span
-                  className="text-[11px] font-medium"
-                  style={{ color: DESIGN_TOKENS.textSecondary }}
-                >
-                  当前角度
-                </span>
-              </div>
-              <div
-                className="rounded-lg px-3 py-2 text-center text-sm font-medium"
-                style={{
-                  backgroundColor: "rgba(100, 116, 139, 0.15)",
-                  color: DESIGN_TOKENS.accentHover,
-                }}
-              >
-                {angleLabel}
-              </div>
-              <div
-                className="mt-2 text-[10px] leading-relaxed"
+              <p className="text-xs leading-relaxed" style={{ color: DESIGN_TOKENS.textSecondary }}>
+                {combinedPrompt}
+              </p>
+              <button
+                onClick={() => navigator.clipboard.writeText(combinedPrompt)}
+                className="mt-2 text-[10px] transition-colors hover:text-white"
                 style={{ color: DESIGN_TOKENS.textMuted }}
               >
-                {anglePromptSuffix}
-              </div>
+                复制 Prompt
+              </button>
             </div>
-
-            {/* Prompt preview */}
-            <div
-              className="rounded-xl border p-3"
-              style={{ borderColor: DESIGN_TOKENS.border }}
-            >
-              <span
-                className="mb-1 block text-[11px] font-medium"
-                style={{ color: DESIGN_TOKENS.textSecondary }}
-              >
-                合成提示词预览
-              </span>
-              <div
-                className="max-h-[80px] overflow-y-auto text-[11px] leading-relaxed"
-                style={{ color: DESIGN_TOKENS.textMuted }}
-              >
-                {basePrompt.trim()
-                  ? `${basePrompt.trim()}, ${anglePromptSuffix}`
-                  : anglePromptSuffix}
-              </div>
-            </div>
-
-            {/* Generate button */}
-            <button
-              onClick={handleGenerate}
-              disabled={isGenerating}
-              className="flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-medium transition-all disabled:opacity-40"
-              style={{
-                backgroundColor: DESIGN_TOKENS.accent,
-                color: "#fff",
-              }}
-            >
-              {isGenerating ? (
-                <>
-                  <Loader2 size={16} className="animate-spin" />
-                  <span>生成中...</span>
-                </>
-              ) : (
-                <>
-                  <RotateCw size={16} strokeWidth={1.5} />
-                  <span>生成</span>
-                </>
-              )}
-            </button>
-
-            {/* Result preview */}
-            {resultUrl && (
-              <div
-                className="rounded-xl border p-3"
-                style={{ borderColor: "rgba(16, 185, 129, 0.3)" }}
-              >
-                <span
-                  className="mb-1.5 block text-[11px] font-medium"
-                  style={{ color: "#34d399" }}
-                >
-                  生成结果 · {resultAngleDesc}
-                </span>
-                <div
-                  className="mb-2 flex items-center justify-center overflow-hidden rounded-lg"
-                  style={{
-                    backgroundColor: "rgba(0,0,0,0.2)",
-                    minHeight: "120px",
-                  }}
-                >
-                  <img
-                    src={resultUrl}
-                    alt="生成结果"
-                    className="max-h-[180px] w-full object-contain"
-                  />
-                </div>
-                <button
-                  onClick={handleApply}
-                  className="flex w-full items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-medium transition-colors hover:opacity-80"
-                  style={{
-                    backgroundColor: "rgba(16, 185, 129, 0.2)",
-                    color: "#34d399",
-                  }}
-                >
-                  <Check size={14} strokeWidth={1.5} />
-                  <span>应用结果</span>
-                </button>
-              </div>
-            )}
-
-            {/* Error */}
-            {error && (
-              <div
-                className="rounded-lg px-3 py-2"
-                style={{ backgroundColor: "rgba(239,68,68,0.1)" }}
-              >
-                <span className="text-[11px] text-red-300/70">{error}</span>
-              </div>
-            )}
           </div>
         </div>
 
-        {/* ── Footer hint ── */}
+        {/* Footer */}
         <div
-          className="border-t px-4 py-2"
+          className="flex items-center justify-between p-4 border-t shrink-0"
           style={{ borderColor: DESIGN_TOKENS.border }}
         >
-          <div
-            className="text-[11px]"
-            style={{ color: DESIGN_TOKENS.textMuted }}
-          >
-            提示：通过调整水平旋转和俯仰角度，生成角色不同朝向的图片。无需修改提示词即可切换视角。
+          <div className="text-xs" style={{ color: DESIGN_TOKENS.textMuted }}>
+            {selectedNodeId ? "已选中节点" : "请先选中一个节点"}
           </div>
+          <button
+            onClick={handleApply}
+            disabled={!selectedNodeId}
+            className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-medium transition-all"
+            style={{
+              backgroundColor: selectedNodeId ? DESIGN_TOKENS.accent : DESIGN_TOKENS.accentSoft,
+              color: selectedNodeId ? "#fff" : DESIGN_TOKENS.textMuted,
+              opacity: selectedNodeId ? 1 : 0.5,
+              cursor: selectedNodeId ? "pointer" : "not-allowed",
+            }}
+          >
+            {applied ? (
+              <>
+                <Check size={14} strokeWidth={1.5} />
+                已应用
+              </>
+            ) : (
+              <>
+                <Sparkles size={14} strokeWidth={1.5} />
+                应用到选中节点
+              </>
+            )}
+          </button>
         </div>
       </div>
-    </>
-  );
+    </div>,
+    document.body
+  )
+}
+
+// ============================================================================
+// 辅助组件：参数选择下拉
+// ============================================================================
+
+function ParamSelectField({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string
+  options: { value: string; label: string; promptDesc?: string }[]
+  value: string
+  onChange: (v: string) => void
+}) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-xs font-medium" style={{ color: DESIGN_TOKENS.textSecondary }}>
+        {label}
+      </label>
+      <div className="flex flex-wrap gap-1.5">
+        {options.map((opt) => (
+          <button
+            key={opt.value}
+            onClick={() => onChange(opt.value)}
+            className="rounded-lg border px-3 py-1.5 text-xs transition-all"
+            style={{
+              borderColor: value === opt.value ? DESIGN_TOKENS.accent : DESIGN_TOKENS.border,
+              backgroundColor: value === opt.value ? DESIGN_TOKENS.accentSoft : "transparent",
+              color: value === opt.value ? DESIGN_TOKENS.accent : DESIGN_TOKENS.textSecondary,
+            }}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
 }

@@ -177,12 +177,12 @@ export function ChatInput({
 
   const insertNodeMention = (node: any) => {
     const title = node.data?.title || node.data?.fileName || node.data?.text?.slice(0, 20) || "节点"
-    // 找到最后一个 @ 的位置，替换 @query 为 @nodeId
+    // 找到最后一个 @ 的位置，替换 @query 为 @[title](node:id) 格式引用
     const lastAtIndex = value.lastIndexOf("@")
     if (lastAtIndex >= 0) {
       const before = value.slice(0, lastAtIndex)
       const after = value.slice(lastAtIndex + 1 + mentionQuery.length)
-      onChange(before + `@${title} ` + after)
+      onChange(before + `@[${title}](node:${node.id}) ` + after)
     }
     setShowNodeMention(false)
     setMentionQuery("")
