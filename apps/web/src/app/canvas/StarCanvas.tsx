@@ -120,6 +120,7 @@ import { AddNodePanel } from "./components/toolbar/AddNodePanel";
 import { ChatPanel } from "./components/chat/ChatPanel";
 import { SettingsPanel } from "./components/panels/SettingsPanel";
 import { ScriptImportPanel, type ScriptImportPayload } from "./components/panels/ScriptImportPanel";
+import { VideoRemixPanel, type VideoRemixImportPayload } from "./components/panels/VideoRemixPanel";
 import {
   ProjectBiblePanel,
   type ProjectSceneBibleItem,
@@ -255,6 +256,15 @@ import {
 import { buildSubtitleExport, subtitleTimelineFilename } from "@/lib/storyboard/storyboardSubtitleTimeline";
 import { generateVideoCompositionScript, type VideoCompositionInput } from "@/lib/storyboard/storyboardVideoComposition";
 import { formatDialogueAsSrt, parseDurationToSeconds } from "@/lib/storyboard/subtitleFormatter";
+import {
+  exportToJianyingDraft,
+  buildJianyingCompatiblePackage,
+  extractVideoNodesFromCanvas,
+  extractAudioNodesFromCanvas,
+  extractSubtitleNodesFromCanvas,
+  downloadJsonFile,
+  downloadZipBuffer,
+} from "./utils/jianyingDraftExport";
 import type {
   ChatCanvasAction,
   ApplyActionsReport,
@@ -690,6 +700,7 @@ function StarCanvasInner() {
   const [showAddNodePanel, setShowAddNodePanel] = useState(false);
   const [showNodeHistory, setShowNodeHistory] = useState(false);
   const [showScriptImportPanel, setShowScriptImportPanel] = useState(false);
+  const [showVideoRemixPanel, setShowVideoRemixPanel] = useState(false);
   const [showProjectBiblePanel, setShowProjectBiblePanel] = useState(false);
   const [showCharacterBiblePanel, setShowCharacterBiblePanel] = useState(false);
   const [showSceneBiblePanel, setShowSceneBiblePanel] = useState(false);
@@ -5084,6 +5095,66 @@ function StarCanvasInner() {
   }, [nodes]);
 
   // ========================================================================
+  // 剪映草稿导出
+  // ========================================================================
+
+  /** 导出剪映草稿 JSON（draft_content.json） */
+  const handleExportToJianyingDraft = useCallback(() => {
+    const videoInputs = extractVideoNodesFromCanvas(nodes);
+    const audioInputs = extractAudioNodesFromCanvas(nodes);
+    const subtitleInputs = extractSubtitleNodesFromCanvas(nodes);
+
+    if (videoInputs.length === 0 && audioInputs.length === 0 && subtitleInputs.length === 0) {
+      alert("当前画布没有找到可导出的视频、音频或字幕节点。请先生成视频或添加字幕。");
+      return;
+    }
+
+    const result = exportToJianyingDraft(videoInputs, audioInputs, subtitleInputs);
+
+    // 下载 draft_content.json
+    downloadJsonFile(result.draftContentJson, `draft_content_${Date.now()}.json`);
+
+    // 下载 draft_meta_info.json
+    downloadJsonFile(result.draftMetaJson, `draft_meta_info_${Date.now()}.json`);
+
+    console.info(
+      `[剪映导出] 已生成草稿: ${result.trackCount} 个轨道, ${result.materialCount} 个素材, ` +
+      `时长 ${result.totalDurationSeconds.toFixed(1)}s`,
+    );
+  }, [nodes]);
+
+  /** 导出剪映兼容包 ZIP（视频 + SRT 字幕 + 音频） */
+  const handleExportJianyingCompatible = useCallback(async () => {
+    const videoInputs = extractVideoNodesFromCanvas(nodes);
+    const audioInputs = extractAudioNodesFromCanvas(nodes);
+    const subtitleInputs = extractSubtitleNodesFromCanvas(nodes);
+
+    if (videoInputs.length === 0 && audioInputs.length === 0 && subtitleInputs.length === 0) {
+      alert("当前画布没有找到可导出的视频、音频或字幕节点。请先生成视频或添加字幕。");
+      return;
+    }
+
+    try {
+      // 显示加载提示
+      const loadingMsg = "正在打包剪映兼容包，请稍候...";
+      console.info(loadingMsg);
+
+      const pkg = await buildJianyingCompatiblePackage(videoInputs, audioInputs, subtitleInputs);
+
+      // 下载 ZIP
+      downloadZipBuffer(pkg.zipBuffer, pkg.fileName);
+
+      console.info(
+        `[剪映兼容包] 已生成: ${pkg.files.length} 个文件, ` +
+        `总大小 ${(pkg.zipBuffer.byteLength / 1024 / 1024).toFixed(1)} MB`,
+      );
+    } catch (error) {
+      console.error("[剪映兼容包] 导出失败:", error);
+      alert(`导出失败: ${(error as Error).message}`);
+    }
+  }, [nodes]);
+
+  // ========================================================================
   // ADD NODE
   // ========================================================================
   const getWorkflowDefaults = (nodeKind: CanvasNodeKind): CanvasNodeData => {
@@ -5353,6 +5424,122 @@ function StarCanvasInner() {
     },
     [getCenteredFlowPosition, setNodes, dismissCanvasHint],
   );
+
+  const handleImportRemix = useCallback((payload: VideoRemixImportPayload) => {
+    const { videoName, result } = payload;
+    const template = result.template;
+    const beats = template.structure;
+
+    if (!beats || beats.length === 0) {
+      alert("未检测到分镜结构，无法导入画布。");
+      return;
+    }
+
+    const basePosition = getCenteredFlowPosition({ width: 280, height: 170 });
+    const now = Date.now();
+
+    // 为每个 beat 创建一个 ShotNode
+    const shotNodes: Node<CanvasNodeData>[] = beats.map((beat, index) => ({
+      id: `remix-shot-${generateId()}`,
+      type: "shot",
+      position: {
+        x: basePosition.x + index * 320,
+        y: basePosition.y,
+      },
+      width: 280,
+      height: 170,
+      measured: { width: 280, height: 170 },
+      data: {
+        title: `${beat.type === "hook" ? "钩子" : beat.type === "setup" ? "铺垫" : beat.type === "conflict" ? "冲突" : beat.type === "climax" ? "高潮" : beat.type === "twist" ? "反转" : beat.type === "resolution" ? "收尾" : "引导"} ${index + 1}`,
+        nodeKind: "shot",
+        content: `${beat.description}\n视觉: ${beat.visualNotes}\n音频: ${beat.audioNotes}`,
+        prompt: beat.description,
+        summary: `[${beat.timestamp}] ${beat.type}: ${beat.description}`,
+        shot: {
+          id: `remix-shot-data-${generateId()}`,
+          order: index + 1,
+          title: `${beat.type} ${index + 1}`,
+          shotType: beat.visualNotes,
+          description: beat.description,
+          visualPrompt: beat.visualNotes,
+          duration: beat.duration,
+          characterIdentities: [],
+          status: "draft",
+        },
+        displayWidth: 280,
+        displayHeight: 170,
+        createdAt: now,
+      },
+    }));
+
+    // 创建 StoryboardGridNode 作为汇总节点
+    const gridNodeId = `remix-grid-${generateId()}`;
+    const gridNode: Node<CanvasNodeData> = {
+      id: gridNodeId,
+      type: "storyboard-grid",
+      position: {
+        x: basePosition.x + beats.length * 320 + 100,
+        y: basePosition.y - 40,
+      },
+      width: 360,
+      height: 250,
+      measured: { width: 360, height: 250 },
+      data: {
+        title: `${videoName} - 拉片汇总`,
+        nodeKind: "storyboard-grid",
+        content: `来源: ${result.source}\n类别: ${template.category}\n总时长: ${template.totalDuration}\n钩子模式: ${template.hookPattern}\n\n关键技巧: ${template.keyTechniques.join("、")}\n\n改编建议: ${template.adaptationNotes}`,
+        prompt: template.adaptationNotes,
+        summary: `一键拉片: ${template.name}`,
+        storyboardGrid: {
+          id: gridNodeId,
+          title: `${videoName} - 拉片汇总`,
+          sourceStoryboardNodeId: undefined,
+          shotNodeIds: shotNodes.map((n) => n.id),
+          columns: 3,
+          maxShots: beats.length,
+          shotStates: beats.map((beat, i) => ({
+            shotNodeId: shotNodes[i].id,
+            order: i + 1,
+            title: beat.type,
+            status: "missing" as const,
+          })),
+          status: "draft",
+        },
+        displayWidth: 360,
+        displayHeight: 250,
+        createdAt: now,
+      },
+    };
+
+    // 创建连接边
+    const edges: Edge[] = [];
+    for (let i = 0; i < shotNodes.length - 1; i++) {
+      edges.push({
+        id: `remix-edge-${i}-${i + 1}-${generateId()}`,
+        source: shotNodes[i].id,
+        target: shotNodes[i + 1].id,
+        type: "smoothstep",
+        animated: true,
+        style: { stroke: DESIGN_TOKENS.nodeEdge, strokeWidth: 2 },
+      });
+    }
+    // 连接最后一个 shot 到 grid
+    if (shotNodes.length > 0) {
+      edges.push({
+        id: `remix-edge-grid-${generateId()}`,
+        source: shotNodes[shotNodes.length - 1].id,
+        target: gridNode.id,
+        type: "smoothstep",
+        animated: true,
+        style: { stroke: DESIGN_TOKENS.nodeEdge, strokeWidth: 2 },
+      });
+    }
+
+    pushUndo({ nodes: nodesRef.current, edges: edgesRef.current });
+    setNodes((nds) => [...nds, ...shotNodes, gridNode]);
+    setEdges((eds) => [...eds, ...edges]);
+    dismissCanvasHint();
+  }, [getCenteredFlowPosition, setNodes, setEdges, pushUndo, dismissCanvasHint]);
 
   const handleImportScript = useCallback((payload: ScriptImportPayload) => {
     const defaultSize = NODE_DEFAULT_SIZE.content;
@@ -6855,6 +7042,8 @@ function StarCanvasInner() {
           onExportCharacterCsv={handleExportCharacterCsv}
           onExportSubtitles={handleExportSubtitles}
           onExportCompositionScript={handleExportCompositionScript}
+          onExportToJianyingDraft={handleExportToJianyingDraft}
+          onExportJianyingCompatible={handleExportJianyingCompatible}
         />
         {/* ── Separator ── */}
         <div className="mx-2 h-6 w-px" style={{ backgroundColor: DESIGN_TOKENS.border }} />
@@ -7305,6 +7494,7 @@ function StarCanvasInner() {
         onUploadImage={handleUploadClick}
         onUploadDocument={handleDocumentUploadClick}
         onImportScript={() => setShowScriptImportPanel(true)}
+        onImportVideoRemix={() => setShowVideoRemixPanel(true)}
         onOpenProjectBible={() => setShowProjectBiblePanel(true)}
         onCreateVideoWorkflow={handleCreateVideoWorkflow}
         onOpenAssetLibrary={openAssetLibrary}
@@ -8018,6 +8208,13 @@ function StarCanvasInner() {
         isOpen={showScriptImportPanel}
         onClose={() => setShowScriptImportPanel(false)}
         onImportScript={handleImportScript}
+      />
+
+      {/* Video Remix Panel */}
+      <VideoRemixPanel
+        isOpen={showVideoRemixPanel}
+        onClose={() => setShowVideoRemixPanel(false)}
+        onImportRemix={handleImportRemix}
       />
 
       {/* Settings Panel */}

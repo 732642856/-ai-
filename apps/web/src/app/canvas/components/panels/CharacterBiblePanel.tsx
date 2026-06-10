@@ -45,6 +45,15 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
   const [aiPrompt, setAiPrompt] = useState("")
   const [aiGenerating, setAiGenerating] = useState(false)
 
+  // 紫微斗数角色设计状态
+  const [showAstrologyInput, setShowAstrologyInput] = useState(false)
+  const [birthDate, setBirthDate] = useState("")
+  const [birthTime, setBirthTime] = useState("2")
+  const [birthGender, setBirthGender] = useState<"男" | "女">("男")
+  const [birthType, setBirthType] = useState<"solar" | "lunar">("solar")
+  const [astrologyGenerating, setAstrologyGenerating] = useState(false)
+  const [astrologyResult, setAstrologyResult] = useState<string | null>(null)
+
   // 选中角色时自动切换到编辑视图
   // 使用 selector 返回的 selectedCharacterData 精确订阅，避免 bibleCharacters 全量变化频繁触发
   useEffect(() => {
@@ -150,6 +159,57 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
       setAiGenerating(false)
       setShowAiInput(false)
       setAiPrompt("")
+    }
+  }
+
+  /** 根据紫微斗数命盘生成角色设定 */
+  const handleAstrologyGenerate = () => {
+    if (!birthDate.trim() || astrologyGenerating) return
+    setAstrologyGenerating(true)
+    setAstrologyResult(null)
+    try {
+      // 动态导入 iztro（首次用时加载 24KB）
+      import("../../utils/characterAstrologyService").then(({ generateCharacterFromBirth }) => {
+        const result = generateCharacterFromBirth({
+          dateStr: birthDate.trim(),
+          timeIndex: parseInt(birthTime, 10),
+          gender: birthGender,
+          dateType: birthType,
+        })
+        if (result.error) {
+          setAstrologyResult(`❌ ${result.error}`)
+          return
+        }
+        if (result.profile) {
+          const p = result.profile
+          const summary = [
+            `【四柱八字】${p.chineseDate}`,
+            ``,
+            `【核心性格】${p.personalitySummary}`,
+            ``,
+            `✨ 优势特质：${p.strength.join("、")}`,
+            `⚠️ 潜在不足：${p.weakness.join("、")}`,
+            `🎯 天赋特长：${p.talent.join("；")}`,
+            ``,
+            `💼 事业风格：${p.careerStyle}`,
+            `❤️ 感情风格：${p.relationshipStyle}`,
+            `💰 财富观：${p.wealthStyle}`,
+            ``,
+            p.lifeDomains.map((d) => `【${d.domain}】${d.description}`).join("\n"),
+          ].join("\n")
+          setAstrologyResult(summary)
+          // 自动填充角色信息
+          setEdit((prev) => ({
+            ...prev,
+            name: prev.name || `命盘角色_${p.chineseDate}`,
+            physicalTraits: [...new Set([...(prev.physicalTraits || []), ...p.coreTraits])],
+          }))
+        }
+      }).catch(() => {
+        setAstrologyResult("❌ 紫微斗数引擎加载失败")
+      })
+    } finally {
+      setAstrologyGenerating(false)
     }
   }
 
@@ -267,7 +327,7 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
             /* ========== 角色编辑表单 ========== */
             <div className="space-y-4">
               {/* AI 生成按钮 */}
-              <div className="flex items-center gap-2 mb-2">
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
                 <button
                   onClick={() => setShowAiInput(!showAiInput)}
                   className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
@@ -275,6 +335,16 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
                 >
                   <Sparkles size={12} strokeWidth={1.5} />
                   {showAiInput ? "取消" : "AI 生成角色设定"}
+                </button>
+                <button
+                  onClick={() => setShowAstrologyInput(!showAstrologyInput)}
+                  className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
+                  style={{ backgroundColor: "rgba(139, 92, 246, 0.15)", color: "rgb(167, 139, 250)" }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="4" /><circle cx="12" cy="12" r="1" />
+                  </svg>
+                  {showAstrologyInput ? "取消" : "紫微斗数角色设计"}
                 </button>
               </div>
 
@@ -298,6 +368,107 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
                     {aiGenerating ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
                     {aiGenerating ? "生成中..." : "生成角色设定"}
                   </button>
+                </div>
+              )}
+
+              {/* 紫微斗数输入区域 */}
+              {showAstrologyInput && (
+                <div className="rounded-xl border p-3 space-y-2" style={{ borderColor: "rgba(139, 92, 246, 0.25)", backgroundColor: "rgba(139, 92, 246, 0.06)" }}>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] mb-1" style={{ color: DESIGN_TOKENS.textSecondary }}>出生日期</label>
+                      <input
+                        type="text"
+                        value={birthDate}
+                        onChange={(e) => setBirthDate(e.target.value)}
+                        placeholder="如 2000-8-16"
+                        className="w-full rounded-lg border bg-black/40 px-2 py-1.5 text-xs text-white outline-none"
+                        style={{ borderColor: DESIGN_TOKENS.border }}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] mb-1" style={{ color: DESIGN_TOKENS.textSecondary }}>时辰</label>
+                      <select
+                        value={birthTime}
+                        onChange={(e) => setBirthTime(e.target.value)}
+                        className="w-full rounded-lg border bg-black/40 px-2 py-1.5 text-xs text-white outline-none"
+                        style={{ borderColor: DESIGN_TOKENS.border }}
+                      >
+                        <option value="0">早子时 00:00-01:00</option>
+                        <option value="1">丑时 01:00-03:00</option>
+                        <option value="2">寅时 03:00-05:00</option>
+                        <option value="3">卯时 05:00-07:00</option>
+                        <option value="4">辰时 07:00-09:00</option>
+                        <option value="5">巳时 09:00-11:00</option>
+                        <option value="6">午时 11:00-13:00</option>
+                        <option value="7">未时 13:00-15:00</option>
+                        <option value="8">申时 15:00-17:00</option>
+                        <option value="9">酉时 17:00-19:00</option>
+                        <option value="10">戌时 19:00-21:00</option>
+                        <option value="11">亥时 21:00-23:00</option>
+                        <option value="12">晚子时 23:00-00:00</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] mb-1" style={{ color: DESIGN_TOKENS.textSecondary }}>性别</label>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setBirthGender("男")}
+                          className="flex-1 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors"
+                          style={{
+                            backgroundColor: birthGender === "男" ? "rgba(139, 92, 246, 0.3)" : "rgba(255,255,255,0.05)",
+                            color: birthGender === "男" ? "rgb(167, 139, 250)" : DESIGN_TOKENS.textMuted,
+                          }}
+                        >男</button>
+                        <button
+                          onClick={() => setBirthGender("女")}
+                          className="flex-1 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors"
+                          style={{
+                            backgroundColor: birthGender === "女" ? "rgba(139, 92, 246, 0.3)" : "rgba(255,255,255,0.05)",
+                            color: birthGender === "女" ? "rgb(167, 139, 250)" : DESIGN_TOKENS.textMuted,
+                          }}
+                        >女</button>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] mb-1" style={{ color: DESIGN_TOKENS.textSecondary }}>历法</label>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setBirthType("solar")}
+                          className="flex-1 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors"
+                          style={{
+                            backgroundColor: birthType === "solar" ? "rgba(139, 92, 246, 0.3)" : "rgba(255,255,255,0.05)",
+                            color: birthType === "solar" ? "rgb(167, 139, 250)" : DESIGN_TOKENS.textMuted,
+                          }}
+                        >阳历</button>
+                        <button
+                          onClick={() => setBirthType("lunar")}
+                          className="flex-1 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors"
+                          style={{
+                            backgroundColor: birthType === "lunar" ? "rgba(139, 92, 246, 0.3)" : "rgba(255,255,255,0.05)",
+                            color: birthType === "lunar" ? "rgb(167, 139, 250)" : DESIGN_TOKENS.textMuted,
+                          }}
+                        >农历</button>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleAstrologyGenerate}
+                    disabled={astrologyGenerating || !birthDate.trim()}
+                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-white transition-opacity w-full justify-center"
+                    style={{ backgroundColor: "rgb(139, 92, 246)", opacity: astrologyGenerating || !birthDate.trim() ? 0.5 : 1 }}
+                  >
+                    {astrologyGenerating ? (
+                      <><Loader2 size={12} className="animate-spin" /> 排盘中...</>
+                    ) : (
+                      <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1"/></svg> 根据命盘生成角色</>
+                    )}
+                  </button>
+                  {astrologyResult && (
+                    <div className="mt-2 rounded-lg p-2 text-xs" style={{ backgroundColor: "rgba(139, 92, 246, 0.1)", color: "rgb(196, 181, 253)" }}>
+                      {astrologyResult}
+                    </div>
+                  )}
                 </div>
               )}
 

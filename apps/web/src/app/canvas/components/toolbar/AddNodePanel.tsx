@@ -51,6 +51,7 @@ type AddNodeAction =
   | { type: "upload-image" }
   | { type: "upload-document" }
   | { type: "import-script" }
+  | { type: "import-video-remix" }
   | { type: "create-workflow" }
   | { type: "open-project-bible" }
   | { type: "open-asset-library" }
@@ -76,6 +77,7 @@ interface AddNodePanelProps {
   onUploadImage: () => void
   onUploadDocument?: () => void
   onImportScript?: () => void
+  onImportVideoRemix?: () => void
   onCreateVideoWorkflow?: () => void
   onOpenProjectBible?: () => void
   onOpenAssetLibrary?: () => void
@@ -209,6 +211,12 @@ const CATEGORIES: AddNodeCategory[] = [
         action: { type: "add-node", nodeType: "workflow", nodeKind: "remix-analysis" },
       },
       {
+        icon: Film,
+        title: "一键拉片",
+        description: "上传视频，AI自动拆解为分镜结构，可导入画布编辑",
+        action: { type: "import-video-remix" },
+      },
+      {
         icon: MessageSquareText,
         title: "照片说话/数字人",
         description: "记录头像、台词、声线和口型同步生成要求",
@@ -297,6 +305,7 @@ export function AddNodePanel({
   onUploadImage,
   onUploadDocument,
   onImportScript,
+  onImportVideoRemix,
   onCreateVideoWorkflow,
   onOpenProjectBible,
   onOpenAssetLibrary,
@@ -333,6 +342,9 @@ export function AddNodePanel({
         case "import-script":
           onImportScript?.()
           break
+        case "import-video-remix":
+          onImportVideoRemix?.()
+          break
         case "create-workflow":
           onCreateVideoWorkflow?.()
           break
@@ -345,7 +357,7 @@ export function AddNodePanel({
       }
       onClose()
     },
-    [onAddNode, onUploadImage, onUploadDocument, onImportScript, onCreateVideoWorkflow, onOpenProjectBible, onOpenAssetLibrary, onClose]
+    [onAddNode, onUploadImage, onUploadDocument, onImportScript, onImportVideoRemix, onCreateVideoWorkflow, onOpenProjectBible, onOpenAssetLibrary, onClose]
   )
 
   if (!isOpen) return null

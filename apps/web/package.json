@@ -17,6 +17,8 @@
   },
   "dependencies": {
     "@creative-canvas/canvas": "workspace:*",
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
     "@imgly/background-removal": "^1.7.0",
     "@lancedb/lancedb": "^0.30.0",
     "@mastra/core": "^1.41.0",
@@ -25,6 +27,7 @@
     "@xyflow/react": "^12.10.0",
     "ai": "^6.0.198",
     "dagre": "^0.8.5",
+    "iztro": "^2.5.8",
     "kokoro-js": "^1.2.1",
     "lucide-react": "^1.16.0",
     "mammoth": "^1.12.0",

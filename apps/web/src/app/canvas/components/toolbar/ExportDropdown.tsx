@@ -6,7 +6,7 @@
 // ============================================================================
 
 import { useCallback, useRef, useState } from "react"
-import { Download, BookOpen, Printer, FileText, Table2, Subtitles, Clapperboard, ChevronDown } from "lucide-react"
+import { Download, BookOpen, Printer, FileText, Table2, Subtitles, Clapperboard, ChevronDown, Film, type LucideIcon } from "lucide-react"
 import { DESIGN_TOKENS } from "../../styles/designSystem"
 
 export interface ExportActions {
@@ -18,13 +18,15 @@ export interface ExportActions {
   onExportCharacterCsv: () => void
   onExportSubtitles: () => void
   onExportCompositionScript: () => void
+  onExportToJianyingDraft: () => void
+  onExportJianyingCompatible: () => void
 }
 
 export function ExportDropdown(actions: ExportActions) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
-  const items = [
+  const items: Array<{ icon: LucideIcon; label: string; action: () => void; shortcut: string } | { separator: true }> = [
     { icon: Download, label: "导出项目包", action: actions.onExportProjectPackage, shortcut: "" },
     { icon: BookOpen, label: "导出分镜本", action: actions.onExportStoryboardPdf, shortcut: "" },
     { icon: Printer, label: "打印 PDF", action: actions.onPrintStoryboardPdf, shortcut: "" },
@@ -33,6 +35,9 @@ export function ExportDropdown(actions: ExportActions) {
     { icon: Table2, label: "角色表", action: actions.onExportCharacterCsv, shortcut: "" },
     { icon: Subtitles, label: "字幕", action: actions.onExportSubtitles, shortcut: "" },
     { icon: Clapperboard, label: "合成", action: actions.onExportCompositionScript, shortcut: "" },
+    { separator: true },
+    { icon: Film, label: "剪映草稿 (JSON)", action: actions.onExportToJianyingDraft, shortcut: "" },
+    { icon: Film, label: "剪映兼容包 (ZIP)", action: actions.onExportJianyingCompatible, shortcut: "" },
   ]
 
   const toggle = useCallback(() => setOpen((v) => !v), [])
@@ -66,18 +71,31 @@ export function ExportDropdown(actions: ExportActions) {
             borderColor: DESIGN_TOKENS.border,
           }}
         >
-          {items.map((item, i) => (
-            <button
-              key={item.label}
-              type="button"
-              className="flex w-full items-center gap-2.5 px-3.5 py-2 text-xs transition hover:bg-white/10"
-              style={{ color: DESIGN_TOKENS.textSecondary }}
-              onClick={() => { item.action(); close() }}
-            >
-              <item.icon size={13} strokeWidth={1.7} style={{ color: DESIGN_TOKENS.accent }} />
-              <span>{item.label}</span>
-            </button>
-          ))}
+          {items.map((item, i) => {
+            // 渲染分隔线
+            if ("separator" in item) {
+              return (
+                <div
+                  key={`sep-${i}`}
+                  className="my-1 mx-2 h-px"
+                  style={{ backgroundColor: DESIGN_TOKENS.border }}
+                />
+              );
+            }
+            // 常规菜单项
+            return (
+              <button
+                key={item.label}
+                type="button"
+                className="flex w-full items-center gap-2.5 px-3.5 py-2 text-xs transition hover:bg-white/10"
+                style={{ color: DESIGN_TOKENS.textSecondary }}
+                onClick={() => { item.action(); close() }}
+              >
+                <item.icon size={13} strokeWidth={1.7} style={{ color: DESIGN_TOKENS.accent }} />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
