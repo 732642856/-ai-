@@ -13,6 +13,7 @@
 ![Next.js](https://img.shields.io/badge/Next.js-16-000000)
 ![MIT](https://img.shields.io/badge/License-MIT-green)
 ![Tests](https://img.shields.io/badge/Tests-515_✔️-success)
+![Version](https://img.shields.io/badge/Version-v0.1.0-6366f1)
 
 > 节点式 AI 影视创作工作台 · 对标 TapNow + 小云雀短剧 Agent 2.0
 
