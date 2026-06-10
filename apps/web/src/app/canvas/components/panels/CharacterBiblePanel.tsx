@@ -199,11 +199,15 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
           ].join("\n")
           setAstrologyResult(summary)
           // 自动填充角色信息
-          setEdit((prev) => ({
-            ...prev,
-            name: prev.name || `命盘角色_${p.chineseDate}`,
-            physicalTraits: [...new Set([...(prev.physicalTraits || []), ...p.coreTraits])],
-          }))
+          const astroUpdates = {
+            name: (edit.name || `命盘角色_${p.chineseDate}`),
+            physicalTraits: [...new Set([...(edit.physicalTraits || []), ...p.coreTraits])],
+          }
+          setEdit((prev) => ({ ...prev, ...astroUpdates }))
+          // 写入 Zustand store（如果正在编辑现有角色）
+          if (edit.id) {
+            updateBibleCharacter(edit.id, astroUpdates)
+          }
         }
       }).catch(() => {
         setAstrologyResult("❌ 紫微斗数引擎加载失败")

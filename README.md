@@ -8,7 +8,16 @@
 
 ## Screen recording
 
-<!-- TODO: 添加演示 GIF 或录屏 -->
+![StarCanvas](https://img.shields.io/badge/StarCanvas-星轨画布-6366f1)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)
+![Next.js](https://img.shields.io/badge/Next.js-16-000000)
+![MIT](https://img.shields.io/badge/License-MIT-green)
+![Tests](https://img.shields.io/badge/Tests-515_✔️-success)
+
+> 节点式 AI 影视创作工作台 · 对标 TapNow + 小云雀短剧 Agent 2.0
+
+<!-- TODO: 跑通完整管线后替换为真实录屏 -->
+![demo](https://via.placeholder.com/800x450/1a1a2e/ffffff?text=StarCanvas+Demo)
 
 ## Features
 
