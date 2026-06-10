@@ -75,6 +75,8 @@ import { persistImageDataUrl } from "@/lib/assets/localImageStore"
 import { generateVideoFromImage, VideoGenerationError, videoResultToNodeData } from "../utils/videoGenerationService"
 import { generateImageFromPrompt } from "../utils/imageGeneration"
 import { generateTts, ttsResultToNodeData, TtsError, type TtsInput, type TtsProgressCallback } from "../utils/ttsService"
+import { composeVideo } from "../utils/videoCompositionBrowser"
+import type { VideoClipInput, AudioTrackInput, SubtitleInput } from "../utils/videoCompositionBrowser"
 
 interface RunContext {
   runId: string
@@ -178,7 +180,16 @@ function isTtsStep(kind: CanvasNodeKind): boolean {
 }
 
 function isPassThroughStep(kind: CanvasNodeKind): boolean {
-  return ["composition", "video-result"].includes(kind)
+  return ["video-result"].includes(kind)
+}
+
+/** 秒数 → SRT 时间戳格式 (HH:MM:SS,mmm) */
+function formatSrtTime(seconds: number): string {
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  const s = Math.floor(seconds % 60)
+  const ms = Math.floor((seconds % 1) * 1000)
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")},${String(ms).padStart(3, "0")}`
 }
 
 function collectReferenceImageUrls(
@@ -1311,7 +1322,80 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
     }
 
     // ------------------------------------------------------------------
-    // PASS-THROUGH STEP (composition, video-result)
+    // COMPOSITION STEP (ffmpeg.wasm 视频合成)
+    // ------------------------------------------------------------------
+    if (kind === "composition") {
+      try {
+        // 收集上游的：视频、音频、字幕
+        const clips: VideoClipInput[] = []
+        let narrationAudio: AudioTrackInput | undefined
+        let subtitleContent: SubtitleInput | undefined
+
+        for (const edge of upstreamEdges) {
+          const upstream = allNodes.find((n) => n.id === edge.source)
+          if (!upstream) continue
+          const ud = upstream.data as CanvasNodeData | undefined
+          const uk = ud?.nodeKind || upstream.type
+
+          if (uk === "video-result" || uk === "video-generation") {
+            const videoUrl = ud?.resultUrl || ud?.imageUrl || ""
+            if (videoUrl) {
+              clips.push({ data: videoUrl })
+            }
+          }
+
+          if (uk === "audio") {
+            const audioUrl = ud?.resultUrl || ""
+            if (audioUrl) {
+              narrationAudio = { data: audioUrl, volume: 1 }
+            }
+          }
+
+          if (uk === "subtitle") {
+            const segments = ud?.shot?.subtitleTimeline?.segments || ud?.segments || []
+            if (Array.isArray(segments) && segments.length > 0) {
+              const srtLines: string[] = []
+              segments.forEach((seg: any, i: number) => {
+                const start = formatSrtTime(seg.startSeconds || seg.start || 0)
+                const end = formatSrtTime(seg.endSeconds || seg.end || 0)
+                srtLines.push(`${i + 1}\n${start} --> ${end}\n${seg.text || ""}\n`)
+              })
+              subtitleContent = { srtContent: srtLines.join("\n") }
+            }
+          }
+        }
+
+        if (clips.length === 0) {
+          updateNodeData(node.id, {
+            runMeta: createFailedRunMeta({ error: "合成失败：没有找到可合成的视频片段", runId: runContext?.runId }),
+          })
+          return ""
+        }
+
+        const result = await composeVideo({
+          clips,
+          narration: narrationAudio,
+          subtitle: subtitleContent,
+          outputName: `starcanvas-${node.id.slice(0, 8)}`,
+        })
+
+        updateNodeData(node.id, {
+          resultUrl: result.url,
+          summary: `✅ 视频合成完成 (${clips.length} 段, 请查看预览)`,
+          runMeta: createSucceededRunMeta({ message: `合成完成: ${result.filename}`, runId: runContext?.runId }),
+        })
+        return result.url
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "未知错误"
+        updateNodeData(node.id, {
+          runMeta: createFailedRunMeta({ error: `合成失败: ${msg}`, runId: runContext?.runId }),
+        })
+        return ""
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // PASS-THROUGH STEP (video-result)
     // ------------------------------------------------------------------
     if (isPassThroughStep(kind)) {
       updateNodeData(node.id, {

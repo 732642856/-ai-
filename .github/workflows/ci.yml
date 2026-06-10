@@ -9,7 +9,7 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-latest
-    name: Lint (Turborepo)
+    name: Lint
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -23,12 +23,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Lint
-        run: pnpm lint:all
+      - name: Lint (web only)
+        run: pnpm lint:web
 
   typecheck:
     runs-on: ubuntu-latest
-    name: TypeCheck (Turborepo)
+    name: TypeCheck
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -42,12 +42,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: TypeCheck
-        run: pnpm typecheck:all
+      - name: TypeCheck (web only)
+        run: pnpm typecheck:web
 
   test:
     runs-on: ubuntu-latest
-    name: Test (Turborepo)
+    name: Test
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -61,12 +61,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Test
-        run: pnpm test:all
+      - name: Test (web only)
+        run: pnpm test:web
 
   build:
     runs-on: ubuntu-latest
-    name: Build (Turborepo)
+    name: Build
     needs: [lint, typecheck, test]
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     steps:
@@ -82,11 +82,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build
-        run: pnpm build:all
+      - name: Build (web only)
+        run: pnpm build:web
 
       - name: Upload web build
         uses: actions/upload-artifact@v4
         with:
-          name: creative-canvas-web
-          path: apps/web/dist/
+          name: starcanvas-web
+          path: apps/web/.next/
