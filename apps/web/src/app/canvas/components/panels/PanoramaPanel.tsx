@@ -14,7 +14,7 @@
 
 import React, { useCallback, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { X, RotateCw, Image, Sparkles, Check, Globe, Upload, RefreshCw } from "lucide-react"
+import { X, RotateCw, Image, Sparkles, Check, Globe, Upload, RefreshCw, Wand2, Loader2 } from "lucide-react"
 import ReactPannellum from "react-pannellum"
 import { DESIGN_TOKENS } from "../../styles/designSystem"
 
@@ -122,6 +122,9 @@ export function PanoramaPanel({
   const [autoRotate, setAutoRotate] = useState(true)
   const [autoRotateSpeed, setAutoRotateSpeed] = useState(-2)
   const [isLoading, setIsLoading] = useState(false)
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [generationError, setGenerationError] = useState<string | null>(null)
+  const [panoramaType, setPanoramaType] = useState<"indoor" | "outdoor" | "sci-fi" | "underwater" | "sky" | "custom">("custom")
   const [panoramaPrompt, setPanoramaPrompt] = useState("")
   const [activeTab, setActiveTab] = useState<"viewer" | "prompt" | "presets">("viewer")
   const inputFileRef = useRef<HTMLInputElement>(null)
@@ -191,6 +194,45 @@ export function PanoramaPanel({
     reader.onerror = () => setIsLoading(false)
     reader.readAsDataURL(file)
   }, [])
+
+  // 调用 API 生成全景图
+  const handleGenerate = useCallback(async () => {
+    if (!panoramaPrompt && !description) return
+    setIsGenerating(true)
+    setGenerationError(null)
+
+    try {
+      const res = await fetch("/api/ai/generate-panorama", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          panoramaType,
+          subject: panoramaPrompt || description || title,
+          style: "photorealistic",
+          extras: "",
+        }),
+      })
+
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error?.message || `API error: ${res.status}`)
+      }
+
+      const data = await res.json()
+      const imageData = data.data?.[0]
+
+      if (imageData?.b64_json) {
+        setImageUrl(`data:image/png;base64,${imageData.b64_json}`)
+        setActiveTab("viewer")
+      } else {
+        throw new Error("生成结果无图片数据")
+      }
+    } catch (err) {
+      setGenerationError(err instanceof Error ? err.message : "生成失败")
+    } finally {
+      setIsGenerating(false)
+    }
+  }, [panoramaPrompt, description, title, panoramaType])
 
   // 全景配置 (memoized)
   const pannellumConfig = useMemo(() => {
@@ -279,6 +321,24 @@ export function PanoramaPanel({
             >
               <RotateCw size={14} />
               旋转
+            </button>
+            {/* AI 生成全景图 */}
+            <button
+              onClick={handleGenerate}
+              disabled={isGenerating || (!panoramaPrompt && !description)}
+              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs transition-all"
+              style={{
+                color: isGenerating ? DESIGN_TOKENS.textMuted : DESIGN_TOKENS.accentHover,
+                backgroundColor: isGenerating ? "transparent" : DESIGN_TOKENS.accentSoft,
+              }}
+              title="AI生成全景图"
+            >
+              {isGenerating ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Wand2 size={14} />
+              )}
+              {isGenerating ? "生成中..." : "AI生成"}
             </button>
             <button
               onClick={onClose}
@@ -512,6 +572,46 @@ export function PanoramaPanel({
                 placeholder="场景氛围描述..."
               />
             </div>
+
+            {/* 全景类型选择 */}
+            <div className="mb-3">
+              <label
+                className="mb-1 block text-[11px]"
+                style={{ color: DESIGN_TOKENS.textMuted }}
+              >
+                全景生成类型
+              </label>
+              <div className="grid grid-cols-2 gap-1.5">
+                {(["indoor", "outdoor", "sci-fi", "underwater", "sky", "custom"] as const).map((type) => (
+                  <button
+                    key={type}
+                    onClick={() => setPanoramaType(type)}
+                    className="rounded-lg px-2 py-1.5 text-[11px] transition-all"
+                    style={{
+                      backgroundColor: panoramaType === type ? DESIGN_TOKENS.accentSoft : "rgba(255,255,255,0.04)",
+                      color: panoramaType === type ? DESIGN_TOKENS.accentHover : DESIGN_TOKENS.textMuted,
+                      border: `1px solid ${panoramaType === type ? DESIGN_TOKENS.accent : "transparent"}`,
+                    }}
+                  >
+                    {type === "indoor" ? "室内" : type === "outdoor" ? "户外" : type === "sci-fi" ? "科幻" : type === "underwater" ? "水下" : type === "sky" ? "天空" : "自定义"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 生成错误提示 */}
+            {generationError && (
+              <div
+                className="mb-3 rounded-lg px-3 py-2 text-[11px]"
+                style={{
+                  backgroundColor: "rgba(239, 68, 68, 0.1)",
+                  color: "#ef4444",
+                  border: "1px solid rgba(239, 68, 68, 0.2)",
+                }}
+              >
+                {generationError}
+              </div>
+            )}
 
             {/* 自动旋转速度 */}
             <div className="mb-3">

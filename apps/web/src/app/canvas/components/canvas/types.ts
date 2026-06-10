@@ -568,6 +568,7 @@ export type AssetItem = {
   folder: AssetFolder
   favorite?: boolean
   tags?: string[]
+  isPanorama?: boolean
   createdAt: number
   metadata?: Record<string, unknown>
 }

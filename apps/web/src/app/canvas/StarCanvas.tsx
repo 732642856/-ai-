@@ -7984,6 +7984,12 @@ function StarCanvasInner() {
                 handleSaveToAssetLibrary(contextMenu.nodeId);
               }
             }}
+            onOpenPanorama={() => {
+              if (contextMenu?.type === "node") {
+                setSelectedNodeId(contextMenu.nodeId);
+                setShowPanorama(true);
+              }
+            }}
             onAIVariant={() => {
               if (contextMenu?.type === "node") {
                 handleAIVariant(contextMenu.nodeId);

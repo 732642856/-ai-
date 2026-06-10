@@ -24,6 +24,7 @@ import {
   RotateCcw,
   ArrowRight,
   Square,
+  Globe,
 } from "lucide-react"
 import type { ContextMenuState, CanvasNodeKind } from "../canvas/types"
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
@@ -54,6 +55,7 @@ interface NodeContextMenuProps {
   onCreateInspirationFromDocument?: () => void
   onCreateStoryboardFromDocument?: () => void
   onComposeSelectedShots?: () => void
+  onOpenPanorama?: () => void
   isWorkflowRunning?: boolean
   nodeKind?: CanvasNodeKind
   selectedShotCount?: number
@@ -135,6 +137,7 @@ export const NodeContextMenu = memo(function NodeContextMenu({
   onCreateInspirationFromDocument,
   onCreateStoryboardFromDocument,
   onComposeSelectedShots,
+  onOpenPanorama,
   isWorkflowRunning,
   nodeKind,
   selectedShotCount = 1,
@@ -466,6 +469,16 @@ export const NodeContextMenu = memo(function NodeContextMenu({
                     onClose()
                   }}
                 />
+                {onOpenPanorama && (
+                  <MenuItem
+                    icon={<Globe size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
+                    label="在全景中查看"
+                    onClick={() => {
+                      onOpenPanorama()
+                      onClose()
+                    }}
+                  />
+                )}
               </>
             )}
             {onAIVariant && (
