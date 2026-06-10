@@ -478,6 +478,9 @@ export type CanvasNodeData = {
   autoSizeMode?: "auto" | "fixed-width-height-grows" | "manual"
   writingMode?: "normal" | "focus"
   generation?: any
+  cinematicParams?: import("../panels/CinematicParamPanel").CinematicParams
+  colorGradePrompt?: string
+  timelineStartTimeSeconds?: number
   generatedShotNodeIds?: string[]
   generatedStoryboardGridNodeId?: string
   storyboardOutputImageNodeId?: string

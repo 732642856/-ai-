@@ -4,12 +4,13 @@
  */
 
 import { useRef, useState, type ChangeEvent, type KeyboardEvent } from "react"
-import { Paperclip, ArrowUp, Square, Mic, Settings, MessageSquareText, Image } from "lucide-react"
+import { Paperclip, ArrowUp, Square, Mic, Settings, MessageSquareText, Image, Archive } from "lucide-react"
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 import { ChatAttachmentPreview } from "./ChatAttachmentPreview"
 import { SlashCommandMenu } from "./SlashCommandMenu"
 import type { ChatAttachment } from "../../hooks/useChatAttachments"
 import type { SlashCommand } from "../../types/slash-commands"
+import type { AssetItem } from "../canvas/types"
 import { getCachedDefaultImageModel } from "@/lib/ai/client"
 import { getModelOptions } from "@/lib/ai/imageProviderCapabilities"
 
@@ -75,6 +76,7 @@ interface ChatInputProps {
   placeholder?: string
   disabled?: boolean
   canvasNodes?: any[] // 画布节点列表，用于 @ 引用
+  assets?: AssetItem[] // 素材库列表，用于 @asset_ 引用
   selectedCount?: number // 选中节点数，用于 slash 命令过滤
 }
 
@@ -113,6 +115,7 @@ export function ChatInput({
   placeholder = "描述想法，或框选节点添加上下文...",
   disabled = false,
   canvasNodes = [],
+  assets = [],
   selectedCount = 0,
 }: ChatInputProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -131,33 +134,48 @@ export function ChatInput({
       ? selectedModelOption.value
       : currentMode.defaultModel
 
-  // @ 引用节点过滤
+  // @ 引用节点/素材过滤：节点插入 @node_xxx，素材插入 @asset_xxx，与 build-node-execution-context 对齐
   const mentionableNodes = canvasNodes.filter((n) => n.data?.title || n.data?.text || n.data?.fileName)
+  const normalizedMentionQuery = mentionQuery.toLowerCase()
   const filteredMentionNodes = mentionQuery
     ? mentionableNodes.filter((n) => {
         const title = n.data?.title || n.data?.fileName || n.data?.text || ""
-        return String(title).toLowerCase().includes(mentionQuery.toLowerCase())
+        return String(title).toLowerCase().includes(normalizedMentionQuery) || String(n.id).toLowerCase().includes(normalizedMentionQuery)
       })
     : mentionableNodes
+  const filteredMentionAssets = (mentionQuery
+    ? assets.filter((asset) =>
+        asset.name.toLowerCase().includes(normalizedMentionQuery) ||
+        asset.id.toLowerCase().includes(normalizedMentionQuery) ||
+        asset.folder.toLowerCase().includes(normalizedMentionQuery),
+      )
+    : assets
+  ).slice(0, 12)
+  const mentionOptions = [
+    ...filteredMentionNodes.slice(0, 12).map((node) => ({ kind: "node" as const, item: node })),
+    ...filteredMentionAssets.map((asset) => ({ kind: "asset" as const, item: asset })),
+  ]
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // @ 引用下拉菜单导航
     if (showNodeMention) {
       if (e.key === "ArrowDown") {
         e.preventDefault()
-        setMentionIndex((prev) => (prev + 1) % filteredMentionNodes.length)
+        setMentionIndex((prev) => (prev + 1) % mentionOptions.length)
         return
       }
       if (e.key === "ArrowUp") {
         e.preventDefault()
-        setMentionIndex((prev) => (prev - 1 + filteredMentionNodes.length) % filteredMentionNodes.length)
+        setMentionIndex((prev) => (prev - 1 + mentionOptions.length) % mentionOptions.length)
         return
       }
       if (e.key === "Enter" || e.key === "Tab") {
         e.preventDefault()
-        const node = filteredMentionNodes[mentionIndex]
-        if (node) {
-          insertNodeMention(node)
+        const option = mentionOptions[mentionIndex]
+        if (option?.kind === "node") {
+          insertNodeMention(option.item)
+        } else if (option?.kind === "asset") {
+          insertAssetMention(option.item)
         }
         return
       }
@@ -175,19 +193,30 @@ export function ChatInput({
     }
   }
 
-  const insertNodeMention = (node: any) => {
-    const title = node.data?.title || node.data?.fileName || node.data?.text?.slice(0, 20) || "节点"
-    // 找到最后一个 @ 的位置，替换 @query 为 @[title](node:id) 格式引用
-    const lastAtIndex = value.lastIndexOf("@")
-    if (lastAtIndex >= 0) {
-      const before = value.slice(0, lastAtIndex)
-      const after = value.slice(lastAtIndex + 1 + mentionQuery.length)
-      onChange(before + `@[${title}](node:${node.id}) ` + after)
-    }
+  const closeMentionMenu = () => {
     setShowNodeMention(false)
     setMentionQuery("")
     setMentionIndex(0)
     textareaRef.current?.focus()
+  }
+
+  const replaceActiveMention = (token: string) => {
+    const lastAtIndex = value.lastIndexOf("@")
+    if (lastAtIndex >= 0) {
+      const before = value.slice(0, lastAtIndex)
+      const after = value.slice(lastAtIndex + 1 + mentionQuery.length)
+      onChange(before + token + " " + after)
+    }
+    closeMentionMenu()
+  }
+
+  const insertNodeMention = (node: any) => {
+    // build-node-execution-context 当前解析 @node_xxx；因此这里插入机器可解析 token，而不是 markdown 链接。
+    replaceActiveMention(`@${node.id}`)
+  }
+
+  const insertAssetMention = (asset: AssetItem) => {
+    replaceActiveMention(`@${asset.id}`)
   }
 
   const handleInputChange = (newValue: string) => {
@@ -284,23 +313,45 @@ export function ChatInput({
         />
 
         {/* @ 引用节点下拉菜单 */}
-        {showNodeMention && filteredMentionNodes.length > 0 && (
+        {showNodeMention && mentionOptions.length > 0 && (
           <div
-            className="absolute bottom-full left-4 mb-2 max-h-[200px] w-[280px] overflow-y-auto rounded-xl border py-2 shadow-xl"
+            className="absolute bottom-full left-4 mb-2 max-h-[240px] w-[320px] overflow-y-auto rounded-xl border py-2 shadow-xl"
             style={{
               backgroundColor: "rgba(30,30,38,0.98)",
               borderColor: DESIGN_TOKENS.border,
             }}
           >
             <div className="px-3 py-1 text-xs" style={{ color: DESIGN_TOKENS.textMuted }}>
-              引用画布节点
+              引用画布节点 / 素材库资产
             </div>
-            {filteredMentionNodes.map((node, idx) => {
+            {mentionOptions.map((option, idx) => {
+              if (option.kind === "asset") {
+                const asset = option.item
+                return (
+                  <button
+                    key={`asset-${asset.id}`}
+                    onClick={() => insertAssetMention(asset)}
+                    className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-white/5 ${
+                      idx === mentionIndex ? "bg-white/10" : ""
+                    }`}
+                    style={{ color: idx === mentionIndex ? DESIGN_TOKENS.accent : DESIGN_TOKENS.text }}
+                  >
+                    <span className="flex items-center gap-1 text-xs rounded px-1.5 py-0.5" style={{ backgroundColor: "rgba(100,116,139,0.2)", color: DESIGN_TOKENS.textMuted }}>
+                      <Archive size={11} />
+                      素材
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">{asset.name}</span>
+                    <span className="text-[10px]" style={{ color: DESIGN_TOKENS.textMuted }}>{asset.folder}</span>
+                  </button>
+                )
+              }
+
+              const node = option.item
               const title = node.data?.title || node.data?.fileName || node.data?.text?.slice(0, 20) || "未命名节点"
-              const typeLabel = node.type === "image" ? "图片" : node.type === "text" ? "文本" : "提示词"
+              const typeLabel = node.type === "image" ? "图片" : node.type === "text" ? "文本" : "节点"
               return (
                 <button
-                  key={node.id}
+                  key={`node-${node.id}`}
                   onClick={() => insertNodeMention(node)}
                   className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-white/5 ${
                     idx === mentionIndex ? "bg-white/10" : ""
@@ -310,7 +361,8 @@ export function ChatInput({
                   <span className="text-xs rounded px-1.5 py-0.5" style={{ backgroundColor: "rgba(100,116,139,0.2)", color: DESIGN_TOKENS.textMuted }}>
                     {typeLabel}
                   </span>
-                  <span className="truncate">{title}</span>
+                  <span className="min-w-0 flex-1 truncate">{title}</span>
+                  <span className="text-[10px]" style={{ color: DESIGN_TOKENS.textMuted }}>@{node.id}</span>
                 </button>
               )
             })}

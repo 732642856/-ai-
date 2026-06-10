@@ -37,6 +37,11 @@ export interface JianyingClipSettings {
   transformY: number;
   scale: number;
   rotation: number;
+  /** 画面翻转 */
+  flip?: {
+    horizontal: boolean;
+    vertical: boolean;
+  };
   /** 画面裁剪 */
   crop?: {
     left: number;
@@ -86,6 +91,12 @@ export interface JianyingVideoMaterial {
   height: number;
   /** 文件格式 */
   format: string;
+  /** 是否包含音频轨道 */
+  hasAudio?: boolean;
+  /** 是否为 AI 生成内容 */
+  isAiGenerateContent?: boolean;
+  /** 是否为版权素材 */
+  isCopyright?: boolean;
 }
 
 /** 音频素材 */
@@ -95,6 +106,8 @@ export interface JianyingAudioMaterial {
   path: string;
   duration: number;
   format: string;
+  /** 是否为 AI 克隆音色 */
+  isAiCloneTone?: boolean;
 }
 
 /** 文本素材 */
@@ -142,6 +155,10 @@ export interface JianyingDraftContent {
   duration: number;
   fps: number;
   canvasConfig: JianyingCanvasConfig;
+  /** 色彩空间 (0=SDR, 1=HDR) */
+  colorSpace?: number;
+  /** 最后修改平台信息 */
+  lastModifiedPlatform?: JianyingPlatform & { appVersion?: string };
   tracks: JianyingTrack[];
   materials: JianyingMaterials;
   platform: JianyingPlatform;
@@ -407,6 +424,11 @@ export function exportToJianyingDraft(
       width: opts.canvasWidth,
       height: opts.canvasHeight,
       backgroundColor: "#000000",
+    },
+    colorSpace: 0, // SDR
+    lastModifiedPlatform: {
+      appSource: opts.appSource,
+      appVersion: JIANYING_VERSION,
     },
     tracks: [],
     materials: {

@@ -4,7 +4,7 @@
  * - 底部保留素材库、聊天、用户
  */
 
-import { Plus, Library, MessageCircle, Clock3, Save } from "lucide-react"
+import { Plus, Library, MessageCircle, Clock3, Save, ImageIcon, Camera, Palette, Film } from "lucide-react"
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 
 interface LeftToolbarProps {
@@ -16,6 +16,11 @@ interface LeftToolbarProps {
   onOpenWorkspaceHistory?: () => void
   onOpenTemplates?: () => void
   onOpenUserMenu: () => void
+  // 制片层面板
+  onOpenCharacterView?: () => void
+  onOpenCinematicParams?: () => void
+  onOpenColorGrade?: () => void
+  onOpenTimeline?: () => void
 }
 
 export function LeftToolbar({
@@ -27,6 +32,10 @@ export function LeftToolbar({
   onOpenWorkspaceHistory,
   onOpenTemplates,
   onOpenUserMenu,
+  onOpenCharacterView,
+  onOpenCinematicParams,
+  onOpenColorGrade,
+  onOpenTimeline,
 }: LeftToolbarProps) {
   return (
     <div
@@ -104,6 +113,54 @@ export function LeftToolbar({
         title="工作流模板（保存/加载）"
       >
         <Save size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />
+      </button>
+
+      {/* 分隔线 */}
+      <div
+        className="my-1.5 h-px w-6"
+        style={{ backgroundColor: DESIGN_TOKENS.border }}
+      />
+
+      {/* --- 制片层面板工具 --- */}
+
+      {/* 角色三视图 */}
+      <button
+        onClick={onOpenCharacterView}
+        className="flex h-9 w-9 items-center justify-center rounded-full transition-all hover:bg-white/10"
+        style={{ color: DESIGN_TOKENS.textMuted }}
+        title="角色三视图生成"
+      >
+        <ImageIcon size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />
+      </button>
+
+      {/* 运镜参数 */}
+      <button
+        onClick={onOpenCinematicParams}
+        className="flex h-9 w-9 items-center justify-center rounded-full transition-all hover:bg-white/10"
+        style={{ color: DESIGN_TOKENS.textMuted }}
+        title="运镜参数控制"
+      >
+        <Camera size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />
+      </button>
+
+      {/* 调色面板 */}
+      <button
+        onClick={onOpenColorGrade}
+        className="flex h-9 w-9 items-center justify-center rounded-full transition-all hover:bg-white/10"
+        style={{ color: DESIGN_TOKENS.textMuted }}
+        title="色彩分级"
+      >
+        <Palette size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />
+      </button>
+
+      {/* 时间轴 */}
+      <button
+        onClick={onOpenTimeline}
+        className="flex h-9 w-9 items-center justify-center rounded-full transition-all hover:bg-white/10"
+        style={{ color: DESIGN_TOKENS.textMuted }}
+        title="时间轴编辑"
+      >
+        <Film size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />
       </button>
 
       {/* 分隔线 */}

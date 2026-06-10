@@ -133,6 +133,11 @@ import { SceneBiblePanel } from "./components/panels/SceneBiblePanel";
 import { VisualStyleBiblePanel } from "./components/panels/VisualStyleBiblePanel";
 import { EmotionCurvePanel } from "./components/panels/EmotionCurvePanel";
 import type { EmotionCurveDataPoint } from "./components/panels/EmotionCurvePanel";
+// 制片层面板（角色三视图、运镜参数、调色、时间轴）
+import { CharacterViewPanel as CharacterViewModal } from "./components/canvas/CharacterViewModal";
+import { CinematicParamPanelInner as CinematicParamPanel, type CinematicParams } from "./components/panels/CinematicParamPanel";
+import { ColorGradePanel } from "./components/panels/ColorGradePanel";
+import { TimelinePanel, type TimelineClip } from "./components/panels/TimelinePanel";
 import { NodeHistoryPanel } from "./components/history/NodeHistoryPanel";
 import { WorkspaceHistoryPanel } from "./components/history/WorkspaceHistoryPanel";
 import { WorkflowRunPanel } from "./components/workflow/WorkflowRunPanel";
@@ -525,6 +530,69 @@ function getNodeText(node: Node<CanvasNodeData>): string {
     .join("\n");
 }
 
+function parseTimelineDurationSeconds(value: unknown, fallback = 5): number {
+  if (typeof value === "number" && Number.isFinite(value)) return Math.max(1, value);
+  if (typeof value !== "string") return fallback;
+  const parsed = parseDurationToSeconds(value);
+  return parsed && Number.isFinite(parsed) ? Math.max(1, parsed) : fallback;
+}
+
+function buildTimelineClipsFromNodes(nodes: Node<CanvasNodeData>[]): TimelineClip[] {
+  let cursor = 0;
+  const clips: TimelineClip[] = [];
+
+  for (const node of nodes) {
+    const data = node.data || {};
+    const shot = data.shot;
+    const title = data.title || data.fileName || shot?.title || "未命名片段";
+    const duration = parseTimelineDurationSeconds(
+      data.duration ?? shot?.duration ?? data.totalDurationSeconds,
+      5,
+    );
+    const videoUrl = data.resultUrl || data.assetUrl || (data.nodeKind === "uploaded-video" ? data.imageUrl : undefined);
+    const imageUrl = shot?.generatedImageUrl || data.imageUrl || data.thumbnailUrl;
+
+    if (data.nodeKind === "video-result" || data.nodeKind === "video-generation" || data.nodeKind === "uploaded-video" || videoUrl || imageUrl) {
+      clips.push({
+        id: `tl-video-${node.id}`,
+        nodeId: node.id,
+        type: "video",
+        label: String(title),
+        startTime: cursor,
+        duration,
+        thumbnailUrl: imageUrl,
+      });
+      cursor += duration;
+    }
+
+    const audioUrl = shot?.voiceAudioUrl || (data.nodeKind === "uploaded-audio" ? data.assetUrl || data.resultUrl : undefined);
+    if (data.nodeKind === "audio" || data.nodeKind === "tts" || data.nodeKind === "uploaded-audio" || audioUrl) {
+      clips.push({
+        id: `tl-audio-${node.id}`,
+        nodeId: node.id,
+        type: "audio",
+        label: String(title),
+        startTime: Math.max(0, cursor - duration),
+        duration,
+      });
+    }
+
+    const subtitleDuration = parseTimelineDurationSeconds(data.totalDurationSeconds ?? shot?.subtitleTimeline?.durationSeconds ?? duration, duration);
+    if (data.nodeKind === "subtitle" || data.nodeKind === "subtitle-srt" || data.srtContent || shot?.subtitleTimeline) {
+      clips.push({
+        id: `tl-subtitle-${node.id}`,
+        nodeId: node.id,
+        type: "subtitle",
+        label: String(title),
+        startTime: shot?.subtitleTimeline?.startTimeSeconds ?? Math.max(0, cursor - duration),
+        duration: subtitleDuration,
+      });
+    }
+  }
+
+  return clips;
+}
+
 // ============================================================================
 // STAR CANVAS INNER (uses hooks that require ReactFlow context)
 // ============================================================================
@@ -707,6 +775,11 @@ function StarCanvasInner() {
   const [showStyleBiblePanel, setShowStyleBiblePanel] = useState(false);
   const [showEmotionCurve, setShowEmotionCurve] = useState(false);
   const [showCharacterLibrary, setShowCharacterLibrary] = useState(false);
+  // 制片层面板
+  const [showCharacterView, setShowCharacterView] = useState(false);
+  const [showCinematicParams, setShowCinematicParams] = useState(false);
+  const [showColorGrade, setShowColorGrade] = useState(false);
+  const [showTimeline, setShowTimeline] = useState(false);
   const [showProductionQueue, setShowProductionQueue] = useState(false);
   const [historyNodeId, setHistoryNodeId] = useState<string | null>(null);
   const [isComposingSelectedShots, setIsComposingSelectedShots] = useState(false);
@@ -851,6 +924,9 @@ function StarCanvasInner() {
       sourceCount: sourceVisuals.length + sourcePrompts.length,
     };
   }, [nodes, storyboardCompositeSettings.stylePrompt]);
+
+  const timelineClips = useMemo(() => buildTimelineClipsFromNodes(nodes), [nodes]);
+  const [timelineCurrentTime, setTimelineCurrentTime] = useState(0);
 
   const productionRunQueue = useMemo(() => {
     const briefs = buildShotProductionBriefs(nodes);
@@ -6566,7 +6642,7 @@ function StarCanvasInner() {
       }
 
       const asset: AssetItem = {
-        id: generateId(),
+        id: `asset_${generateId()}`,
         type: "image",
         name: node.data.fileName || node.data.title || "Untitled",
         src,
@@ -7465,6 +7541,10 @@ function StarCanvasInner() {
         onOpenWorkspaceHistory={() => setShowWorkspaceHistory(true)}
         onOpenTemplates={() => setShowTemplatesDialog(true)}
         onOpenUserMenu={() => setShowUserMenu((prev) => !prev)}
+        onOpenCharacterView={() => setShowCharacterView(true)}
+        onOpenCinematicParams={() => setShowCinematicParams(true)}
+        onOpenColorGrade={() => setShowColorGrade(true)}
+        onOpenTimeline={() => setShowTimeline(true)}
       />
 
       {/* Workflow Templates Dialog */}
@@ -8103,6 +8183,76 @@ function StarCanvasInner() {
           document.body,
         )}
 
+      {/* ================================================================ */}
+      {/* 制片层面板：角色三视图、运镜参数、调色、时间轴                      */}
+      {/* ================================================================ */}
+
+      {/* 角色三视图生成面板 (CharacterViewModal) */}
+      {showCharacterView && (
+        <CharacterViewModal
+          isOpen={showCharacterView}
+          onClose={() => setShowCharacterView(false)}
+        />
+      )}
+
+      {/* 影视参数化控制面板 (CinematicParamPanel — leva) */}
+      {showCinematicParams && (
+        <CinematicParamPanel
+          isOpen={showCinematicParams}
+          onClose={() => setShowCinematicParams(false)}
+          selectedNodeId={selectedNodeId}
+          onApplyToNode={(nodeId: string, prompt: string, params: CinematicParams) => {
+            setNodes((nds) =>
+              nds.map((n) => {
+                if (n.id !== nodeId) return n;
+                const previousPrompt = n.data.prompt || n.data.content || "";
+                const nextPrompt = previousPrompt ? `${previousPrompt}\n\n${prompt}` : prompt;
+                return { ...n, data: { ...n.data, prompt: nextPrompt, cinematicParams: params } };
+              }),
+            );
+          }}
+        />
+      )}
+
+      {/* 色彩分级面板 (ColorGradePanel — rgb-curve) */}
+      {showColorGrade && (
+        <ColorGradePanel
+          isOpen={showColorGrade}
+          onClose={() => setShowColorGrade(false)}
+          selectedNodeId={selectedNodeId}
+          onApplyToNode={(nodeId: string, promptSuffix: string) => {
+            setNodes((nds) =>
+              nds.map((n) => {
+                if (n.id !== nodeId) return n;
+                const previousPrompt = n.data.prompt || n.data.content || "";
+                const nextPrompt = previousPrompt ? `${previousPrompt}\n\n${promptSuffix}` : promptSuffix;
+                return { ...n, data: { ...n.data, prompt: nextPrompt, colorGradePrompt: promptSuffix } };
+              }),
+            );
+          }}
+        />
+      )}
+
+      {/* 时间轴面板 (TimelinePanel — react-timeline-editor) */}
+      {showTimeline && (
+        <TimelinePanel
+          isOpen={showTimeline}
+          onClose={() => setShowTimeline(false)}
+          clips={timelineClips}
+          currentNodeTime={timelineCurrentTime}
+          onSeek={setTimelineCurrentTime}
+          onClipMove={(clipId, newStartTime) => {
+            setNodes((nds) =>
+              nds.map((n) =>
+                `tl-video-${n.id}` === clipId || `tl-audio-${n.id}` === clipId || `tl-subtitle-${n.id}` === clipId
+                  ? { ...n, data: { ...n.data, timelineStartTimeSeconds: newStartTime } }
+                  : n,
+              ),
+            );
+          }}
+        />
+      )}
+
       {/* 情绪曲线面板 */}
       {showEmotionCurve && typeof document !== "undefined" &&
         createPortal(
@@ -8353,6 +8503,7 @@ function StarCanvasInner() {
         selectedNodeId={selectedNodeId}
         selectedNode={selectedNode}
         canvasNodes={nodes}
+        assets={assetLibrary.assets}
         onAddImageToCanvas={handleAddImageFromChat}
         onApplyChatActions={applyChatActions}
         showHistoryFromOutside={showHistory}

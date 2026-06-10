@@ -27,6 +27,7 @@ import { getActionLabel, getStatusIcon, formatActionsSummary } from "../../featu
 import { generateImageFromPrompt } from "../../utils/imageGeneration"
 import { generateId } from "../../utils/generateId"
 import type { Node } from "@xyflow/react"
+import type { AssetItem } from "../canvas/types"
 
 type CanvasNodeContextSnapshot = {
   id: string
@@ -168,6 +169,7 @@ interface ChatPanelProps {
   selectedNodeId?: string | null
   selectedNode?: Node | null
   canvasNodes?: Node[] // 画布上所有节点，用于AI感知
+  assets?: AssetItem[] // 素材库资产，用于 @asset_ 引用
   onAddImageToCanvas: (attachment: ChatAttachment) => void
   onApplyChatActions?: (actions: ChatCanvasAction[]) => ApplyActionsReport // 返回执行报告
   showHistoryFromOutside?: boolean
@@ -180,6 +182,7 @@ export function ChatPanel({
   selectedNodeId,
   selectedNode,
   canvasNodes = [],
+  assets = [],
   onAddImageToCanvas,
   onApplyChatActions,
   showHistoryFromOutside,
@@ -876,6 +879,7 @@ export function ChatPanel({
           onAddAttachmentToCanvas={handleAddToCanvas}
           placeholder={selectedNodeId ? "根据选中节点提问..." : "描述想法，或框选节点添加上下文..."}
           canvasNodes={canvasNodes}
+          assets={assets}
           selectedCount={selectedNodeId ? 1 : 0}
         />
       </div>
