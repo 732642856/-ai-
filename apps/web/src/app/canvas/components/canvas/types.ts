@@ -480,6 +480,7 @@ export type CanvasNodeData = {
   generation?: any
   cinematicParams?: import("../panels/CinematicParamPanel").CinematicParams
   colorGradePrompt?: string
+  panoramaPrompt?: string
   timelineStartTimeSeconds?: number
   generatedShotNodeIds?: string[]
   generatedStoryboardGridNodeId?: string

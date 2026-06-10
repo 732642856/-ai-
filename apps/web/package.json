@@ -40,6 +40,7 @@
     "react-dom": "19.2.4",
     "react-dropzone": "14.3.0",
     "recharts": "2.15.0",
+    "react-pannellum": "^0.2.16",
     "rgb-curve": "^1.0.2",
     "tweakpane": "^4.0.5",
     "undici": "^8.4.1",

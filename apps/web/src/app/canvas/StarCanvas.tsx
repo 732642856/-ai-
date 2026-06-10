@@ -133,11 +133,12 @@ import { SceneBiblePanel } from "./components/panels/SceneBiblePanel";
 import { VisualStyleBiblePanel } from "./components/panels/VisualStyleBiblePanel";
 import { EmotionCurvePanel } from "./components/panels/EmotionCurvePanel";
 import type { EmotionCurveDataPoint } from "./components/panels/EmotionCurvePanel";
-// 制片层面板（角色三视图、运镜参数、调色、时间轴）
+// 制片层面板（角色三视图、运镜参数、调色、时间轴、全景预览）
 import { CharacterViewPanel as CharacterViewModal } from "./components/canvas/CharacterViewModal";
 import { CinematicParamPanelInner as CinematicParamPanel, type CinematicParams } from "./components/panels/CinematicParamPanel";
 import { ColorGradePanel } from "./components/panels/ColorGradePanel";
 import { TimelinePanel, type TimelineClip } from "./components/panels/TimelinePanel";
+import { PanoramaPanel } from "./components/panels/PanoramaPanel";
 import { NodeHistoryPanel } from "./components/history/NodeHistoryPanel";
 import { WorkspaceHistoryPanel } from "./components/history/WorkspaceHistoryPanel";
 import { WorkflowRunPanel } from "./components/workflow/WorkflowRunPanel";
@@ -780,6 +781,7 @@ function StarCanvasInner() {
   const [showCinematicParams, setShowCinematicParams] = useState(false);
   const [showColorGrade, setShowColorGrade] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
+  const [showPanorama, setShowPanorama] = useState(false);
   const [showProductionQueue, setShowProductionQueue] = useState(false);
   const [historyNodeId, setHistoryNodeId] = useState<string | null>(null);
   const [isComposingSelectedShots, setIsComposingSelectedShots] = useState(false);
@@ -7545,6 +7547,7 @@ function StarCanvasInner() {
         onOpenCinematicParams={() => setShowCinematicParams(true)}
         onOpenColorGrade={() => setShowColorGrade(true)}
         onOpenTimeline={() => setShowTimeline(true)}
+        onOpenPanorama={() => setShowPanorama(true)}
       />
 
       {/* Workflow Templates Dialog */}
@@ -8248,6 +8251,31 @@ function StarCanvasInner() {
                   ? { ...n, data: { ...n.data, timelineStartTimeSeconds: newStartTime } }
                   : n,
               ),
+            );
+          }}
+        />
+      )}
+
+      {/* 全景预𪾢面板 (PanoramaPanel — react-pannellum) */}
+      {showPanorama && (
+        <PanoramaPanel
+          isOpen={showPanorama}
+          onClose={() => setShowPanorama(false)}
+          selectedNodeId={selectedNodeId}
+          initialImageUrl={
+            selectedNode
+              ? (selectedNode.data as Record<string, unknown>)?.imageUrl as string | undefined
+                ?? (selectedNode.data as Record<string, unknown>)?.resultUrl as string | undefined
+              : undefined
+          }
+          onApplyToNode={(nodeId: string, panoramaPrompt: string) => {
+            setNodes((nds) =>
+              nds.map((n) => {
+                if (n.id !== nodeId) return n;
+                const previousPrompt = n.data.prompt || n.data.content || "";
+                const nextPrompt = previousPrompt ? `${previousPrompt}\n\n[Panorama] ${panoramaPrompt}` : `[Panorama] ${panoramaPrompt}`;
+                return { ...n, data: { ...n.data, prompt: nextPrompt, panoramaPrompt } };
+              }),
             );
           }}
         />
