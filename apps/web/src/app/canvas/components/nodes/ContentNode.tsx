@@ -170,7 +170,7 @@ function ContinuityCheckPanel({ issues, report }: ContinuityCheckPanelProps) {
                 const dimLabel = DIMENSION_LABELS[issue.dimension] ?? issue.dimension
                 return (
                   <div
-                    key={idx}
+                    key={issue.shotId ?? issue.sceneId ?? `${issue.dimension}-${idx}`}
                     className="rounded-lg p-2 flex flex-col gap-0.5"
                     style={{ backgroundColor: config.bg, border: `1px solid ${config.color}22` }}
                   >

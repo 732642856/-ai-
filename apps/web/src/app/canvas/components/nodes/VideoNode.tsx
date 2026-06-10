@@ -111,13 +111,16 @@ const VideoNode = memo(function VideoNode({ id, data, selected, onRetry }: Video
       setCurrentSubtitle(seg?.text ?? "");
     };
 
+    const handleEnded = () => setCurrentSubtitle("");
+    const handlePause = () => setCurrentSubtitle("");
+
     video.addEventListener("timeupdate", updateSubtitle);
-    video.addEventListener("ended", () => setCurrentSubtitle(""));
-    video.addEventListener("pause", () => setCurrentSubtitle(""));
+    video.addEventListener("ended", handleEnded);
+    video.addEventListener("pause", handlePause);
     return () => {
       video.removeEventListener("timeupdate", updateSubtitle);
-      video.removeEventListener("ended", () => setCurrentSubtitle(""));
-      video.removeEventListener("pause", () => setCurrentSubtitle(""));
+      video.removeEventListener("ended", handleEnded);
+      video.removeEventListener("pause", handlePause);
     };
   }, [hasSubtitles, subtitleSegments]);
 

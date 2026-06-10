@@ -24,14 +24,18 @@ interface CharacterBiblePanelProps {
 }
 
 export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProps) {
-  const {
-    bibleCharacters,
-    selectedBibleCharacterId,
-    selectBibleCharacter,
-    addBibleCharacter,
-    updateBibleCharacter,
-    removeBibleCharacter,
-  } = useCanvasStore()
+  const bibleCharacters = useCanvasStore((s) => s.bibleCharacters)
+  const selectedBibleCharacterId = useCanvasStore((s) => s.selectedBibleCharacterId)
+  const selectBibleCharacter = useCanvasStore((s) => s.selectBibleCharacter)
+  const addBibleCharacter = useCanvasStore((s) => s.addBibleCharacter)
+  const updateBibleCharacter = useCanvasStore((s) => s.updateBibleCharacter)
+  const removeBibleCharacter = useCanvasStore((s) => s.removeBibleCharacter)
+  
+  // 通过 selector 精确订阅选中的角色数据，避免 bibleCharacters 全量变化导致不必要重渲染
+  const selectedCharacterData = useCanvasStore((s) => {
+    if (!s.selectedBibleCharacterId) return null
+    return s.bibleCharacters.find((c) => c.id === s.selectedBibleCharacterId) || null
+  })
 
   const [tab, setTab] = useState<TabMode>("list")
   const [edit, setEdit] = useState<Partial<CharacterBibleData>>({})
@@ -41,21 +45,20 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
   const [aiPrompt, setAiPrompt] = useState("")
   const [aiGenerating, setAiGenerating] = useState(false)
 
-  const selectedCharacter = bibleCharacters.find((c) => c.id === selectedBibleCharacterId)
-
   // 选中角色时自动切换到编辑视图
+  // 使用 selector 返回的 selectedCharacterData 精确订阅，避免 bibleCharacters 全量变化频繁触发
   useEffect(() => {
-    if (selectedCharacter) {
+    if (selectedCharacterData) {
       setEdit({
-        ...selectedCharacter,
-        identityAnchors: selectedCharacter.identityAnchors || createDefaultIdentityAnchors(),
+        ...selectedCharacterData,
+        identityAnchors: selectedCharacterData.identityAnchors || createDefaultIdentityAnchors(),
       })
       setTab("edit")
     } else {
       setEdit({})
       setTab("list")
     }
-  }, [selectedBibleCharacterId, bibleCharacters])
+  }, [selectedCharacterData])
 
   const handleCreateNew = () => {
     const newChar: CharacterBibleData = {
@@ -121,6 +124,9 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
           _providerOverrides: overrides || undefined,
         }),
       })
+      if (!res.ok) {
+        throw new Error(`Bible director API error: ${res.status} ${res.statusText}`)
+      }
       const data = await res.json()
       if (data.parsed) {
         const c = data.parsed
@@ -203,7 +209,7 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
               {bibleCharacters.map((char) => (
                 <div
                   key={char.id}
-                  className="flex items-center gap-3 rounded-xl p-3 cursor-pointer transition-colors"
+                  className="group flex items-center gap-3 rounded-xl p-3 cursor-pointer transition-colors"
                   style={{
                     backgroundColor: selectedBibleCharacterId === char.id ? DESIGN_TOKENS.accentSoft : DESIGN_TOKENS.card,
                     border: `1px solid ${selectedBibleCharacterId === char.id ? DESIGN_TOKENS.accent : DESIGN_TOKENS.border}`,
@@ -414,7 +420,7 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
                     <input
                       type="text"
                       value={edit.identityAnchors?.skeletal?.faceShape || ""}
-                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, skeletal: { ...prev.identityAnchors!.skeletal, faceShape: e.target.value } }}))}
+                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()), skeletal: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()).skeletal, faceShape: e.target.value } }}))}
                       placeholder="脸型：圆脸/方脸/鹅蛋脸"
                       className="rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none"
                       style={{ borderColor: DESIGN_TOKENS.border }}
@@ -422,7 +428,7 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
                     <input
                       type="text"
                       value={edit.identityAnchors?.skeletal?.jawline || ""}
-                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, skeletal: { ...prev.identityAnchors!.skeletal, jawline: e.target.value } }}))}
+                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()), skeletal: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()).skeletal, jawline: e.target.value } }}))}
                       placeholder="下颌线：分明/圆润"
                       className="rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none"
                       style={{ borderColor: DESIGN_TOKENS.border }}
@@ -430,7 +436,7 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
                     <input
                       type="text"
                       value={edit.identityAnchors?.skeletal?.cheekbones || ""}
-                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, skeletal: { ...prev.identityAnchors!.skeletal, cheekbones: e.target.value } }}))}
+                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()), skeletal: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()).skeletal, cheekbones: e.target.value } }}))}
                       placeholder="颧骨：高/平/宽"
                       className="rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none"
                       style={{ borderColor: DESIGN_TOKENS.border }}
@@ -445,7 +451,7 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
                     <input
                       type="text"
                       value={edit.identityAnchors?.features?.eyeShape || ""}
-                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, features: { ...prev.identityAnchors!.features, eyeShape: e.target.value } }}))}
+                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()), features: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()).features, eyeShape: e.target.value } }}))}
                       placeholder="眼型：丹凤眼/杏眼/桃花眼"
                       className="rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none"
                       style={{ borderColor: DESIGN_TOKENS.border }}
@@ -453,7 +459,7 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
                     <input
                       type="text"
                       value={edit.identityAnchors?.features?.eyeDetails || ""}
-                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, features: { ...prev.identityAnchors!.features, eyeDetails: e.target.value } }}))}
+                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()), features: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()).features, eyeDetails: e.target.value } }}))}
                       placeholder="眼细节：单眼皮/内双/外双"
                       className="rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none"
                       style={{ borderColor: DESIGN_TOKENS.border }}
@@ -461,7 +467,7 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
                     <input
                       type="text"
                       value={edit.identityAnchors?.features?.noseShape || ""}
-                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, features: { ...prev.identityAnchors!.features, noseShape: e.target.value } }}))}
+                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()), features: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()).features, noseShape: e.target.value } }}))}
                       placeholder="鼻型：直鼻/翘鼻/蒜头鼻"
                       className="rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none"
                       style={{ borderColor: DESIGN_TOKENS.border }}
@@ -469,7 +475,7 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
                     <input
                       type="text"
                       value={edit.identityAnchors?.features?.lipShape || ""}
-                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, features: { ...prev.identityAnchors!.features, lipShape: e.target.value } }}))}
+                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()), features: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()).features, lipShape: e.target.value } }}))}
                       placeholder="唇型：薄唇/厚唇/M字唇"
                       className="rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none"
                       style={{ borderColor: DESIGN_TOKENS.border }}
@@ -486,9 +492,9 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
                       onChange={(e) => setEdit((prev) => ({
                         ...prev,
                         identityAnchors: {
-                          ...prev.identityAnchors!,
+                          ...(prev.identityAnchors ?? createDefaultIdentityAnchors()),
                           uniqueMarks: {
-                            ...prev.identityAnchors!.uniqueMarks,
+                            ...(prev.identityAnchors ?? createDefaultIdentityAnchors()).uniqueMarks,
                             marks: e.target.value.split("\n").map((s) => s.trim()).filter(Boolean),
                           },
                         },
@@ -513,7 +519,7 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
                       <input
                         type="text"
                         value={edit.identityAnchors?.colorAnchors?.iris || ""}
-                        onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, colorAnchors: { ...prev.identityAnchors!.colorAnchors, iris: e.target.value } }}))}
+                        onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()), colorAnchors: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()).colorAnchors, iris: e.target.value } }}))}
                         placeholder="#4A2C2A"
                         className="flex-1 rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none font-mono"
                         style={{ borderColor: DESIGN_TOKENS.border }}
@@ -524,7 +530,7 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
                       <input
                         type="text"
                         value={edit.identityAnchors?.colorAnchors?.hair || ""}
-                        onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, colorAnchors: { ...prev.identityAnchors!.colorAnchors, hair: e.target.value } }}))}
+                        onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()), colorAnchors: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()).colorAnchors, hair: e.target.value } }}))}
                         placeholder="#1A1A1A"
                         className="flex-1 rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none font-mono"
                         style={{ borderColor: DESIGN_TOKENS.border }}
@@ -535,7 +541,7 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
                       <input
                         type="text"
                         value={edit.identityAnchors?.colorAnchors?.skin || ""}
-                        onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, colorAnchors: { ...prev.identityAnchors!.colorAnchors, skin: e.target.value } }}))}
+                        onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()), colorAnchors: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()).colorAnchors, skin: e.target.value } }}))}
                         placeholder="#F5D0A6"
                         className="flex-1 rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none font-mono"
                         style={{ borderColor: DESIGN_TOKENS.border }}
@@ -546,7 +552,7 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
                       <input
                         type="text"
                         value={edit.identityAnchors?.colorAnchors?.lips || ""}
-                        onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, colorAnchors: { ...prev.identityAnchors!.colorAnchors, lips: e.target.value } }}))}
+                        onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()), colorAnchors: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()).colorAnchors, lips: e.target.value } }}))}
                         placeholder="#C86B6B"
                         className="flex-1 rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none font-mono"
                         style={{ borderColor: DESIGN_TOKENS.border }}
@@ -562,7 +568,7 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
                     <input
                       type="text"
                       value={edit.identityAnchors?.skinTexture?.skinTexture || ""}
-                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, skinTexture: { ...prev.identityAnchors!.skinTexture, skinTexture: e.target.value } }}))}
+                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()), skinTexture: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()).skinTexture, skinTexture: e.target.value } }}))}
                       placeholder="皮肤纹理：细腻/有雀斑"
                       className="rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none"
                       style={{ borderColor: DESIGN_TOKENS.border }}
@@ -570,7 +576,7 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
                     <input
                       type="text"
                       value={edit.identityAnchors?.skinTexture?.lightingReaction || ""}
-                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, skinTexture: { ...prev.identityAnchors!.skinTexture, lightingReaction: e.target.value } }}))}
+                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()), skinTexture: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()).skinTexture, lightingReaction: e.target.value } }}))}
                       placeholder="光线反应：反光明显/哑光"
                       className="rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none"
                       style={{ borderColor: DESIGN_TOKENS.border }}
@@ -585,7 +591,7 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
                     <input
                       type="text"
                       value={edit.identityAnchors?.hair?.hairlineType || ""}
-                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, hair: { ...prev.identityAnchors!.hair, hairlineType: e.target.value } }}))}
+                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()), hair: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()).hair, hairlineType: e.target.value } }}))}
                       placeholder="发际线：M字额/平额"
                       className="rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none"
                       style={{ borderColor: DESIGN_TOKENS.border }}
@@ -593,7 +599,7 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
                     <input
                       type="text"
                       value={edit.identityAnchors?.hair?.hairTexture || ""}
-                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, hair: { ...prev.identityAnchors!.hair, hairTexture: e.target.value } }}))}
+                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()), hair: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()).hair, hairTexture: e.target.value } }}))}
                       placeholder="发质：直/卷/波浪"
                       className="rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none"
                       style={{ borderColor: DESIGN_TOKENS.border }}
@@ -601,7 +607,7 @@ export function CharacterBiblePanel({ isOpen, onClose }: CharacterBiblePanelProp
                     <input
                       type="text"
                       value={edit.identityAnchors?.hair?.uniqueHairMark || ""}
-                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...prev.identityAnchors!, hair: { ...prev.identityAnchors!.hair, uniqueHairMark: e.target.value } }}))}
+                      onChange={(e) => setEdit((prev) => ({ ...prev, identityAnchors: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()), hair: { ...(prev.identityAnchors ?? createDefaultIdentityAnchors()).hair, uniqueHairMark: e.target.value } }}))}
                       placeholder="独特发部标记（选填）"
                       className="rounded-lg border bg-black/40 px-2 py-1 text-xs text-white outline-none col-span-2"
                       style={{ borderColor: DESIGN_TOKENS.border }}

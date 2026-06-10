@@ -3,7 +3,7 @@
 // ============================================================================
 "use client"
 
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useReactFlow } from "@xyflow/react"
 import type { Node, Edge } from "@xyflow/react"
 import * as Sentry from "@sentry/nextjs"
@@ -18,6 +18,47 @@ import {
   createIdleRunMeta,
 } from "../utils/nodeRunMeta"
 import { createRunHistoryItem } from "../utils/node-run-history"
+
+// ---- 内部类型：用于上游数据解析 ----
+interface ParsedSceneEntry {
+  sceneId?: string
+  id?: string
+  characters?: (string | { name?: string })[]
+  location?: string
+  timeOfDay?: string
+  shots?: ParsedShotEntry[]
+}
+
+interface ParsedShotEntry {
+  shotId?: string
+  id?: string
+  description?: string
+  action?: string
+  dialogue?: string
+  visualPrompt?: string
+}
+
+interface ParsedScriptPayload {
+  scenes?: ParsedSceneEntry[]
+  characters?: unknown[]
+}
+
+interface StreamChunk {
+  done?: boolean
+  content?: string
+  error?: unknown
+  usage?: StreamUsage
+  /** 图片生成副产物 */
+  type?: string
+  imageUrl?: string
+  prompt?: string
+  model?: string
+  generatedImage?: {
+    imageUrl?: string
+    prompt?: string
+    model?: string
+  }
+}
 import { useRunHistoryStore } from "../stores/useRunHistoryStore"
 import type { NodeRunHistoryInput } from "../types/node-run-history"
 import { buildRestorePromptPatch, sanitizeHistoryRawOutput } from "../utils/history-safety"
@@ -206,7 +247,7 @@ async function readSSEStream(
   const processDataLine = (data: string) => {
     if (!data || data === "[DONE]") return
 
-    let parsed: any
+    let parsed: StreamChunk
     try {
       parsed = JSON.parse(data)
     } catch {
@@ -218,9 +259,7 @@ async function readSSEStream(
 
     // Error in stream
     if (parsed.error) {
-      const normalized = typeof parsed.error === "object"
-        ? parsed.error
-        : normalizeGenerationError({ body: parsed.error })
+      const normalized = normalizeGenerationError({ body: parsed.error })
       throw Object.assign(new Error(formatGenerationErrorForDisplay(normalized)), { generationError: normalized })
     }
 
@@ -302,6 +341,12 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
   })
   const abortRef = useRef(false)
   const runningNodeIdsRef = useRef<Set<string>>(new Set())
+  const isMountedRef = useRef(true)
+
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => { isMountedRef.current = false }
+  }, [])
 
   const updateNodeData = useCallback((nodeId: string, updates: Partial<CanvasNodeData>) => {
     setNodes((nds) =>
@@ -328,6 +373,8 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
     return await Sentry.startSpan(
       { op: "workflow.step.execute", name: stepLabel, attributes: { nodeKind: kind, nodeId: node.id } },
       async (span) => {
+        // 如果组件已卸载，跳过后续所有操作
+        if (!isMountedRef.current) return ""
         // Get upstream content from connected nodes
     const upstreamEdges = edges.filter((e) => e.target === node.id)
     const upstreamContent: string[] = []
@@ -444,22 +491,22 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
           const { ContinuityGuard, formatContinuityReport } = await import("../utils/continuityGuard");
           const guard = new ContinuityGuard();
 
-          let parsedScriptData: any = null;
-          let shotSequenceData: any = null;
+          let parsedScriptData: { scenes: { sceneId: string; characters: string[]; location: string; timeOfDay: string }[] } | null = null;
+          let shotSequenceData: { shots: { shotId: string; sceneId: string; instructions: { fragments: { text: string; characterName?: string }[] } }[] } | null = null;
 
           // 1. Find upstream script node
           for (const edge of upstreamEdges) {
-            const upstream = allNodes.find((n: any) => n.id === edge.source);
+            const upstream = allNodes.find((n) => n.id === edge.source);
             if (upstream?.type === "script" || upstream?.type === "text") {
-              const scriptContent = (upstream.data as any)?.content || (upstream.data as any)?.prompt || "";
+              const scriptContent = (upstream.data as CanvasNodeData)?.content || (upstream.data as CanvasNodeData)?.prompt || "";
               if (scriptContent.trim()) {
                 try {
-                  const parsed = JSON.parse(scriptContent);
+                  const parsed = JSON.parse(scriptContent) as ParsedScriptPayload;
                   if (Array.isArray(parsed.scenes)) {
                     parsedScriptData = {
-                      scenes: parsed.scenes.map((s: any, i: number) => ({
+                      scenes: parsed.scenes.map((s: ParsedSceneEntry, i: number) => ({
                         sceneId: s.sceneId || s.id || `scene_${i + 1}`,
-                        characters: Array.isArray(s.characters) ? s.characters.map((c: any) => typeof c === "string" ? c : c?.name || "").filter(Boolean) : [],
+                        characters: Array.isArray(s.characters) ? s.characters.map((c) => typeof c === "string" ? c : c?.name || "").filter(Boolean) : [],
                         location: s.location || "",
                         timeOfDay: s.timeOfDay || "",
                       }))
@@ -473,10 +520,9 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
 
           // 2. Parse storyboard output as shotSequence
           try {
-            const parsed = JSON.parse(finalResult.trim());
+            const parsed = JSON.parse(finalResult.trim()) as ParsedScriptPayload;
             if (Array.isArray(parsed.scenes)) {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const shots: any[] = [];
+              const shots: { shotId: string; sceneId: string; instructions: { fragments: { text: string; characterName?: string }[] } }[] = [];
               for (const scene of parsed.scenes) {
                 const sceneId = scene.sceneId || scene.id || "";
                 if (Array.isArray(scene.shots)) {
@@ -486,8 +532,8 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
                       sceneId,
                       instructions: {
                         fragments: [
-                          { text: [shot.description, shot.action, shot.dialogue].filter(Boolean).join(" "), characterName: undefined as string | undefined },
-                          ...(shot.visualPrompt ? [{ text: shot.visualPrompt, characterName: undefined as string | undefined }] : []),
+                          { text: [shot.description, shot.action, shot.dialogue].filter(Boolean).join(" ") },
+                          ...(shot.visualPrompt ? [{ text: shot.visualPrompt }] : []),
                         ],
                       },
                     });
@@ -503,8 +549,9 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
             const issues = guard.checkAllContinuity(parsedScriptData, shotSequenceData);
             const report = formatContinuityReport(issues);
             // 通过 setNodes 深层合并 runMeta（updateNodeData 只支持浅层更新）
-            setNodes((nds: any[]) =>
-              nds.map((n: any) => {
+            if (isMountedRef.current) {
+            setNodes((nds) =>
+              nds.map((n) => {
                 if (n.id !== node.id) return n;
                 return {
                   ...n,
@@ -520,6 +567,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
                 };
               })
             );
+            }
           }
         } catch (guardErr) {
           console.warn("[ContinuityGuard] 连续性检查失败，不影响主流程:", guardErr);

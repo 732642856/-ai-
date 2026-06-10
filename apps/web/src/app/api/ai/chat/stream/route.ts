@@ -709,10 +709,11 @@ export async function POST(request: NextRequest) {
         "Connection": "keep-alive",
       },
     })
-  } catch (error: any) {
-    console.error("[Chat SSE Route Error]", error)
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Internal server error"
+    console.error("[Chat SSE Route Error]", message)
     return NextResponse.json(
-      { error: error.message || "Internal server error" },
+      { error: message },
       { status: 500 }
     )
   }

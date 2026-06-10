@@ -15,6 +15,15 @@ import {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
+    
+    // 输入验证
+    if (!body || typeof body.task !== "string" || body.task.trim().length === 0) {
+      return NextResponse.json(
+        { error: { message: "缺少必填字段 task", code: "INVALID_INPUT" } },
+        { status: 400 },
+      )
+    }
+    
     const input = body as BibleDirectorInput & { _providerOverrides?: any }
     const { _providerOverrides, ...bibleInput } = input
 

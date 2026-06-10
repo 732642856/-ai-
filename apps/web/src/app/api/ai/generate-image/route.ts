@@ -13,6 +13,11 @@ const API_KEY = process.env.AI_API_KEY || process.env.OPENAI_API_KEY || ""
 const REQUEST_TIMEOUT_MS = Number(process.env.AI_REQUEST_TIMEOUT_MS || 120000)
 const ENHANCE_TIMEOUT_MS = Math.min(REQUEST_TIMEOUT_MS, 30000)
 const IMAGE_RETRY_ATTEMPTS = Math.max(1, Number(process.env.AI_IMAGE_RETRY_ATTEMPTS || 2))
+const IS_DEV = process.env.NODE_ENV !== "production"
+
+/** 仅在开发环境输出日志，生产环境静默，避免泄露内部状态 */
+function devLog(...args: unknown[]) { if (IS_DEV) devLog(...args) }
+function devDebug(...args: unknown[]) { if (IS_DEV) devDebug(...args) }
 const RETRYABLE_UPSTREAM_STATUSES = new Set([429, 500, 502, 503, 504])
 
 function sleep(ms: number) {
@@ -239,7 +244,7 @@ export async function POST(request: NextRequest) {
     // ── Normalize request fields ───────────────────────────────────────────
     const normalizedSize = normalizeImageSize(size)
     if (normalizedSize !== size) {
-      console.info("[generate-image] normalized unsupported size:", size, "=>", normalizedSize)
+      devLog("[generate-image] normalized unsupported size:", size, "=>", normalizedSize)
     }
 
     // ── Normalize reference images ─────────────────────────────────────────
@@ -253,7 +258,7 @@ export async function POST(request: NextRequest) {
         provider: capability.provider,
         error: new Error("UNSUPPORTED_IMAGE_TO_IMAGE"),
       })
-      console.debug("[generate-image] unsupported image-to-image:", normalized.raw)
+      devDebug("[generate-image] unsupported image-to-image:", normalized.raw)
       return NextResponse.json(
         {
           ok: false,
@@ -268,9 +273,9 @@ export async function POST(request: NextRequest) {
     }
 
     const endpoint = isImageToImage ? IMAGE_TO_IMAGE_ENDPOINT : TEXT_TO_IMAGE_ENDPOINT
-    console.info("[generate-image] endpoint:", endpoint)
-    console.info("[generate-image] mode:", isImageToImage ? "image-to-image" : "text-to-image")
-    console.info("[generate-image] source image count:", sourceImageValues.length)
+    devLog("[generate-image] endpoint:", endpoint)
+    devLog("[generate-image] mode:", isImageToImage ? "image-to-image" : "text-to-image")
+    devLog("[generate-image] source image count:", sourceImageValues.length)
 
     if (isImageToImage) {
       const firstPayloadImage =
@@ -278,11 +283,11 @@ export async function POST(request: NextRequest) {
           ? stripDataUriPrefix(sourceImageValues[0])
           : sourceImageValues[0]
 
-      console.info(
+      devLog(
         "[generate-image] first image starts with data uri:",
         firstPayloadImage.startsWith("data:")
       )
-      console.info(
+      devLog(
         "[generate-image] first image base64 prefix:",
         firstPayloadImage.replace(/^data:[^;]+;base64,/, "").slice(0, 16)
       )
@@ -344,28 +349,28 @@ export async function POST(request: NextRequest) {
         })
 
     // ── Diagnostic log: upstream request shape ─────────────────────────────
-    console.info("[generate-image] REFERENCE_IMAGE_FORMAT:", isImageToImage ? "multipart_form_image_file" : REFERENCE_IMAGE_FORMAT)
-    console.info("[generate-image] upstream model:", model)
-    console.info("[generate-image] upstream size:", normalizedSize)
-    console.info("[generate-image] upstream prompt length:", finalPrompt.length)
+    devLog("[generate-image] REFERENCE_IMAGE_FORMAT:", isImageToImage ? "multipart_form_image_file" : REFERENCE_IMAGE_FORMAT)
+    devLog("[generate-image] upstream model:", model)
+    devLog("[generate-image] upstream size:", normalizedSize)
+    devLog("[generate-image] upstream prompt length:", finalPrompt.length)
     if (upstreamBody instanceof FormData) {
-      console.info("[generate-image] upstream form-data image count:", sourceImageValues.length)
+      devLog("[generate-image] upstream form-data image count:", sourceImageValues.length)
     } else {
-      console.info("[generate-image] upstream has 'image' field:", "image" in upstreamBody)
-      console.info("[generate-image] upstream has 'image_url' field:", "image_url" in upstreamBody)
-      console.info("[generate-image] upstream has 'messages' field:", "messages" in upstreamBody)
+      devLog("[generate-image] upstream has 'image' field:", "image" in upstreamBody)
+      devLog("[generate-image] upstream has 'image_url' field:", "image_url" in upstreamBody)
+      devLog("[generate-image] upstream has 'messages' field:", "messages" in upstreamBody)
       if ("image" in upstreamBody && Array.isArray(upstreamBody.image)) {
         const img = upstreamBody.image[0] as string
-        console.info("[generate-image] upstream image[0] starts with data:uri:", img.startsWith("data:"))
-        console.info("[generate-image] upstream image[0] length:", img.length)
-        console.info("[generate-image] upstream image[0] prefix (50 chars):", img.slice(0, 50))
+        devLog("[generate-image] upstream image[0] starts with data:uri:", img.startsWith("data:"))
+        devLog("[generate-image] upstream image[0] length:", img.length)
+        devLog("[generate-image] upstream image[0] prefix (50 chars):", img.slice(0, 50))
       }
       if ("image_url" in upstreamBody && Array.isArray(upstreamBody.image_url)) {
         const imgUrl = upstreamBody.image_url[0] as string
-        console.info("[generate-image] upstream image_url[0] starts with data:uri:", imgUrl.startsWith("data:"))
+        devLog("[generate-image] upstream image_url[0] starts with data:uri:", imgUrl.startsWith("data:"))
       }
       if ("messages" in upstreamBody) {
-        console.info("[generate-image] upstream messages payload enabled")
+        devLog("[generate-image] upstream messages payload enabled")
       }
     }
 
@@ -385,14 +390,14 @@ export async function POST(request: NextRequest) {
     for (let attempt = 1; attempt <= IMAGE_RETRY_ATTEMPTS; attempt += 1) {
       attemptsUsed = attempt
       try {
-        console.info("[generate-image]", requestId || "no-request-id", "upstream attempt", attempt, "/", IMAGE_RETRY_ATTEMPTS)
+        devLog("[generate-image]", requestId || "no-request-id", "upstream attempt", attempt, "/", IMAGE_RETRY_ATTEMPTS)
         imageRes = await fetchWithTimeout(upstreamUrl, {
           method: "POST",
           headers: upstreamHeaders,
           body: upstreamBodyPayload,
         }, REQUEST_TIMEOUT_MS)
 
-        console.info("[generate-image]", requestId || "no-request-id", "upstream status", imageRes.status)
+        devLog("[generate-image]", requestId || "no-request-id", "upstream status", imageRes.status)
         if (imageRes.ok) break
 
         const errorText = await imageRes.text()
@@ -408,7 +413,7 @@ export async function POST(request: NextRequest) {
       }
 
       const delayMs = getRetryDelayMs(attempt)
-      console.info("[generate-image]", requestId || "no-request-id", "retrying upstream request:", attempt + 1, "/", IMAGE_RETRY_ATTEMPTS, "after", delayMs, "ms")
+      devLog("[generate-image]", requestId || "no-request-id", "retrying upstream request:", attempt + 1, "/", IMAGE_RETRY_ATTEMPTS, "after", delayMs, "ms")
       await sleep(delayMs)
     }
 
@@ -419,7 +424,7 @@ export async function POST(request: NextRequest) {
         provider: capability.provider,
         error: lastFailure?.error,
       })
-      console.debug("[generate-image] upstream error raw:", normalized.raw)
+      devDebug("[generate-image] upstream error raw:", normalized.raw)
       return NextResponse.json(
         {
           ok: false,
@@ -443,7 +448,7 @@ export async function POST(request: NextRequest) {
         provider: capability.provider,
         error,
       })
-      console.debug("[generate-image] invalid json raw:", normalized.raw)
+      devDebug("[generate-image] invalid json raw:", normalized.raw)
       return NextResponse.json(
         {
           ok: false,
@@ -458,13 +463,13 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Diagnostic log: upstream response ──────────────────────────────────
-    console.info("[generate-image] upstream response keys:", Object.keys(imageData).join(", "))
-    console.info("[generate-image] upstream data count:", imageData.data?.length ?? 0)
+    devLog("[generate-image] upstream response keys:", Object.keys(imageData).join(", "))
+    devLog("[generate-image] upstream data count:", imageData.data?.length ?? 0)
     const hasB64 = Boolean(imageData.data?.[0]?.b64_json)
     const hasUrl = Boolean(imageData.data?.[0]?.url)
-    console.info("[generate-image] upstream has b64_json:", hasB64, "has url:", hasUrl)
+    devLog("[generate-image] upstream has b64_json:", hasB64, "has url:", hasUrl)
     if (imageData.data?.[0]?.revised_prompt) {
-      console.info("[generate-image] upstream revised_prompt:", imageData.data[0].revised_prompt.slice(0, 120))
+      devLog("[generate-image] upstream revised_prompt:", imageData.data[0].revised_prompt.slice(0, 120))
     }
 
     const b64Json = imageData.data?.[0]?.b64_json
@@ -512,7 +517,7 @@ export async function POST(request: NextRequest) {
     })
   } catch (error: any) {
     const normalized = normalizeGenerationError({ error, provider: "copse" })
-    console.debug("[generate-image] unexpected error raw:", normalized.raw)
+    devDebug("[generate-image] unexpected error raw:", normalized.raw)
     return NextResponse.json(
       { ok: false, error: normalized, attempts: 0, provider: "copse" },
       { status: normalized.status || 500 },
