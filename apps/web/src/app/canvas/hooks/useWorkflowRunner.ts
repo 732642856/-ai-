@@ -72,7 +72,7 @@ import { getDefaultModel, getDefaultImageModel, getLocalProviderOverrides } from
 import { buildRunRequest } from "@/lib/ai/run-request"
 import { normalizeGenerationError, formatGenerationErrorForDisplay } from "@/lib/ai/normalizeGenerationError"
 import { persistImageDataUrl } from "@/lib/assets/localImageStore"
-import { generateVideoFromImage, VideoGenerationError, videoResultToNodeData } from "../utils/videoGenerationService"
+import { generateVideoFromImage, VideoGenerationError, videoResultToNodeData, type VideoGenBackend } from "../utils/videoGenerationService"
 import { generateImageFromPrompt } from "../utils/imageGeneration"
 import { generateTts, ttsResultToNodeData, TtsError, type TtsInput, type TtsProgressCallback } from "../utils/ttsService"
 import { composeVideo } from "../utils/videoCompositionBrowser"
@@ -1194,7 +1194,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
             imageUrl: sourceImageUrl,
             motionPrompt: motionPrompt || undefined,
             durationSeconds: 5,
-            backend: process.env.NEXT_PUBLIC_VIDEO_BACKEND || undefined, // Auto-detect from env, fallback to mock
+            backend: process.env.NEXT_PUBLIC_VIDEO_BACKEND as VideoGenBackend || undefined,
           },
           (progress) => {
             updateNodeData(node.id, {

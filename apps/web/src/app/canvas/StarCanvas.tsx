@@ -134,6 +134,7 @@ import { VisualStyleBiblePanel } from "./components/panels/VisualStyleBiblePanel
 import { EmotionCurvePanel } from "./components/panels/EmotionCurvePanel";
 import type { EmotionCurveDataPoint } from "./components/panels/EmotionCurvePanel";
 import { ShotListTable } from "./components/panels/ShotListTable";
+import { StyleLibraryPanel } from "./components/panels/StyleLibraryPanel";
 // 制片层面板（角色三视图、运镜参数、调色、时间轴、全景预览）
 import { CharacterViewPanel as CharacterViewModal } from "./components/canvas/CharacterViewModal";
 import { CinematicParamPanelInner as CinematicParamPanel, type CinematicParams } from "./components/panels/CinematicParamPanel";
@@ -778,6 +779,7 @@ function StarCanvasInner() {
   const [showProjectBiblePanel, setShowProjectBiblePanel] = useState(false);
   const [showCharacterBiblePanel, setShowCharacterBiblePanel] = useState(false);
   const [showShotList, setShowShotList] = useState(false);
+  const [showStyleLibrary, setShowStyleLibrary] = useState(false);
   const [showSceneBiblePanel, setShowSceneBiblePanel] = useState(false);
   const [showStyleBiblePanel, setShowStyleBiblePanel] = useState(false);
   const [showEmotionCurve, setShowEmotionCurve] = useState(false);
@@ -7204,6 +7206,21 @@ function StarCanvasInner() {
           <Table2 size={14} strokeWidth={1.7} />
           <span>分镜</span>
         </button>
+        <button
+          type="button"
+          onClick={() => setShowStyleLibrary((v) => !v)}
+          className="flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-medium backdrop-blur-xl transition hover:bg-white/10"
+          style={{
+            borderColor: showStyleLibrary ? "rgba(168, 85, 247, 0.5)" : DESIGN_TOKENS.border,
+            backgroundColor: showStyleLibrary ? "rgba(168, 85, 247, 0.18)" : "rgba(18,18,24,0.7)",
+            color: DESIGN_TOKENS.textSecondary,
+          }}
+          title="影视画风库（100+风格预设）"
+          data-testid="style-library-toggle"
+        >
+          <Palette size={14} strokeWidth={1.7} />
+          <span>画风</span>
+        </button>
         {productionRunQueue && (
           <button
             type="button"
@@ -8430,6 +8447,34 @@ function StarCanvasInner() {
           </div>,
           document.body,
         )}
+
+      {/* 影视画风库 */}
+      <StyleLibraryPanel
+        isOpen={showStyleLibrary}
+        onClose={() => setShowStyleLibrary(false)}
+        currentPrompt={selectedNode?.data?.shot?.visualPrompt || selectedNode?.data?.prompt || ""}
+        onApplyStyle={(enhancedPrompt) => {
+          const targetId = selectedNodeId
+          if (!targetId) return
+          // Update the visual prompt of the selected shot/image node
+          if (selectedNode?.data?.shot) {
+            // Shot node
+            const shotPatch = { visualPrompt: enhancedPrompt }
+            setNodes((nds) =>
+              nds.map((n) =>
+                n.id === targetId ? { ...n, data: { ...n.data, shot: { ...n.data.shot!, ...shotPatch } } } : n,
+              ),
+            )
+          } else {
+            // Image/Content node
+            setNodes((nds) =>
+              nds.map((n) =>
+                n.id === targetId ? { ...n, data: { ...n.data, prompt: enhancedPrompt, visualPrompt: enhancedPrompt } } : n,
+              ),
+            )
+          }
+        }}
+      />
 
       {/* AI 影视创作剧组面𤋈 (CrewAgentPanel — 7 Agent) */}
       {showCrewAgentPanel && (
