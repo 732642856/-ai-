@@ -4,7 +4,7 @@
  * - 底部保留素材库、聊天、用户
  */
 
-import { Plus, Library, MessageCircle, Clock3, Save, ImageIcon, Camera, Palette, Film, Globe, Clapperboard } from "lucide-react"
+import { Plus, Library, MessageCircle, Clock3, Save, ImageIcon, Camera, Palette, Film, Globe, Clapperboard, Upload } from "lucide-react"
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 
 interface LeftToolbarProps {
@@ -14,6 +14,7 @@ interface LeftToolbarProps {
   onToggleChat: () => void
   isChatOpen: boolean
   onOpenWorkspaceHistory?: () => void
+  onOpenFileUpload?: () => void
   onOpenTemplates?: () => void
   onOpenUserMenu: () => void
   // 制片层面板
@@ -40,6 +41,7 @@ export function LeftToolbar({
   onOpenTimeline,
   onOpenPanorama,
   onOpenCrewAgent,
+  onOpenFileUpload,
 }: LeftToolbarProps) {
   return (
     <div
@@ -73,6 +75,16 @@ export function LeftToolbar({
         className="my-1.5 h-px w-6"
         style={{ backgroundColor: DESIGN_TOKENS.border }}
       />
+
+      {/* 文件上传 */}
+      <button
+        onClick={onOpenFileUpload}
+        className="flex h-9 w-9 items-center justify-center rounded-full transition-all hover:bg-white/10"
+        style={{ color: DESIGN_TOKENS.textMuted }}
+        title="上传剧本/文档 (DOCX/PDF/TXT)"
+      >
+        <Upload size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />
+      </button>
 
       {/* 素材库 */}
       <button

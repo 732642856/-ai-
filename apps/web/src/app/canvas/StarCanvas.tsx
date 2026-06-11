@@ -141,6 +141,7 @@ import { TimelinePanel, type TimelineClip } from "./components/panels/TimelinePa
 import { PanoramaPanel } from "./components/panels/PanoramaPanel";
 import { CrewAgentPanel } from "./components/panels/CrewAgentPanel";
 import { ExportPreflightPanel } from "./components/panels/ExportPreflightPanel";
+import { FileUploadPanel } from "./components/panels/FileUploadPanel";
 import { NodeHistoryPanel } from "./components/history/NodeHistoryPanel";
 import { WorkspaceHistoryPanel } from "./components/history/WorkspaceHistoryPanel";
 import { WorkflowRunPanel } from "./components/workflow/WorkflowRunPanel";
@@ -787,6 +788,7 @@ function StarCanvasInner() {
   const [showCrewAgentPanel, setShowCrewAgentPanel] = useState(false);
   const [showExportPreflight, setShowExportPreflight] = useState(false);
   const [exportPreflightType, setExportPreflightType] = useState<"json" | "zip">("json");
+  const [showFileUpload, setShowFileUpload] = useState(false);
   const [showProductionQueue, setShowProductionQueue] = useState(false);
   const [historyNodeId, setHistoryNodeId] = useState<string | null>(null);
   const [isComposingSelectedShots, setIsComposingSelectedShots] = useState(false);
@@ -7552,6 +7554,7 @@ function StarCanvasInner() {
         onOpenTimeline={() => setShowTimeline(true)}
         onOpenPanorama={() => setShowPanorama(true)}
         onOpenCrewAgent={() => setShowCrewAgentPanel(true)}
+        onOpenFileUpload={() => setShowFileUpload(true)}
       />
 
       {/* Workflow Templates Dialog */}
@@ -8378,6 +8381,28 @@ function StarCanvasInner() {
           nodes={nodes}
           timelineOrder={timelineClips.map((c) => c.id.replace(/^tl-(video|audio|subtitle)-/, ""))}
           onPerformExport={performJianyingExport}
+        />
+      )}
+
+      {/* 文件上传面板 (FileUploadPanel) */}
+      {showFileUpload && (
+        <FileUploadPanel
+          isOpen={showFileUpload}
+          onClose={() => setShowFileUpload(false)}
+          onDocumentParsed={(result, position) => {
+            const docNode = createDocumentNode({
+              id: `doc-${Date.now()}`,
+              document: {
+                fileName: result.fileName,
+                fileSize: result.fileSize,
+                mimeType: result.type === "pdf" ? "application/pdf" : `text/${result.type}`,
+                text: result.text,
+                uploadedAt: new Date().toISOString(),
+              },
+              position,
+            });
+            setNodes((nds) => [...nds, docNode]);
+          }}
         />
       )}
 
