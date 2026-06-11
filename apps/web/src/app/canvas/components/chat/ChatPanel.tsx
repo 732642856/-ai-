@@ -28,6 +28,68 @@ import { generateImageFromPrompt } from "../../utils/imageGeneration"
 import { generateId } from "../../utils/generateId"
 import type { Node } from "@xyflow/react"
 import type { AssetItem } from "../canvas/types"
+import type { CanvasNodeData } from "../canvas/types"
+import { AssetPreviewPopover, type ReferenceInfo } from "./AssetPreviewPopover"
+
+// ── @引用解析 ──────────────────────────────────────────
+function parseReferences(
+  text: string,
+  canvasNodes: Node<CanvasNodeData>[],
+  assets: AssetItem[],
+): React.ReactNode[] {
+  const parts: React.ReactNode[] = []
+  const regex = /@(node|asset)_([a-zA-Z0-9_-]+)/g
+  let lastIndex = 0
+  let match
+
+  while ((match = regex.exec(text)) !== null) {
+    // 前面的纯文本
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index))
+    }
+
+    const type = match[1] as "node" | "asset"
+    const id = match[2]
+    let ref: ReferenceInfo
+
+    if (type === "node") {
+      const node = canvasNodes.find((n) => n.id === id)
+      ref = {
+        type: "node",
+        id,
+        title: (node?.data?.title as string) || node?.id,
+        imageUrl: (node?.data?.imageUrl as string) || (node?.data?.sketchImageDataUrl as string),
+        isValid: !!node,
+        kind: (node?.data?.nodeKind as string) || node?.type,
+      }
+    } else {
+      const asset = assets.find((a) => a.id === id)
+      ref = {
+        type: "asset",
+        id,
+        title: asset?.name || id,
+        imageUrl: asset?.thumbnail || asset?.src,
+        isValid: !!asset,
+        kind: asset?.type,
+      }
+    }
+
+    parts.push(
+      <AssetPreviewPopover key={`${match[0]}-${match.index}`} reference={ref}>
+        @{match[0].slice(1)}
+      </AssetPreviewPopover>,
+    )
+
+    lastIndex = regex.lastIndex
+  }
+
+  // 尾部纯文本
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex))
+  }
+
+  return parts.length > 0 ? parts : [text]
+}
 
 type CanvasNodeContextSnapshot = {
   id: string
@@ -704,7 +766,9 @@ export function ChatPanel({
                     }}
                   >
                     {msg.content && (
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed">
+                        {parseReferences(msg.content, canvasNodes, assets)}
+                      </p>
                     )}
                     {msg.content === "" && isStreaming && (
                       <div className="flex items-center gap-2 py-1">
