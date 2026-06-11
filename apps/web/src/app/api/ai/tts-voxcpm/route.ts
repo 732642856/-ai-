@@ -114,8 +114,6 @@ export async function POST(request: NextRequest) {
       voxcpmPayload.language = body.language
     }
 
-    console.log(`[VoxCPM] Generating TTS: text=${body.text.slice(0, 50)}... voice=${body.voice || "default"}`)
-
     // Call VoxCPM vLLM-Omni endpoint (OpenAI-compatible)
     const startTime = Date.now()
     const response = await fetch(`${VOXCPM_BASE_URL}/v1/audio/speech`, {
@@ -138,8 +136,6 @@ export async function POST(request: NextRequest) {
     const audioBuffer = await response.arrayBuffer()
     const audioBase64 = arrayBufferToBase64(audioBuffer)
     const duration = Date.now() - startTime
-
-    console.log(`[VoxCPM] Generated in ${duration}ms, size=${(audioBuffer.byteLength / 1024).toFixed(1)}KB`)
 
     const result: VoxCPMResponse = {
       audioData: audioBase64,

@@ -8912,7 +8912,7 @@ function StarCanvasInner() {
                 selected: false,
                 position: { x: n.position.x + offset.x, y: n.position.y + offset.y }
               }))
-              setNodes((nds) => nds.map(n => ({ ...n, selected: false })).concat(newNodes as any))
+              setNodes((nds) => nds.map(n => ({ ...n, selected: false })).concat(newNodes))
               break
             }
             case "generate-all-images":
