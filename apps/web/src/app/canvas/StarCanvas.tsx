@@ -140,6 +140,7 @@ import { ColorGradePanel } from "./components/panels/ColorGradePanel";
 import { TimelinePanel, type TimelineClip } from "./components/panels/TimelinePanel";
 import { PanoramaPanel } from "./components/panels/PanoramaPanel";
 import { CrewAgentPanel } from "./components/panels/CrewAgentPanel";
+import { ExportPreflightPanel } from "./components/panels/ExportPreflightPanel";
 import { NodeHistoryPanel } from "./components/history/NodeHistoryPanel";
 import { WorkspaceHistoryPanel } from "./components/history/WorkspaceHistoryPanel";
 import { WorkflowRunPanel } from "./components/workflow/WorkflowRunPanel";
@@ -784,6 +785,8 @@ function StarCanvasInner() {
   const [showTimeline, setShowTimeline] = useState(false);
   const [showPanorama, setShowPanorama] = useState(false);
   const [showCrewAgentPanel, setShowCrewAgentPanel] = useState(false);
+  const [showExportPreflight, setShowExportPreflight] = useState(false);
+  const [exportPreflightType, setExportPreflightType] = useState<"json" | "zip">("json");
   const [showProductionQueue, setShowProductionQueue] = useState(false);
   const [historyNodeId, setHistoryNodeId] = useState<string | null>(null);
   const [isComposingSelectedShots, setIsComposingSelectedShots] = useState(false);
@@ -5180,57 +5183,53 @@ function StarCanvasInner() {
 
   /** 导出剪映草稿 JSON（draft_content.json） */
   const handleExportToJianyingDraft = useCallback(() => {
-    const videoInputs = extractVideoNodesFromCanvas(nodes);
-    const audioInputs = extractAudioNodesFromCanvas(nodes);
-    const subtitleInputs = extractSubtitleNodesFromCanvas(nodes);
-
-    if (videoInputs.length === 0 && audioInputs.length === 0 && subtitleInputs.length === 0) {
-      alert("当前画布没有找到可导出的视频、音频或字幕节点。请先生成视频或添加字幕。");
-      return;
-    }
-
-    const result = exportToJianyingDraft(videoInputs, audioInputs, subtitleInputs);
-
-    // 下载 draft_content.json
-    downloadJsonFile(result.draftContentJson, `draft_content_${Date.now()}.json`);
-
-    // 下载 draft_meta_info.json
-    downloadJsonFile(result.draftMetaJson, `draft_meta_info_${Date.now()}.json`);
-
-    console.info(
-      `[剪映导出] 已生成草稿: ${result.trackCount} 个轨道, ${result.materialCount} 个素材, ` +
-      `时长 ${result.totalDurationSeconds.toFixed(1)}s`,
-    );
-  }, [nodes]);
+    setExportPreflightType("json");
+    setShowExportPreflight(true);
+  }, []);
 
   /** 导出剪映兼容包 ZIP（视频 + SRT 字幕 + 音频） */
-  const handleExportJianyingCompatible = useCallback(async () => {
+  const handleExportJianyingCompatible = useCallback(() => {
+    setExportPreflightType("zip");
+    setShowExportPreflight(true);
+  }, []);
+
+  /** 实际执行剪映导出（由 ExportPreflightPanel 调用） */
+  const performJianyingExport = useCallback(async (type: "json" | "zip"): Promise<{
+    success: boolean; filePath?: string; message?: string; files?: Array<{ path: string; size: number }>
+  }> => {
     const videoInputs = extractVideoNodesFromCanvas(nodes);
     const audioInputs = extractAudioNodesFromCanvas(nodes);
     const subtitleInputs = extractSubtitleNodesFromCanvas(nodes);
 
     if (videoInputs.length === 0 && audioInputs.length === 0 && subtitleInputs.length === 0) {
       alert("当前画布没有找到可导出的视频、音频或字幕节点。请先生成视频或添加字幕。");
-      return;
+      return { success: false, message: "无可用素材" };
     }
 
     try {
-      // 显示加载提示
-      const loadingMsg = "正在打包剪映兼容包，请稍候...";
-      console.info(loadingMsg);
-
-      const pkg = await buildJianyingCompatiblePackage(videoInputs, audioInputs, subtitleInputs);
-
-      // 下载 ZIP
-      downloadZipBuffer(pkg.zipBuffer, pkg.fileName);
-
-      console.info(
-        `[剪映兼容包] 已生成: ${pkg.files.length} 个文件, ` +
-        `总大小 ${(pkg.zipBuffer.byteLength / 1024 / 1024).toFixed(1)} MB`,
-      );
+      if (type === "json") {
+        const result = exportToJianyingDraft(videoInputs, audioInputs, subtitleInputs);
+        downloadJsonFile(result.draftContentJson, `draft_content_${Date.now()}.json`);
+        downloadJsonFile(result.draftMetaJson, `draft_meta_info_${Date.now()}.json`);
+        return {
+          success: true,
+          message: `JSON 草稿已生成: ${result.trackCount} 个轨道, ${result.materialCount} 个素材, 时长 ${result.totalDurationSeconds.toFixed(1)}s`,
+          files: [
+            { path: `draft_content_${Date.now()}.json`, size: new Blob([result.draftContentJson]).size },
+            { path: `draft_meta_info_${Date.now()}.json`, size: new Blob([result.draftMetaJson]).size },
+          ],
+        }
+      } else {
+        const pkg = await buildJianyingCompatiblePackage(videoInputs, audioInputs, subtitleInputs);
+        downloadZipBuffer(pkg.zipBuffer, pkg.fileName);
+        return {
+          success: true,
+          message: `ZIP 兼容包已生成: ${pkg.files.length} 个文件, ${(pkg.zipBuffer.byteLength / 1024 / 1024).toFixed(1)} MB`,
+          files: pkg.files,
+        }
+      }
     } catch (error) {
-      console.error("[剪映兼容包] 导出失败:", error);
-      alert(`导出失败: ${(error as Error).message}`);
+      throw error;
     }
   }, [nodes]);
 
@@ -8366,6 +8365,17 @@ function StarCanvasInner() {
               ])
             })
           }}
+        />
+      )}
+
+      {/* 导出预检面板 (ExportPreflightPanel) */}
+      {showExportPreflight && (
+        <ExportPreflightPanel
+          isOpen={showExportPreflight}
+          onClose={() => setShowExportPreflight(false)}
+          nodes={nodes}
+          timelineOrder={timelineClips.map((c) => c.id.replace(/^tl-(video|audio|subtitle)-/, ""))}
+          onPerformExport={performJianyingExport}
         />
       )}
 

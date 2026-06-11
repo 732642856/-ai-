@@ -127,6 +127,14 @@ export function PanoramaPanel({
   const [panoramaType, setPanoramaType] = useState<"indoor" | "outdoor" | "sci-fi" | "underwater" | "sky" | "custom">("custom")
   const [panoramaPrompt, setPanoramaPrompt] = useState("")
   const [activeTab, setActiveTab] = useState<"viewer" | "prompt" | "presets">("viewer")
+  // 多场景热点
+  const [savedScenes, setSavedScenes] = useState<Array<{
+    id: string
+    title: string
+    imageUrl: string
+    pitch: number
+    yaw: number
+  }>>([])
   const inputFileRef = useRef<HTMLInputElement>(null)
 
   // 重置状态
@@ -255,8 +263,18 @@ export function PanoramaPanel({
     if (description) {
       cfg.description = description
     }
+    // 多场景热点 — 切换到已保存的其他全景场景
+    if (savedScenes.length > 0) {
+      cfg.hotSpots = savedScenes.map((scene) => ({
+        pitch: scene.pitch,
+        yaw: scene.yaw,
+        type: "info" as const,
+        text: `切换到: ${scene.title}`,
+        id: scene.id,
+      }))
+    }
     return cfg
-  }, [autoRotate, autoRotateSpeed, title, description])
+  }, [autoRotate, autoRotateSpeed, title, description, savedScenes])
 
   // 场景唯一 ID (用时间戳防止 React key 冲突)
   const sceneId = useMemo(() => `panorama-${Date.now()}`, [isOpen, imageUrl])
@@ -669,6 +687,65 @@ export function PanoramaPanel({
                 ))}
               </div>
             </div>
+
+            {/* 多场景热点 */}
+            {imageUrl && (
+              <div className="mb-4">
+                <label className="mb-2 block text-[11px]" style={{ color: DESIGN_TOKENS.textMuted }}>
+                  多场景热点
+                </label>
+                <button
+                  onClick={() => {
+                    setSavedScenes((prev) => [
+                      ...prev,
+                      {
+                        id: `scene-${Date.now()}`,
+                        title: title || `场景 ${prev.length + 1}`,
+                        imageUrl: imageUrl!,
+                        pitch: 0,
+                        yaw: 0,
+                      },
+                    ])
+                  }}
+                  className="w-full rounded-lg border px-3 py-2 text-xs transition-all hover:bg-white/5"
+                  style={{ borderColor: DESIGN_TOKENS.border, color: DESIGN_TOKENS.textSecondary }}
+                >
+                  保存当前为热点场景
+                </button>
+                {savedScenes.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {savedScenes.map((scene) => (
+                      <div
+                        key={scene.id}
+                        className="flex items-center justify-between rounded-lg border px-2 py-1.5"
+                        style={{ borderColor: DESIGN_TOKENS.border }}
+                      >
+                        <span className="text-[10px]" style={{ color: DESIGN_TOKENS.textSecondary }}>
+                          {scene.title}
+                        </span>
+                        <button
+                          onClick={() => {
+                            setImageUrl(scene.imageUrl)
+                            setTitle(scene.title)
+                          }}
+                          className="text-[10px] px-1.5 py-0.5 rounded"
+                          style={{ color: DESIGN_TOKENS.accentHover }}
+                        >
+                          跳转
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      onClick={() => setSavedScenes([])}
+                      className="text-[10px] w-full text-center pt-1"
+                      style={{ color: DESIGN_TOKENS.textMuted }}
+                    >
+                      清除全部场景
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* 分隔线 */}
             <div

@@ -45,7 +45,7 @@ export interface ExportPreflightPanelProps {
   isOpen: boolean
   onClose: () => void
   /** 画布中所有节点，用于预检 */
-  nodes?: Array<{ id: string; type: string; data?: Record<string, unknown> }>
+  nodes?: Array<{ id: string; type?: string; data?: Record<string, unknown> }>
   /** 从 TimelinePanel 提取的 clips 顺序 */
   timelineOrder?: string[]
   /** 实际的导出函数引用 */
@@ -63,7 +63,7 @@ export interface ExportResult {
 // ── 预检逻辑 ──────────────────────────────────────────
 
 function runPreflightCheck(
-  nodes: Array<{ id: string; type: string; data?: Record<string, unknown> }>,
+  nodes: Array<{ id: string; type?: string; data?: Record<string, unknown> }>,
   timelineOrder?: string[],
 ): ExportAssetCheck[] {
   const checks: ExportAssetCheck[] = []
@@ -74,11 +74,11 @@ function runPreflightCheck(
     ?.map((id) => nodes.find((n) => n.id === id))
     .filter(Boolean) as typeof nodes | undefined
 
-  const scanNodes = orderedNodes || nodes
+  const scanNodes = (orderedNodes || nodes) as Array<{ id: string; type?: string; data?: Record<string, unknown> }>
 
   for (const node of scanNodes) {
     const data = node.data || {}
-    const nodeKind = (data.nodeKind as string) || node.type
+    const nodeKind = (data.nodeKind as string) || node.type || ""
 
     // 视频节点
     if (
