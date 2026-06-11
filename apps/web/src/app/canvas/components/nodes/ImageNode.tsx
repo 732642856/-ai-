@@ -812,9 +812,9 @@ export const ImageNode = memo(function ImageNode({
               <div className="flex-1 min-w-0 mr-2">
                 <span className="text-[11px] text-red-300/70 block truncate">{aiError}</span>
                 {/* Retry count display */}
-                {(data as any)._retryCount > 0 && (
+                {(data._retryCount ?? 0) > 0 && (
                   <span className="text-[10px] text-red-400/50 block mt-0.5">
-                    已重试 {(data as any)._retryCount} 次
+                    已重试 {data._retryCount} 次
                   </span>
                 )}
               </div>

@@ -28,6 +28,7 @@
     "@xyflow/react": "^12.10.0",
     "@xzdarcy/react-timeline-editor": "^1.0.0",
     "ai": "^6.0.198",
+    "jszip": "^3.10.1",
     "dagre": "^0.8.5",
     "iztro": "^2.5.8",
     "kokoro-js": "^1.2.1",

@@ -133,6 +133,7 @@ import { SceneBiblePanel } from "./components/panels/SceneBiblePanel";
 import { VisualStyleBiblePanel } from "./components/panels/VisualStyleBiblePanel";
 import { EmotionCurvePanel } from "./components/panels/EmotionCurvePanel";
 import type { EmotionCurveDataPoint } from "./components/panels/EmotionCurvePanel";
+import { ShotListTable } from "./components/panels/ShotListTable";
 // 制片层面板（角色三视图、运镜参数、调色、时间轴、全景预览）
 import { CharacterViewPanel as CharacterViewModal } from "./components/canvas/CharacterViewModal";
 import { CinematicParamPanelInner as CinematicParamPanel, type CinematicParams } from "./components/panels/CinematicParamPanel";
@@ -264,6 +265,7 @@ import {
 } from "@/lib/storyboard/storyboardExportFormats";
 import { buildSubtitleExport, subtitleTimelineFilename } from "@/lib/storyboard/storyboardSubtitleTimeline";
 import { generateVideoCompositionScript, type VideoCompositionInput } from "@/lib/storyboard/storyboardVideoComposition";
+import { downloadJianyingDraft } from "@/lib/jianying/jianyingDraftExport";
 import { formatDialogueAsSrt, parseDurationToSeconds } from "@/lib/storyboard/subtitleFormatter";
 import {
   exportToJianyingDraft,
@@ -775,6 +777,7 @@ function StarCanvasInner() {
   const [showVideoRemixPanel, setShowVideoRemixPanel] = useState(false);
   const [showProjectBiblePanel, setShowProjectBiblePanel] = useState(false);
   const [showCharacterBiblePanel, setShowCharacterBiblePanel] = useState(false);
+  const [showShotList, setShowShotList] = useState(false);
   const [showSceneBiblePanel, setShowSceneBiblePanel] = useState(false);
   const [showStyleBiblePanel, setShowStyleBiblePanel] = useState(false);
   const [showEmotionCurve, setShowEmotionCurve] = useState(false);
@@ -7186,6 +7189,21 @@ function StarCanvasInner() {
           onOpenStyleBible={() => setShowStyleBiblePanel(true)}
           onToggleEmotionCurve={() => setShowEmotionCurve((v) => !v)}
         />
+        <button
+          type="button"
+          onClick={() => setShowShotList((v) => !v)}
+          className="flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-medium backdrop-blur-xl transition hover:bg-white/10"
+          style={{
+            borderColor: showShotList ? "rgba(59, 130, 246, 0.5)" : DESIGN_TOKENS.border,
+            backgroundColor: showShotList ? "rgba(59, 130, 246, 0.18)" : "rgba(18,18,24,0.7)",
+            color: DESIGN_TOKENS.textSecondary,
+          }}
+          title="分镜表格视图（Shot List）"
+          data-testid="shot-list-toggle"
+        >
+          <Table2 size={14} strokeWidth={1.7} />
+          <span>分镜</span>
+        </button>
         {productionRunQueue && (
           <button
             type="button"
@@ -8371,6 +8389,43 @@ function StarCanvasInner() {
             </div>
             <div className="px-4 pb-4">
               <EmotionCurvePanel data={emotionCurveData} />
+            </div>
+          </div>,
+          document.body,
+        )}
+
+      {/* 分镜列表面板 */}
+      {showShotList && typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className="fixed bottom-20 right-4 z-50 flex max-h-[70vh] w-[720px] flex-col rounded-xl border shadow-2xl"
+            style={{
+              backgroundColor: "rgba(15, 15, 30, 0.96)",
+              borderColor: "rgba(59, 130, 246, 0.3)",
+              backdropFilter: "blur(12px)",
+            }}
+          >
+            <div className="flex items-center justify-between px-3 pt-2 pb-1">
+              <span className="text-xs font-medium" style={{ color: "rgba(255,255,255,0.8)" }}>
+                Shot List
+              </span>
+              <button
+                onClick={() => setShowShotList(false)}
+                className="rounded p-1 transition hover:bg-white/10"
+                style={{ color: "rgba(255,255,255,0.5)" }}
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-hidden px-3 pb-3">
+              <ShotListTable
+                nodes={nodes}
+                selectedNodeId={selectedNodeId}
+                onSelectShot={(nodeId: string) => { setSelectedNodeId(nodeId); setShowShotList(false) }}
+                onRunShot={(nodeId: string) => { workflowRunner.runNode(nodeId) }}
+                onExportJianying={() => { downloadJianyingDraft(nodes) }}
+                onExportScript={handleExportCompositionScript}
+              />
             </div>
           </div>,
           document.body,
