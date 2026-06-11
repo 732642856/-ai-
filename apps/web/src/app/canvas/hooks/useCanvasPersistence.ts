@@ -8,7 +8,7 @@
 
 import supermemory from "@/lib/memory/supermemory";
 import { useCallback, useEffect, useRef } from "react";
-import type { Node, Edge } from "@xyflow/react";
+import type { Node, Edge, Viewport } from "@xyflow/react";
 import type { CanvasNodeData } from "../components/canvas/types";
 import {
   hydrateImageAsset,
@@ -20,7 +20,7 @@ import {
 } from "@/lib/storage/sanitizePersistedCanvas";
 
 const STORAGE_KEY = "startrails_canvas";
-const MAX_SIZE_BYTES = 4 * 1024 * 1024; // 4MB safeguard
+const MAX_SIZE_BYTES = 50 * 1024 * 1024; // 50MB — IndexedDB 原生大容量
 const DEBOUNCE_MS = 400;
 const EMPTY_CANVAS_SAVE_GRACE_MS = 1_500;
 
@@ -135,10 +135,11 @@ async function hydrateImageNodes(
 // ---------------------------------------------------------------------------
 
 interface PersistedCanvas {
-  version: 1;
+  version: 2;
   savedAt: number;
   nodes: Node<CanvasNodeData>[];
   edges: Edge[];
+  viewport: Viewport | null;
 }
 
 interface UseCanvasPersistenceOptions {
@@ -153,6 +154,10 @@ interface UseCanvasPersistenceOptions {
       | ((nds: Node<CanvasNodeData>[]) => Node<CanvasNodeData>[]),
   ) => void;
   setEdges: (edges: Edge[] | ((eds: Edge[]) => Edge[])) => void;
+  /** Current viewport (for save) */
+  viewport?: Viewport;
+  /** Used to set the initial viewport after restore */
+  setViewport?: (viewport: Viewport) => void;
   setFitViewOnce: (value: boolean) => void;
 }
 
@@ -236,6 +241,8 @@ export function useCanvasPersistence({
   edges,
   setNodes,
   setEdges,
+  viewport: currentViewport,
+  setViewport,
   setFitViewOnce,
 }: UseCanvasPersistenceOptions) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -265,7 +272,8 @@ export function useCanvasPersistence({
 
         if (
           !data ||
-          data.version !== 1 ||
+          !data.version ||
+          typeof data.version !== "number" ||
           !Array.isArray(data.nodes) ||
           !Array.isArray(data.edges)
         ) {
@@ -277,21 +285,35 @@ export function useCanvasPersistence({
           return;
         }
 
+        // v1 → v2 migration: add viewport field
+        const migratedData: PersistedCanvas = {
+          version: 2,
+          savedAt: data.savedAt,
+          nodes: data.nodes,
+          edges: data.edges,
+          viewport: (data as any).viewport ?? null,
+        };
+
         // Hydrate image nodes from IndexedDB
         const hydratedNodes = recoverCanvasVisibilityAndLayout(
-          await hydrateImageNodes(data.nodes),
+          await hydrateImageNodes(migratedData.nodes),
         );
 
         if (cancelled) return;
 
         if (hydratedNodes.length > 0) {
           setNodes(hydratedNodes);
-          setEdges(data.edges);
-          setFitViewOnce(true);
+          setEdges(migratedData.edges);
+          // Restore viewport if available
+          if (migratedData.viewport && setViewport) {
+            setViewport(migratedData.viewport);
+          } else {
+            setFitViewOnce(true);
+          }
         }
 
         if (legacyRaw && !saved) {
-          await supermemory.set(STORAGE_KEY, data, {
+          await supermemory.set(STORAGE_KEY, migratedData, {
             type: "canvas_state",
             title: "Canvas autosave",
           });
@@ -299,7 +321,7 @@ export function useCanvasPersistence({
         }
 
         console.log(
-          `[CanvasPersistence] Restored ${hydratedNodes.length} nodes, ${data.edges.length} edges (saved ${new Date(data.savedAt).toLocaleString()})`,
+          `[CanvasPersistence] Restored ${hydratedNodes.length} nodes, ${migratedData.edges.length} edges${migratedData.viewport ? ", viewport" : ""} (saved ${new Date(migratedData.savedAt).toLocaleString()})`,
         );
       } catch (err) {
         console.error("[CanvasPersistence] Restore failed:", err);
@@ -357,10 +379,11 @@ export function useCanvasPersistence({
         }
 
         const payload: PersistedCanvas = {
-          version: 1,
+          version: 2,
           savedAt: Date.now(),
           nodes: sanitizedNodes,
           edges,
+          viewport: currentViewport ?? null,
         };
 
         const json = JSON.stringify(payload);

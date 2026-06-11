@@ -4120,6 +4120,8 @@ function StarCanvasInner() {
     edges,
     setNodes,
     setEdges,
+    viewport,
+    setViewport,
     setFitViewOnce,
   });
 
