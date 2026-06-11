@@ -6668,6 +6668,53 @@ function StarCanvasInner() {
   );
 
   // ========================================================================
+  // SHOT REGENERATE — 重绘本镜头
+  // ========================================================================
+  const handleRegenerateShot = useCallback(
+    async (nodeId: string) => {
+      const node = nodes.find((n) => n.id === nodeId);
+      if (!node) return;
+      const data = node.data as Record<string, unknown>;
+      const prompt = (data.prompt as string) || (data.content as string) || "";
+      if (!prompt) return;
+
+      try {
+        const res = await fetch("/api/ai/generate-image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt, size: "1024x1024" }),
+        });
+
+        if (!res.ok) throw new Error(`API error: ${res.status}`);
+        const result = await res.json();
+        const imageUrl = result.imageUrl || result.data?.[0]?.b64_json;
+
+        if (imageUrl) {
+          setNodes((nds) =>
+            nds.map((n) =>
+              n.id === nodeId
+                ? {
+                    ...n,
+                    data: {
+                      ...n.data,
+                      imageUrl: imageUrl.startsWith("data:")
+                        ? imageUrl
+                        : `data:image/png;base64,${imageUrl}`,
+                      regeneratedAt: Date.now(),
+                    },
+                  }
+                : n,
+            ),
+          );
+        }
+      } catch (err) {
+        console.error("[RegenerateShot] Failed:", err);
+      }
+    },
+    [nodes, setNodes],
+  );
+
+  // ========================================================================
   // AI VARIANT FOR IMAGE / SKETCH NODE
   // ========================================================================
   const handleAIVariant = useCallback(
@@ -7995,6 +8042,11 @@ function StarCanvasInner() {
               if (contextMenu?.type === "node") {
                 setSelectedNodeId(contextMenu.nodeId);
                 setShowPanorama(true);
+              }
+            }}
+            onRegenerateShot={() => {
+              if (contextMenu?.type === "node") {
+                handleRegenerateShot(contextMenu.nodeId);
               }
             }}
             onAIVariant={() => {

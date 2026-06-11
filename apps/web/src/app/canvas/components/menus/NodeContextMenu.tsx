@@ -25,6 +25,7 @@ import {
   ArrowRight,
   Square,
   Globe,
+  RefreshCw,
 } from "lucide-react"
 import type { ContextMenuState, CanvasNodeKind } from "../canvas/types"
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
@@ -56,6 +57,7 @@ interface NodeContextMenuProps {
   onCreateStoryboardFromDocument?: () => void
   onComposeSelectedShots?: () => void
   onOpenPanorama?: () => void
+  onRegenerateShot?: () => void
   isWorkflowRunning?: boolean
   nodeKind?: CanvasNodeKind
   selectedShotCount?: number
@@ -138,6 +140,7 @@ export const NodeContextMenu = memo(function NodeContextMenu({
   onCreateStoryboardFromDocument,
   onComposeSelectedShots,
   onOpenPanorama,
+  onRegenerateShot,
   isWorkflowRunning,
   nodeKind,
   selectedShotCount = 1,
@@ -366,6 +369,16 @@ export const NodeContextMenu = memo(function NodeContextMenu({
                 label="生成本镜头图片"
                 onClick={() => {
                   onGenerateShotImage()
+                  onClose()
+                }}
+              />
+            )}
+            {isShotNode && onRegenerateShot && (
+              <MenuItem
+                icon={<RefreshCw size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />}
+                label="重绘本镜头"
+                onClick={() => {
+                  onRegenerateShot()
                   onClose()
                 }}
               />
