@@ -65,6 +65,8 @@ import {
   Palette,
   TrendingUp,
   UserRound,
+  RotateCcw,
+  GitCompare,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -135,6 +137,8 @@ import { EmotionCurvePanel } from "./components/panels/EmotionCurvePanel";
 import type { EmotionCurveDataPoint } from "./components/panels/EmotionCurvePanel";
 import { ShotListTable } from "./components/panels/ShotListTable";
 import { StyleLibraryPanel } from "./components/panels/StyleLibraryPanel";
+import { DraggableAngleControl } from "./components/canvas/DraggableAngleControl";
+import { VersionComparePanel } from "./components/history/VersionComparePanel";
 // 制片层面板（角色三视图、运镜参数、调色、时间轴、全景预览）
 import { CharacterViewPanel as CharacterViewModal } from "./components/canvas/CharacterViewModal";
 import { CinematicParamPanelInner as CinematicParamPanel, type CinematicParams } from "./components/panels/CinematicParamPanel";
@@ -782,6 +786,8 @@ function StarCanvasInner() {
   const [showCharacterBiblePanel, setShowCharacterBiblePanel] = useState(false);
   const [showShotList, setShowShotList] = useState(false);
   const [showStyleLibrary, setShowStyleLibrary] = useState(false);
+  const [showAngleControl, setShowAngleControl] = useState(false);
+  const [showVersionCompare, setShowVersionCompare] = useState(false);
   const [showSceneBiblePanel, setShowSceneBiblePanel] = useState(false);
   const [showStyleBiblePanel, setShowStyleBiblePanel] = useState(false);
   const [showEmotionCurve, setShowEmotionCurve] = useState(false);
@@ -825,6 +831,8 @@ function StarCanvasInner() {
   const [runEvents, setRunEvents] = useState<WorkflowRunEvent[]>([]);
   const appendWorkspaceHistory = useWorkspaceHistoryStore((state) => state.append);
   const addCanvasSnapshot = useCanvasSnapshotStore((state) => state.addSnapshot);
+  const snapshotStoreSnapshots = useCanvasSnapshotStore((state) => state.snapshots);
+  const latestSnapshotId = snapshotStoreSnapshots[0]?.id;
 
   const addWorkspaceHistoryEvent = useCallback(
     (event: Parameters<typeof appendWorkspaceHistory>[0]) => {
@@ -7238,6 +7246,36 @@ function StarCanvasInner() {
           <Palette size={14} strokeWidth={1.7} />
           <span>画风</span>
         </button>
+        <button
+          type="button"
+          onClick={() => setShowAngleControl((v) => !v)}
+          className="flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-medium backdrop-blur-xl transition hover:bg-white/10"
+          style={{
+            borderColor: showAngleControl ? "rgba(249, 115, 22, 0.5)" : DESIGN_TOKENS.border,
+            backgroundColor: showAngleControl ? "rgba(249, 115, 22, 0.18)" : "rgba(18,18,24,0.7)",
+            color: DESIGN_TOKENS.textSecondary,
+          }}
+          title="拖拽旋转角色角度"
+          data-testid="angle-control-toggle"
+        >
+          <RotateCcw size={14} strokeWidth={1.7} />
+          <span>角度</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowVersionCompare((v) => !v)}
+          className="flex items-center gap-1.5 rounded-2xl border px-3 py-2 text-xs font-medium backdrop-blur-xl transition hover:bg-white/10"
+          style={{
+            borderColor: showVersionCompare ? "rgba(34, 211, 238, 0.5)" : DESIGN_TOKENS.border,
+            backgroundColor: showVersionCompare ? "rgba(34, 211, 238, 0.18)" : "rgba(18,18,24,0.7)",
+            color: DESIGN_TOKENS.textSecondary,
+          }}
+          title="版本对比"
+          data-testid="version-compare-toggle"
+        >
+          <GitCompare size={14} strokeWidth={1.7} />
+          <span>版本</span>
+        </button>
         {productionRunQueue && (
           <button
             type="button"
@@ -8489,6 +8527,51 @@ function StarCanvasInner() {
                 n.id === targetId ? { ...n, data: { ...n.data, prompt: enhancedPrompt, visualPrompt: enhancedPrompt } } : n,
               ),
             )
+          }
+        }}
+      />
+
+      {/* 拖拽角度控制 */}
+      {showAngleControl && (
+        <div
+          className="fixed bottom-20 right-4 z-50 rounded-xl border p-4 shadow-2xl"
+          style={{
+            backgroundColor: "rgba(15, 15, 30, 0.96)",
+            borderColor: "rgba(249, 115, 22, 0.3)",
+            backdropFilter: "blur(12px)",
+          }}
+        >
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-xs font-medium" style={{ color: "rgba(255,255,255,0.8)" }}>角度控制</span>
+            <button onClick={() => setShowAngleControl(false)} className="rounded p-1 hover:bg-white/10" style={{ color: "rgba(255,255,255,0.5)" }}>
+              <X size={14} />
+            </button>
+          </div>
+          <DraggableAngleControl
+            characterImageUrl={selectedNode?.data?.resultUrl || selectedNode?.data?.shot?.generatedImageUrl || undefined}
+            onChange={(angle) => {
+              if (selectedNode?.data?.shot) {
+                // Update shot camera angle parameter
+                setNodes((nds) => nds.map((n) =>
+                  n.id === selectedNodeId ? { ...n, data: { ...n.data, shot: { ...n.data.shot!, cameraAngle: angle } } } : n
+                ))
+              }
+            }}
+          />
+        </div>
+      )}
+
+      {/* 版本对比面板 */}
+      <VersionComparePanel
+        isOpen={showVersionCompare}
+        onClose={() => setShowVersionCompare(false)}
+        snapshots={snapshotStoreSnapshots}
+        currentSnapshotId={latestSnapshotId}
+        onRestore={(snapshotId: string) => {
+          const snap = snapshotStoreSnapshots.find((s) => s.id === snapshotId)
+          if (snap) {
+            setNodes(snap.nodes)
+            setEdges(snap.edges)
           }
         }}
       />
