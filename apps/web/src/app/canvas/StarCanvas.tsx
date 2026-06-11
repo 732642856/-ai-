@@ -465,6 +465,7 @@ let _runAgentFn: ((nodeId: string) => void) | undefined;
 let _runBatchGenerateFn: ((nodeIds: string[]) => void) | undefined;
 let _updateAgentContentFn: ((nodeId: string, content: string) => void) | undefined;
 let _runVideoRetryFn: ((nodeId: string) => void) | undefined;
+let _videoUpscaleFn: ((nodeId: string) => void) | undefined;
 let _doUndo: (() => void) | undefined;
 let _doRedo: (() => void) | undefined;
 
@@ -502,7 +503,7 @@ const nodeTypes = {
   workflow: WorkflowNode,
   shot: ShotNode,
   storyboardGrid: StoryboardGridNode,
-  video: (props: any) => <VideoNode {...props} onRetry={_runVideoRetryFn} />,
+  video: (props: any) => <VideoNode {...props} onRetry={_runVideoRetryFn} onUpscale={_videoUpscaleFn} />,
   agent: (props: any) => (
     <AgentNode
       {...props}
@@ -704,6 +705,7 @@ function StarCanvasInner() {
       _runBatchGenerateFn = undefined;
       _updateAgentContentFn = undefined;
       _runVideoRetryFn = undefined;
+      _videoUpscaleFn = undefined;
     };
   }, []);
 
@@ -3854,6 +3856,21 @@ function StarCanvasInner() {
   // Wire VideoNode's retry button to the workflow runner
   _runVideoRetryFn = (nodeId: string) => {
     workflowRunner.runNode(nodeId);
+  };
+
+  _videoUpscaleFn = async (nodeId: string) => {
+    const node = nodesRef.current.find((n) => n.id === nodeId);
+    if (!node) return;
+    // Fire and forget — the upscale API will notify via node state updates
+    fetch("/api/ai/upscale", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        nodeId,
+        videoUrl: node.data.resultUrl,
+        scale: 2,
+      }),
+    }).catch((err) => console.error("[upscale] API error:", err));
   };
 
   // Wire undo/redo for toolbar buttons

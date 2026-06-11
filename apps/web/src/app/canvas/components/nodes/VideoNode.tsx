@@ -13,7 +13,7 @@
 
 import { memo, useState, useRef, useCallback, useEffect } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Play, Pause, Loader2, AlertTriangle, RotateCcw, Music, Clock, Subtitles } from "lucide-react";
+import { Play, Pause, Loader2, AlertTriangle, RotateCcw, Music, Clock, Subtitles, Zap } from "lucide-react";
 import type { CanvasNodeData, NodeRunStatus } from "../canvas/types";
 import { nodeToneStyles } from "../canvas/types";
 import { getCompatibleRunMeta, isNodeBusy, isNodeFinished } from "../../utils/nodeRunMeta";
@@ -23,6 +23,8 @@ interface VideoNodeProps extends NodeProps {
   data: CanvasNodeData;
   /** Retry callback when generation failed. Receives node ID. */
   onRetry?: (nodeId: string) => void;
+  /** HD enhance / upscale callback. Receives node ID. */
+  onUpscale?: (nodeId: string) => void;
 }
 
 // ── Status labels ─────────────────────────────────────────────
@@ -67,7 +69,7 @@ const stageLabels: Record<VideoGenStage, string> = {
 
 // ── Component ─────────────────────────────────────────────────
 
-const VideoNode = memo(function VideoNode({ id, data, selected, onRetry }: VideoNodeProps) {
+const VideoNode = memo(function VideoNode({ id, data, selected, onRetry, onUpscale }: VideoNodeProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -333,6 +335,25 @@ const VideoNode = memo(function VideoNode({ id, data, selected, onRetry }: Video
               >
                 <RotateCcw size={12} />
                 重新生成
+              </button>
+            )}
+            {onUpscale && runMeta.runStatus === "succeeded" && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onUpscale(id);
+                }}
+                className="nodrag mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg
+                           text-xs font-medium border transition-colors"
+                style={{
+                  borderColor: "rgba(168,85,247,0.3)",
+                  backgroundColor: "rgba(168,85,247,0.12)",
+                  color: "#c4b5fd",
+                }}
+                title="视频 HD 高清增强"
+              >
+                <Zap size={12} />
+                HD 增强
               </button>
             )}
           </div>
