@@ -139,6 +139,8 @@ import { ShotListTable } from "./components/panels/ShotListTable";
 import { StyleLibraryPanel } from "./components/panels/StyleLibraryPanel";
 import { DraggableAngleControl } from "./components/canvas/DraggableAngleControl";
 import { VersionComparePanel } from "./components/history/VersionComparePanel";
+import { AgentModeSwitcher, type AgentMode } from "./components/chat/AgentModeSwitcher";
+import { BatchActionPanel, type BatchAction } from "./components/canvas/BatchActionPanel";
 // 制片层面板（角色三视图、运镜参数、调色、时间轴、全景预览）
 import { CharacterViewPanel as CharacterViewModal } from "./components/canvas/CharacterViewModal";
 import { CinematicParamPanelInner as CinematicParamPanel, type CinematicParams } from "./components/panels/CinematicParamPanel";
@@ -792,6 +794,7 @@ function StarCanvasInner() {
   const [showStyleBiblePanel, setShowStyleBiblePanel] = useState(false);
   const [showEmotionCurve, setShowEmotionCurve] = useState(false);
   const [showCharacterLibrary, setShowCharacterLibrary] = useState(false);
+  const [agentMode, setAgentMode] = useState<AgentMode>("ask");
   // 制片层面板
   const [showCharacterView, setShowCharacterView] = useState(false);
   const [showCinematicParams, setShowCinematicParams] = useState(false);
@@ -8870,6 +8873,59 @@ function StarCanvasInner() {
           <span>打开星轨Ai</span>
         </button>
       )}
+
+      {/* Agent 模式切换器 */}
+      {chatOpen && (
+        <div className="fixed bottom-[72px] right-4 z-[55] rounded-xl border px-2 py-1.5 shadow-lg backdrop-blur-xl"
+          style={{ borderColor: DESIGN_TOKENS.border, backgroundColor: "rgba(18,18,28,0.92)" }}>
+          <AgentModeSwitcher
+            activeMode={agentMode}
+            onChange={setAgentMode}
+          />
+        </div>
+      )}
+
+      {/* 多节点批量操作面板 */}
+      <BatchActionPanel
+        isVisible={selectionCount > 1}
+        selectedCount={selectionCount}
+        selectedKinds={[]}
+        nodeIds={[]}
+        onAction={(action) => {
+          const selectedIds = nodes.filter(n => n.selected).map(n => n.id)
+          if (selectedIds.length < 2) return
+          switch (action) {
+            case "delete-selected":
+              setNodes((nds) => nds.filter((n) => !n.selected))
+              setEdges((eds) => eds.filter((e) => {
+                const ns = nodes.filter(n => n.selected)
+                return !ns.some(n => n.id === e.source || n.id === e.target)
+              }))
+              break
+            case "duplicate-selected": {
+              const offset = { x: 60, y: 60 }
+              const selNodes = nodes.filter(n => n.selected)
+              const idMap = new Map(selNodes.map(n => [n.id, `${n.id}_dup_${Date.now()}_${Math.random().toString(36).slice(2,6)}`]))
+              const newNodes = selNodes.map(n => ({
+                ...structuredClone(n),
+                id: idMap.get(n.id)!,
+                selected: false,
+                position: { x: n.position.x + offset.x, y: n.position.y + offset.y }
+              }))
+              setNodes((nds) => nds.map(n => ({ ...n, selected: false })).concat(newNodes as any))
+              break
+            }
+            case "generate-all-images":
+            case "generate-all-videos":
+              selectedIds.forEach((id) => workflowRunner.runNode(id))
+              break
+          }
+        }}
+        onClear={() => {
+          // Deselect all nodes
+          (document.querySelector('.react-flow__pane') as HTMLElement)?.click()
+        }}
+      />
 
       {/* Chat Panel */}
       <ChatPanel
