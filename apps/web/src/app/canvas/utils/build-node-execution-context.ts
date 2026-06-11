@@ -386,13 +386,13 @@ function extractUpstreamMedia(
         mediaRole,
         targetHandle,
         // V1-6: 传递视频元数据
-        durationMs: (d as any).videoDurationMs,
-        width: (d as any).videoWidth,
-        height: (d as any).videoHeight,
-        fps: (d as any).videoFps,
-        mimeType: (d as any).mimeType,
-        sizeBytes: (d as any).fileSize,
-        thumbnailUrl: (d as any).thumbnailUrl ?? (d as any).imageUrl,
+        durationMs: d.videoDurationMs,
+        width: d.videoWidth,
+        height: d.videoHeight,
+        fps: d.videoFps,
+        mimeType: d.mimeType,
+        sizeBytes: d.fileSize,
+        thumbnailUrl: d.thumbnailUrl ?? d.imageUrl,
       })
     })
 
@@ -409,10 +409,10 @@ function extractUpstreamMedia(
           mediaRole,
           targetHandle,
           // V1-6: 传递视频元数据
-          durationMs: (d as any).videoDurationMs,
-          width: (d as any).videoWidth,
-          height: (d as any).videoHeight,
-          thumbnailUrl: (d as any).thumbnailUrl ?? (d as any).imageUrl,
+          durationMs: d.videoDurationMs,
+          width: d.videoWidth,
+          height: d.videoHeight,
+          thumbnailUrl: d.thumbnailUrl ?? d.imageUrl,
         })
       } else {
         images.push({
@@ -665,13 +665,13 @@ function extractSelfVideos(data: CanvasNodeData): RawMedia[] {
       nodeId: "self",
       outputIndex: 0,
       mediaRole: "generated",
-      durationMs: (data as any).videoDurationMs,
-      width: (data as any).videoWidth,
-      height: (data as any).videoHeight,
-      fps: (data as any).videoFps,
-      mimeType: (data as any).mimeType,
-      sizeBytes: (data as any).fileSize,
-      thumbnailUrl: (data as any).thumbnailUrl ?? (data as any).imageUrl,
+      durationMs: (data as CanvasNodeData).videoDurationMs,
+      width: (data as CanvasNodeData).videoWidth,
+      height: (data as CanvasNodeData).videoHeight,
+      fps: (data as CanvasNodeData).videoFps,
+      mimeType: (data as CanvasNodeData).mimeType,
+      sizeBytes: (data as CanvasNodeData).fileSize,
+      thumbnailUrl: (data as CanvasNodeData).thumbnailUrl ?? (data as CanvasNodeData).imageUrl,
     })
   }
 

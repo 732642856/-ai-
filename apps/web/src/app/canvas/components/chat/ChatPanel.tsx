@@ -51,10 +51,6 @@ type CanvasNodeContextSnapshot = {
 
 const isDebugEnabled = (key: string) =>
   typeof window !== "undefined" && window.localStorage.getItem(key) === "1"
-
-const DEBUG_CHAT = isDebugEnabled("DEBUG_CHAT_ATTACHMENTS")
-const DEBUG_AI = isDebugEnabled("DEBUG_AI_PAYLOAD")
-
 function getNodeTitle(node: Node): string {
   const data = node.data as Record<string, any> | undefined
   const fallbackText = data?.content || data?.text || data?.prompt || data?.summary
@@ -308,9 +304,6 @@ export function ChatPanel({
             return prev
           })
         }
-      }
-      if (DEBUG_AI) {
-        console.debug("[DEBUG_AI] Response complete")
       }
     },
     onError: (error) => {

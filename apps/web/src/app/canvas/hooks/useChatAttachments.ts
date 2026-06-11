@@ -4,9 +4,6 @@
 
 import { useCallback, useState, type ChangeEvent } from "react"
 import { generateId } from "../utils/generateId"
-
-const DEBUG_CHAT = typeof window !== "undefined" && window.localStorage.getItem("DEBUG_CHAT_ATTACHMENTS") === "1"
-
 export interface ChatAttachment {
   id: string
   type: "image" | "video" | "audio" | "file"
@@ -58,13 +55,6 @@ export function useChatAttachments() {
 
         setAttachments((prev) => [...prev, attachment])
 
-        if (DEBUG_CHAT) {
-          console.debug("[DEBUG_CHAT_ATTACHMENTS] Added attachment:", {
-            id: attachment.id,
-            type: attachment.type,
-            name: attachment.name,
-          })
-        }
         continue
       }
 
@@ -85,14 +75,6 @@ export function useChatAttachments() {
 
         setAttachments((prev) => [...prev, attachment])
 
-        if (DEBUG_CHAT) {
-          console.debug("[DEBUG_CHAT_ATTACHMENTS] Added attachment:", {
-            id: attachment.id,
-            type: attachment.type,
-            name: attachment.name,
-            dimensions: `${attachment.width}x${attachment.height}`,
-          })
-        }
       }
 
       img.onerror = () => {

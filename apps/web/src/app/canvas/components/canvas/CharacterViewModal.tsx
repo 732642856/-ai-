@@ -188,7 +188,7 @@ export function CharacterViewPanel({
 
       setGeneratedImages((prev) => [...results.reverse(), ...prev].slice(0, 12))
     } catch (err) {
-      console.error("[CharacterViewPanel] Generation failed:", err)
+      // Generation failed - error silently captured
     } finally {
       setGenerating(false)
     }

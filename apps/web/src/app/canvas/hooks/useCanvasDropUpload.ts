@@ -16,11 +16,6 @@ import {
   isTextDocumentFile,
   readTextDocumentFile,
 } from "@/lib/documents/textDocumentImport";
-
-const DEBUG_DROP =
-  typeof window !== "undefined" &&
-  window.localStorage.getItem("DEBUG_DROP_UPLOAD") === "1";
-
 export interface ImageFileMeta {
   id: string;
   file: File;
@@ -102,17 +97,6 @@ export function useCanvasDropUpload(
         assetId,
       };
 
-      if (DEBUG_DROP) {
-        console.debug("[DEBUG_DROP_UPLOAD] Image loaded:", {
-          id: meta.id,
-          assetId: meta.assetId,
-          name: meta.name,
-          imageSize: `${meta.width}x${meta.height}`,
-          fileSize: meta.size,
-          mimeType: meta.mimeType,
-        });
-      }
-
       return meta;
     },
     [],
@@ -177,14 +161,6 @@ export function useCanvasDropUpload(
         },
       };
 
-      if (DEBUG_DROP) {
-        console.debug("[DEBUG_DROP_UPLOAD] Created node:", {
-          id: node.id,
-          position,
-          displaySize: `${width}x${height}`,
-        });
-      }
-
       return node;
     },
     [calculateNodeSize],
@@ -216,10 +192,6 @@ export function useCanvasDropUpload(
   const handleDragEnter = useCallback((e: DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-
-    if (DEBUG_DROP) {
-      console.debug("[DEBUG_DROP_UPLOAD] Drag enter");
-    }
 
     // 检查是否有可导入文件（图片或纯文本文档）
     const hasSupportedFiles = Array.from(e.dataTransfer.items).some((item) => {
@@ -256,9 +228,6 @@ export function useCanvasDropUpload(
       setIsDragOver(false);
       setDragError(null);
 
-      if (DEBUG_DROP) {
-        console.debug("[DEBUG_DROP_UPLOAD] Drag leave");
-      }
     }
   }, []);
 
@@ -271,36 +240,16 @@ export function useCanvasDropUpload(
       setIsDragOver(false);
       setDragError(null);
 
-      if (DEBUG_DROP) {
-        console.debug("[DEBUG_DROP_UPLOAD] Drop event:", {
-          screenX: e.clientX,
-          screenY: e.clientY,
-        });
-      }
-
       // 获取放置位置（画布坐标）
       const canvasPosition = reactFlow.screenToFlowPosition({
         x: e.clientX,
         y: e.clientY,
       });
 
-      if (DEBUG_DROP) {
-        console.debug("[DEBUG_DROP_UPLOAD] Canvas position:", canvasPosition);
-      }
-
       // 获取文件列表
       const files = Array.from(e.dataTransfer.files);
       const imageFiles = files.filter((f) => f.type.startsWith("image/"));
       const documentFiles = files.filter(isTextDocumentFile);
-
-      if (DEBUG_DROP) {
-        console.debug("[DEBUG_DROP_UPLOAD] Files:", {
-          total: files.length,
-          images: imageFiles.length,
-          documents: documentFiles.length,
-          names: files.map((f) => f.name),
-        });
-      }
 
       if (imageFiles.length === 0 && documentFiles.length === 0) {
         setDragError(`请拖入可支持文件：${SUPPORTED_DROP_LABEL}`);
@@ -343,12 +292,6 @@ export function useCanvasDropUpload(
         }
         dismissCanvasHint?.();
 
-        if (DEBUG_DROP) {
-          console.log(
-            "[DEBUG_DROP_UPLOAD] Created nodes:",
-            nodes.map((n) => n.id),
-          );
-        }
       } catch (error: any) {
         console.error("[DEBUG_DROP_UPLOAD] Error processing files:", error);
         setDragError(error?.message || "文件处理失败，请重试");
