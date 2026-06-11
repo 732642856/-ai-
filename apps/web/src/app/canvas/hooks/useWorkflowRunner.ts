@@ -1194,7 +1194,7 @@ export function useWorkflowRunner(options?: { onRunEvent?: (event: WorkflowRunEv
             imageUrl: sourceImageUrl,
             motionPrompt: motionPrompt || undefined,
             durationSeconds: 5,
-            backend: (process.env.NEXT_PUBLIC_VIDEO_BACKEND as any) || undefined, // Auto-detect from env, fallback to mock
+            backend: process.env.NEXT_PUBLIC_VIDEO_BACKEND || undefined, // Auto-detect from env, fallback to mock
           },
           (progress) => {
             updateNodeData(node.id, {

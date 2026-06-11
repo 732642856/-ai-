@@ -3989,7 +3989,7 @@ function StarCanvasInner() {
                       ...n.data,
                       generationStatus: "failed" as const,
                       errorMessage: friendlyErrorMessage(err?.message || ""),
-                      _retryCount: ((n.data as any)._retryCount ?? 0) + 1,
+                      _retryCount: ((n.data._retryCount ?? 0) + 1),
                     },
                   }
                 : n,
