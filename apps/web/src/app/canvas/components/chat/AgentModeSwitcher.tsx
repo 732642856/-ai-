@@ -8,7 +8,7 @@
 // ============================================================================
 "use client"
 
-import { memo, useCallback } from "react"
+import { memo } from "react"
 import { MessageCircle, Zap, Eye } from "lucide-react"
 import { DESIGN_TOKENS } from "../../styles/designSystem"
 

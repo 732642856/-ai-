@@ -31,6 +31,20 @@ interface VoxCPMResponse {
 }
 
 // ============================================================================
+// Helpers
+// ============================================================================
+
+/** Convert ArrayBuffer to Base64 string (Node.js + Edge Runtime compatible) */
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer)
+  let binary = ""
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i])
+  }
+  return btoa(binary)
+}
+
+// ============================================================================
 // Configuration
 // ============================================================================
 
@@ -108,6 +122,7 @@ export async function POST(request: NextRequest) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(voxcpmPayload),
+      signal: AbortSignal.timeout(60000),
     })
 
     if (!response.ok) {
@@ -121,7 +136,7 @@ export async function POST(request: NextRequest) {
 
     // Get audio as ArrayBuffer and convert to Base64
     const audioBuffer = await response.arrayBuffer()
-    const audioBase64 = Buffer.from(audioBuffer).toString("base64")
+    const audioBase64 = arrayBufferToBase64(audioBuffer)
     const duration = Date.now() - startTime
 
     console.log(`[VoxCPM] Generated in ${duration}ms, size=${(audioBuffer.byteLength / 1024).toFixed(1)}KB`)
