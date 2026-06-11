@@ -110,48 +110,89 @@ export function CharacterViewPanel({
     [characterName, characterDescription, selectedStyle]
   )
 
-  // 调用 AI 生成
+  // 调用 AI 生成三视图（使用专用 character-view API）
   const handleGenerate = useCallback(async () => {
     setGenerating(true)
     try {
       const perspectives: ViewPerspective[] = lockedPerspective
         ? [lockedPerspective]
-        : ["all"]
+        : ["front", "side", "back"]
 
       const results: { perspective: ViewPerspective; imageUrl: string; prompt: string }[] = []
 
-      for (const perspective of perspectives) {
-        const prompt = buildPrompt(perspective)
+      const characterDesc = buildPrompt("front").replace("front view of the character", "").trim()
 
-        const res = await fetch("/api/ai/generate-image", {
+      // 使用专用 API 逐视角生成
+      for (const perspective of perspectives) {
+        const res = await fetch("/api/ai/generate-character-view", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            prompt,
-            model: "gpt-image-2",
-            size: selectedResolution,
+            characterDescription: characterDesc,
+            referenceImageUrl: localRefImage || undefined,
+            viewType: perspective,
           }),
         })
 
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}))
-          throw new Error(errData.error || `API error: ${res.status}`)
+          throw new Error(errData.error?.message || `API error: ${res.status}`)
         }
 
-        const result = await res.json()
-        if (!result.imageUrl) throw new Error("No image data returned")
+        // SSE 流式解析
+        const reader = res.body?.getReader()
+        if (!reader) throw new Error("No response body")
 
-        results.push({ perspective, imageUrl: result.imageUrl, prompt })
-        onImageGenerated?.(result.imageUrl, perspective, prompt)
+        const decoder = new TextDecoder()
+        let buffer = ""
+        let imageUrl = ""
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const eventRegex = /event: (\w+)\ndata: (.+?)\n\n/g
+          let match
+
+          while ((match = eventRegex.exec(buffer)) !== null) {
+            const eventType = match[1]
+            let data: Record<string, unknown>
+            try {
+              data = JSON.parse(match[2])
+            } catch {
+              continue
+            }
+
+            if (eventType === "result") {
+              // 获取对应视角的 URL
+              if (perspective === "front" && data.frontViewUrl) {
+                imageUrl = data.frontViewUrl as string
+              } else if (perspective === "side" && data.sideViewUrl) {
+                imageUrl = data.sideViewUrl as string
+              } else if (perspective === "back" && data.backViewUrl) {
+                imageUrl = data.backViewUrl as string
+              }
+            } else if (eventType === "error") {
+              throw new Error((data.message as string) || "生成失败")
+            }
+          }
+        }
+
+        if (!imageUrl) throw new Error("No image data returned")
+
+        const prompt = buildPrompt(perspective)
+        results.push({ perspective, imageUrl, prompt })
+        onImageGenerated?.(imageUrl, perspective, prompt)
       }
 
-      setGeneratedImages((prev) => [...results, ...prev].slice(0, 12))
+      setGeneratedImages((prev) => [...results.reverse(), ...prev].slice(0, 12))
     } catch (err) {
       console.error("[CharacterViewPanel] Generation failed:", err)
     } finally {
       setGenerating(false)
     }
-  }, [buildPrompt, selectedResolution, lockedPerspective, onImageGenerated])
+  }, [buildPrompt, lockedPerspective, localRefImage, onImageGenerated])
 
   // 视角锁定切换
   const toggleLock = (perspective: ViewPerspective) => {
