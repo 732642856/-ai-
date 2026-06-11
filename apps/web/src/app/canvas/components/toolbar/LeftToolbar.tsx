@@ -4,7 +4,7 @@
  * - 底部保留素材库、聊天、用户
  */
 
-import { Plus, Library, MessageCircle, Clock3, Save, ImageIcon, Camera, Palette, Film, Globe } from "lucide-react"
+import { Plus, Library, MessageCircle, Clock3, Save, ImageIcon, Camera, Palette, Film, Globe, Clapperboard } from "lucide-react"
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 
 interface LeftToolbarProps {
@@ -22,6 +22,7 @@ interface LeftToolbarProps {
   onOpenColorGrade?: () => void
   onOpenTimeline?: () => void
   onOpenPanorama?: () => void
+  onOpenCrewAgent?: () => void
 }
 
 export function LeftToolbar({
@@ -38,6 +39,7 @@ export function LeftToolbar({
   onOpenColorGrade,
   onOpenTimeline,
   onOpenPanorama,
+  onOpenCrewAgent,
 }: LeftToolbarProps) {
   return (
     <div
@@ -163,6 +165,16 @@ export function LeftToolbar({
         title="720/360 全景预𪾢"
       >
         <Globe size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />
+      </button>
+
+      {/* AI 创作剧组 */}
+      <button
+        onClick={onOpenCrewAgent}
+        className="flex h-9 w-9 items-center justify-center rounded-full transition-all hover:bg-white/10"
+        style={{ color: DESIGN_TOKENS.textMuted }}
+        title="AI 影视创作剧组 (7 Agent)"
+      >
+        <Clapperboard size={ICON_CONFIG.size} strokeWidth={ICON_CONFIG.strokeWidth} />
       </button>
 
       {/* 时间轴 */}

@@ -139,6 +139,7 @@ import { CinematicParamPanelInner as CinematicParamPanel, type CinematicParams }
 import { ColorGradePanel } from "./components/panels/ColorGradePanel";
 import { TimelinePanel, type TimelineClip } from "./components/panels/TimelinePanel";
 import { PanoramaPanel } from "./components/panels/PanoramaPanel";
+import { CrewAgentPanel } from "./components/panels/CrewAgentPanel";
 import { NodeHistoryPanel } from "./components/history/NodeHistoryPanel";
 import { WorkspaceHistoryPanel } from "./components/history/WorkspaceHistoryPanel";
 import { WorkflowRunPanel } from "./components/workflow/WorkflowRunPanel";
@@ -782,6 +783,7 @@ function StarCanvasInner() {
   const [showColorGrade, setShowColorGrade] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
   const [showPanorama, setShowPanorama] = useState(false);
+  const [showCrewAgentPanel, setShowCrewAgentPanel] = useState(false);
   const [showProductionQueue, setShowProductionQueue] = useState(false);
   const [historyNodeId, setHistoryNodeId] = useState<string | null>(null);
   const [isComposingSelectedShots, setIsComposingSelectedShots] = useState(false);
@@ -7548,6 +7550,7 @@ function StarCanvasInner() {
         onOpenColorGrade={() => setShowColorGrade(true)}
         onOpenTimeline={() => setShowTimeline(true)}
         onOpenPanorama={() => setShowPanorama(true)}
+        onOpenCrewAgent={() => setShowCrewAgentPanel(true)}
       />
 
       {/* Workflow Templates Dialog */}
@@ -8316,6 +8319,55 @@ function StarCanvasInner() {
           </div>,
           document.body,
         )}
+
+      {/* AI 影视创作剧组面𤋈 (CrewAgentPanel — 7 Agent) */}
+      {showCrewAgentPanel && (
+        <CrewAgentPanel
+          isOpen={showCrewAgentPanel}
+          onClose={() => setShowCrewAgentPanel(false)}
+          selectedNodeId={selectedNodeId}
+          currentScript={
+            selectedNode
+              ? (selectedNode.data as Record<string, unknown>)?.content as string | undefined
+                ?? (selectedNode.data as Record<string, unknown>)?.text as string | undefined
+                ?? (selectedNode.data as Record<string, unknown>)?.prompt as string | undefined
+              : undefined
+          }
+          onApplyResults={(results) => {
+            // 将 Agent 产出写入画布节点
+            const roleNames: Record<string, string> = {
+              writer: "writer",
+              storyboardArtist: "storyboardArtist",
+              cinematographer: "cinematographer",
+              director: "director",
+              promptEngineer: "promptEngineer",
+              productionDesigner: "productionDesigner",
+              router: "router",
+            }
+            Object.entries(results).forEach(([roleId, output]) => {
+              if (!output) return
+              setNodes((nds) => [
+                ...nds,
+                {
+                  id: `crew-${roleId}-${Date.now()}`,
+                  type: "agent",
+                  position: {
+                    x: 100 + Math.random() * 400,
+                    y: 100 + Math.random() * 300,
+                  },
+                  data: {
+                    label: roleNames[roleId] || roleId,
+                    title: roleNames[roleId] || roleId,
+                    content: output,
+                    nodeKind: "agent",
+                    agentOutput: output,
+                  },
+                } as import("@xyflow/react").Node,
+              ])
+            })
+          }}
+        />
+      )}
 
       {/* Legacy Character Asset Library Panel */}
       {showCharacterLibrary &&
