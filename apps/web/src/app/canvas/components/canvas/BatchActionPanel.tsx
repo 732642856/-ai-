@@ -74,8 +74,6 @@ export const BatchActionPanel = memo(function BatchActionPanel({
   onAction,
   onClear,
 }: BatchActionPanelProps) {
-  if (!isVisible || selectedCount < 2) return null
-
   const handleAction = useCallback(
     (action: BatchAction) => {
       const item = BATCH_ACTIONS.find((a) => a.id === action)
@@ -89,6 +87,8 @@ export const BatchActionPanel = memo(function BatchActionPanel({
     },
     [selectedCount, onAction],
   )
+
+  if (!isVisible || selectedCount < 2) return null
 
   const kindText =
     selectedKinds.length > 0 ? selectedKinds.join("、") : "节点"
