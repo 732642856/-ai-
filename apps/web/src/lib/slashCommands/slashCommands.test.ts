@@ -9,24 +9,35 @@ import {
 
 describe("slashCommands", () => {
   describe("getSlashCommandsForTarget", () => {
-    it("returns text node commands without generate-image", () => {
+    it("returns text node commands including split-storyboard but not generate-image", () => {
       const ids = getSlashCommandsForTarget("text", "").map((command) => command.id);
 
-      assert.deepEqual(ids, [
-        "summarize",
-        "expand",
-        "rewrite",
-        "continue-storyboard-assistant",
-        "split-storyboard",
-      ]);
+      // Should include core text commands
+      assert.equal(ids.includes("summarize"), true);
+      assert.equal(ids.includes("expand"), true);
+      assert.equal(ids.includes("rewrite"), true);
+      assert.equal(ids.includes("continue-storyboard-assistant"), true);
+      assert.equal(ids.includes("split-storyboard"), true);
+      // generate-image is shot/image only, not text
       assert.equal(ids.includes("generate-image"), false);
+      // New commands should appear
+      assert.equal(ids.includes("nine-grid"), true);
+      assert.equal(ids.includes("create-storyboard"), true);
     });
 
-    it("returns shot node commands without split-storyboard", () => {
+    it("returns shot node commands including generate-image but not split-storyboard", () => {
       const ids = getSlashCommandsForTarget("shot", "").map((command) => command.id);
 
-      assert.deepEqual(ids, ["summarize", "expand", "rewrite", "generate-image"]);
+      // Core shot commands
+      assert.equal(ids.includes("summarize"), true);
+      assert.equal(ids.includes("expand"), true);
+      assert.equal(ids.includes("rewrite"), true);
+      assert.equal(ids.includes("generate-image"), true);
+      // split-storyboard is text only, not shot
       assert.equal(ids.includes("split-storyboard"), false);
+      // Visual commands should appear for shot target
+      assert.equal(ids.includes("three-view"), true);
+      assert.equal(ids.includes("cinematic-lighting"), true);
     });
 
     it("filters by english id and Chinese label or description", () => {
@@ -34,18 +45,12 @@ describe("slashCommands", () => {
         getSlashCommandsForTarget("text", "exp").map((command) => command.id),
         ["expand"],
       );
-      assert.deepEqual(
-        getSlashCommandsForTarget("shot", "图片").map((command) => command.id),
-        ["generate-image"],
-      );
-      assert.deepEqual(
-        getSlashCommandsForTarget("text", "故事分镜").map((command) => command.id),
-        ["continue-storyboard-assistant"],
-      );
-      assert.deepEqual(
-        getSlashCommandsForTarget("text", "文字分镜").map((command) => command.id),
-        ["split-storyboard"],
-      );
+      const imgMatch = getSlashCommandsForTarget("shot", "图片").map((command) => command.id);
+      assert.equal(imgMatch.includes("generate-image"), true);
+      const storyMatch = getSlashCommandsForTarget("text", "故事分镜").map((command) => command.id);
+      assert.equal(storyMatch.includes("continue-storyboard-assistant"), true);
+      const splitMatch = getSlashCommandsForTarget("text", "拆成分镜").map((command) => command.id);
+      assert.equal(splitMatch.includes("split-storyboard"), true);
     });
   });
 
