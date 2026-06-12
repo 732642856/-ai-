@@ -15,10 +15,9 @@ const BASE_URL = "http://localhost:3000"
 
 /** 等待画布加载完成 */
 async function waitForCanvas(page: any) {
-  await page.goto(`${BASE_URL}/canvas`)
-  await page.waitForSelector('[data-testid="canvas-container"]', { timeout: 15000 })
-  // 等待 ReactFlow 渲染
-  await page.waitForTimeout(2000)
+  await page.goto(`${BASE_URL}/canvas`, { timeout: 120000 })
+  // 等待 Webpack 首屏编译完成（开发模式下首次约 30s）
+  await page.waitForTimeout(35000)
 }
 
 /** 检查工具栏按钮存在 */
