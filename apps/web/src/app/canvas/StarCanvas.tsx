@@ -31,6 +31,7 @@ import {
   type ChangeEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
+import dynamic from "next/dynamic";
 
 // ============================================================================
 // ICONS
@@ -121,8 +122,6 @@ import { useWorkflowTemplates, type WorkflowTemplate } from "./hooks/useWorkflow
 import { AddNodePanel } from "./components/toolbar/AddNodePanel";
 import { ChatPanel } from "./components/chat/ChatPanel";
 import { SettingsPanel } from "./components/panels/SettingsPanel";
-import { ScriptImportPanel, type ScriptImportPayload } from "./components/panels/ScriptImportPanel";
-import { VideoRemixPanel, type VideoRemixImportPayload } from "./components/panels/VideoRemixPanel";
 import {
   ProjectBiblePanel,
   type ProjectSceneBibleItem,
@@ -139,22 +138,29 @@ import { ShotListTable } from "./components/panels/ShotListTable";
 import { StyleLibraryPanel } from "./components/panels/StyleLibraryPanel";
 import { DraggableAngleControl } from "./components/canvas/DraggableAngleControl";
 import { VersionComparePanel } from "./components/history/VersionComparePanel";
+// 重型面板全部懒加载 — 减少首屏编译体积
 import { AgentModeSwitcher, type AgentMode } from "./components/chat/AgentModeSwitcher";
 import { BatchActionPanel, type BatchAction } from "./components/canvas/BatchActionPanel";
-// 制片层面板（角色三视图、运镜参数、调色、时间轴、全景预览）
-import { CharacterViewPanel as CharacterViewModal } from "./components/canvas/CharacterViewModal";
-import { CinematicParamPanelInner as CinematicParamPanel, type CinematicParams } from "./components/panels/CinematicParamPanel";
-import { ColorGradePanel } from "./components/panels/ColorGradePanel";
-import { TimelinePanel, type TimelineClip } from "./components/panels/TimelinePanel";
-import { PanoramaPanel } from "./components/panels/PanoramaPanel";
-import { CrewAgentPanel } from "./components/panels/CrewAgentPanel";
+// 制片层面板 — 全部 next/dynamic 懒加载
+const CharacterViewPanel = dynamic(() => import("./components/canvas/CharacterViewModal").then(m => ({ default: m.CharacterViewPanel })), { ssr: false });
+const CinematicParamPanel = dynamic(() => import("./components/panels/CinematicParamPanel").then(m => ({ default: m.CinematicParamPanelInner })), { ssr: false });
+const ColorGradePanel = dynamic(() => import("./components/panels/ColorGradePanel").then(m => ({ default: m.ColorGradePanel })), { ssr: false });
+const TimelinePanel = dynamic(() => import("./components/panels/TimelinePanel").then(m => ({ default: m.TimelinePanel })), { ssr: false });
+const PanoramaPanel = dynamic(() => import("./components/panels/PanoramaPanel").then(m => ({ default: m.PanoramaPanel })), { ssr: false });
+const CrewAgentPanel = dynamic(() => import("./components/panels/CrewAgentPanel").then(m => ({ default: m.CrewAgentPanel })), { ssr: false });
+const SourceTracePanel = dynamic(() => import("./components/preview/SourceTracePanel").then(m => ({ default: m.SourceTracePanel })), { ssr: false });
+const NodeHistoryPanel = dynamic(() => import("./components/history/NodeHistoryPanel").then(m => ({ default: m.NodeHistoryPanel })), { ssr: false });
+const VideoRemixPanel = dynamic(() => import("./components/panels/VideoRemixPanel").then(m => ({ default: m.VideoRemixPanel })), { ssr: false });
+const ScriptImportPanel = dynamic(() => import("./components/panels/ScriptImportPanel").then(m => ({ default: m.ScriptImportPanel })), { ssr: false });
+import type { ScriptImportPayload } from "./components/panels/ScriptImportPanel";
+import type { VideoRemixImportPayload } from "./components/panels/VideoRemixPanel";
+import type { CinematicParams } from "./components/panels/CinematicParamPanel";
+import type { TimelineClip } from "./components/panels/TimelinePanel";
 import { ExportPreflightPanel } from "./components/panels/ExportPreflightPanel";
 import { FileUploadPanel } from "./components/panels/FileUploadPanel";
-import { NodeHistoryPanel } from "./components/history/NodeHistoryPanel";
 import { WorkspaceHistoryPanel } from "./components/history/WorkspaceHistoryPanel";
 import { WorkflowRunPanel } from "./components/workflow/WorkflowRunPanel";
 import { PromptPreviewPanel } from "./components/preview/PromptPreviewPanel";
-import { SourceTracePanel } from "./components/preview/SourceTracePanel";
 import ImageNode, {
   registerImageHoverHandlers,
   unregisterImageHoverHandlers,
@@ -8348,9 +8354,9 @@ function StarCanvasInner() {
       {/* 制片层面板：角色三视图、运镜参数、调色、时间轴                      */}
       {/* ================================================================ */}
 
-      {/* 角色三视图生成面板 (CharacterViewModal) */}
+      {/* 角色三视图生成面板 (CharacterViewPanel) */}
       {showCharacterView && (
-        <CharacterViewModal
+        <CharacterViewPanel
           isOpen={showCharacterView}
           onClose={() => setShowCharacterView(false)}
         />
