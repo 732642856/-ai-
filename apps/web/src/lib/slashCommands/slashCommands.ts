@@ -28,7 +28,9 @@ export type SlashCommandId =
   | "create-storyboard"       // 创建故事板
   | "compose-all"             // 合成全集
   | "export-jianying"         // 导出剪映草稿
-  | "export-composition";     // 导出合成脚本
+  | "export-composition"
+  | "reverse-prompt"          // 图片反推提示词
+  | "generate-with-pose";     // 姿态参考生图
 
 export type SlashCommandTargetType = "text" | "shot" | "image" | "video" | "canvas";
 
@@ -140,6 +142,18 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     label: "说话照片",
     description: "让静态照片开口说话",
     targets: ["image"],
+  },
+  {
+    id: "reverse-prompt",
+    label: "反推提示词",
+    description: "从图片反推 AI 生图提示词",
+    targets: ["image"],
+  },
+  {
+    id: "generate-with-pose",
+    label: "姿态生图",
+    description: "使用 OpenPose 骨架图 + 参考图生成指定姿态图片",
+    targets: ["image", "shot"],
   },
   // ── 视频创作 ──
   {

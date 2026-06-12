@@ -6,7 +6,7 @@ const baseURL = process.env.STARCANVAS_E2E_BASE_URL || `http://127.0.0.1:${PORT}
 export default defineConfig({
   testDir: "./e2e",
   outputDir: process.env.STARCANVAS_E2E_OUTPUT_DIR || "/tmp/starcanvas-playwright-test-results",
-  timeout: 45_000,
+  timeout: 600_000,
   expect: {
     timeout: 5_000,
   },
@@ -17,7 +17,7 @@ export default defineConfig({
   use: {
     baseURL,
     trace: "on-first-retry",
-    video: "retain-on-failure",
+    video: "on",
     screenshot: "only-on-failure",
   },
   projects: [

@@ -156,6 +156,11 @@ import type { ScriptImportPayload } from "./components/panels/ScriptImportPanel"
 import type { VideoRemixImportPayload } from "./components/panels/VideoRemixPanel";
 import type { CinematicParams } from "./components/panels/CinematicParamPanel";
 import type { TimelineClip } from "./components/panels/TimelinePanel";
+// 恢复孤立组件
+import { ChainGeneratePanel } from "./components/panels/ChainGeneratePanel";
+import { ParamControlPanel } from "./components/panels/ParamControlPanel";
+import { StoryboardShotEditorPanel } from "./components/panels/StoryboardShotEditorPanel";
+import { BgmPanel } from "./components/nodes/BgmPanel";
 import { ExportPreflightPanel } from "./components/panels/ExportPreflightPanel";
 import { FileUploadPanel } from "./components/panels/FileUploadPanel";
 import { WorkspaceHistoryPanel } from "./components/history/WorkspaceHistoryPanel";
@@ -800,6 +805,11 @@ function StarCanvasInner() {
   const [showStyleBiblePanel, setShowStyleBiblePanel] = useState(false);
   const [showEmotionCurve, setShowEmotionCurve] = useState(false);
   const [showCharacterLibrary, setShowCharacterLibrary] = useState(false);
+  const [showChainGenerate, setShowChainGenerate] = useState(false);
+  const [showParamControl, setShowParamControl] = useState(false);
+  const [showShotEditor, setShowShotEditor] = useState(false);
+  const [showBgRemover, setShowBgRemover] = useState(false);
+  const [showBgm, setShowBgm] = useState(false);
   const [agentMode, setAgentMode] = useState<AgentMode>("ask");
   // 制片层面板
   const [showCharacterView, setShowCharacterView] = useState(false);
@@ -8679,7 +8689,7 @@ function StarCanvasInner() {
           document.body,
         )}
 
-      {/* Production Run Queue Panel */}
+        {/* Production Run Queue Panel */}
       {showProductionQueue && productionRunQueue &&
         typeof document !== "undefined" &&
         createPortal(
