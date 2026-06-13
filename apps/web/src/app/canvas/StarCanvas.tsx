@@ -139,7 +139,7 @@ import { StyleLibraryPanel } from "./components/panels/StyleLibraryPanel";
 import { DraggableAngleControl } from "./components/canvas/DraggableAngleControl";
 import { VersionComparePanel } from "./components/history/VersionComparePanel";
 // 重型面板全部懒加载 — 减少首屏编译体积
-import { AgentModeSwitcher, type AgentMode } from "./components/chat/AgentModeSwitcher";
+import { type AgentMode } from "./components/chat/AgentModeSwitcher";
 import { BatchActionPanel, type BatchAction } from "./components/canvas/BatchActionPanel";
 // 制片层面板 — 全部 next/dynamic 懒加载
 const CharacterViewPanel = dynamic(() => import("./components/canvas/CharacterViewModal").then(m => ({ default: m.CharacterViewPanel })), { ssr: false });
@@ -8944,16 +8944,6 @@ function StarCanvasInner() {
         </button>
       )}
 
-      {/* Agent 模式切换器 */}
-      {chatOpen && (
-        <div className="fixed bottom-[72px] right-4 z-[55] rounded-xl border px-2 py-1.5 shadow-lg backdrop-blur-xl"
-          style={{ borderColor: DESIGN_TOKENS.border, backgroundColor: "rgba(18,18,28,0.92)" }}>
-          <AgentModeSwitcher
-            activeMode={agentMode}
-            onChange={setAgentMode}
-          />
-        </div>
-      )}
 
       {/* 多节点批量操作面板 */}
       <BatchActionPanel
@@ -9009,6 +8999,8 @@ function StarCanvasInner() {
         onApplyChatActions={applyChatActions}
         showHistoryFromOutside={showHistory}
         onHistoryPanelClosed={() => setShowHistory(false)}
+        agentMode={agentMode}
+        onAgentModeChange={setAgentMode}
       />
     </div>
     </>

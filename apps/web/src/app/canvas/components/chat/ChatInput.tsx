@@ -112,7 +112,7 @@ export function ChatInput({
   attachments,
   onAttachmentsChange,
   onAddAttachmentToCanvas,
-  placeholder = "描述想法，或框选节点添加上下文...",
+  placeholder = "输入你的具体需求，例如：把这个故事拆成 12 个分镜…",
   disabled = false,
   canvasNodes = [],
   assets = [],
@@ -308,7 +308,7 @@ export function ChatInput({
           style={{
             color: DESIGN_TOKENS.text,
             maxHeight: "160px",
-            minHeight: "44px",
+            minHeight: "56px",
           }}
         />
 

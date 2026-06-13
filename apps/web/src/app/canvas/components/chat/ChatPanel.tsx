@@ -21,6 +21,7 @@ import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 import { useChatAttachments, type ChatAttachment } from "../../hooks/useChatAttachments"
 import { ChatInput, type ChatTaskMode } from "./ChatInput"
 import type { AiModel } from "./ChatInput"
+import { AgentModeSwitcher } from "./AgentModeSwitcher"
 import { useChatSSE, parseCanvasActions, stripCanvasActions } from "../../hooks/useChatSSE"
 import type { ChatCanvasAction, ApplyActionsReport, ApplyActionResult } from "../../features/canvas/actions/chatActions"
 import { getActionLabel, getStatusIcon, formatActionsSummary } from "../../features/canvas/actions/chatActions"
@@ -232,6 +233,8 @@ interface ChatPanelProps {
   onApplyChatActions?: (actions: ChatCanvasAction[]) => ApplyActionsReport // 返回执行报告
   showHistoryFromOutside?: boolean
   onHistoryPanelClosed?: () => void
+  agentMode?: "ask" | "max" | "preview"
+  onAgentModeChange?: (mode: "ask" | "max" | "preview") => void
 }
 
 export function ChatPanel({
@@ -245,6 +248,8 @@ export function ChatPanel({
   onApplyChatActions,
   showHistoryFromOutside,
   onHistoryPanelClosed,
+  agentMode = "ask",
+  onAgentModeChange,
 }: ChatPanelProps) {
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<Message[]>([])
@@ -555,12 +560,19 @@ export function ChatPanel({
       {/* Header */}
       <div
         className="flex items-center justify-between border-b px-5 py-3"
-        style={{ borderColor: DESIGN_TOKENS.border, height: "52px" }}
+        style={{ borderColor: DESIGN_TOKENS.border, minHeight: "52px" }}
       >
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium" style={{ color: DESIGN_TOKENS.text }}>
             {conversationTitle}
           </span>
+          {/* Agent 模式切换器集成到 header */}
+          {onAgentModeChange && (
+            <AgentModeSwitcher
+              activeMode={agentMode}
+              onChange={onAgentModeChange}
+            />
+          )}
         </div>
 
         <div className="flex items-center gap-1">
@@ -730,6 +742,10 @@ export function ChatPanel({
                   </ul>
                 </>
               )}
+              {/* 输入引导提示 */}
+              <div className="mt-4 rounded-lg border px-3 py-2 text-xs" style={{ borderColor: DESIGN_TOKENS.borderAccent, backgroundColor: "rgba(100,116,139,0.06)" }}>
+                <span style={{ color: DESIGN_TOKENS.accent }}>↓ 在下方输入你的创作需求，按 Enter 发送</span>
+              </div>
             </div>
           </div>
         ) : (
@@ -934,7 +950,7 @@ export function ChatPanel({
           attachments={attachmentsState.attachments}
           onAttachmentsChange={attachmentsState}
           onAddAttachmentToCanvas={handleAddToCanvas}
-          placeholder={selectedNodeId ? "根据选中节点提问..." : "描述想法，或框选节点添加上下文..."}
+          placeholder={selectedNodeId ? "根据选中节点提问…" : "输入你的具体需求，例如：把这个故事拆成 12 个分镜…"}
           canvasNodes={canvasNodes}
           assets={assets}
           selectedCount={selectedNodeId ? 1 : 0}
