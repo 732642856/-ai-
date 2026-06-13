@@ -6,7 +6,7 @@
 
 import { useState, useEffect, type ChangeEvent } from "react"
 import { createPortal } from "react-dom"
-import { X, Save, Plus, Trash2, BarChart3, Eye, EyeOff, Wifi, Loader2, CheckCircle2, AlertCircle, Server, Monitor } from "lucide-react"
+import { X, Save, Plus, Trash2, BarChart3, Wifi, Loader2, CheckCircle2, AlertCircle, Server, Monitor } from "lucide-react"
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 import type { ModelOption } from "../chat/ChatInput"
 import { useAIUsageStore } from "../../features/canvas/usage/useAIUsageStore"
@@ -31,7 +31,6 @@ interface SettingsPanelProps {
 export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   // ── Existing state ──────────────────────────────────
   const [apiBaseUrl, setApiBaseUrl] = useState("https://copse.top/v1")
-  const [apiKey, setApiKey] = useState("")
   const [useMock, setUseMock] = useState(true)
   const [models, setModels] = useState<ModelOption[]>([])
   const [allowAIAutoRun, setAllowAIAutoRun] = useState(false)
@@ -44,7 +43,6 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   })
 
   // ── P2-5B: Provider override state ──────────────────
-  const [showApiKey, setShowApiKey] = useState(false)
   const [defaultModel, setDefaultModel] = useState("")
   const [imageModel, setImageModel] = useState("")
   const [videoModel, setVideoModel] = useState("")
@@ -66,7 +64,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
     try {
       // Existing settings
       setApiBaseUrl(localStorage.getItem("startrails_api_base_url") || "https://copse.top/v1")
-      setApiKey(localStorage.getItem("startrails_api_key") || "")
+      localStorage.removeItem("startrails_api_key")
       setUseMock(localStorage.getItem("startrails_use_mock") !== "false")
       setAllowAIAutoRun(localStorage.getItem("startrails_ai_auto_run") === "true")
       const stored = localStorage.getItem("startrails_models")
@@ -115,7 +113,6 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
       const overrides = useLocalOverride
         ? {
             baseUrl: apiBaseUrl || undefined,
-            apiKey: apiKey || undefined,
             defaultModel: defaultModel || undefined,
             imageModel: imageModel || undefined,
             videoModel: videoModel || undefined,
@@ -137,7 +134,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
 
     // Existing settings
     localStorage.setItem("startrails_api_base_url", apiBaseUrl)
-    localStorage.setItem("startrails_api_key", apiKey)
+    localStorage.removeItem("startrails_api_key")
     localStorage.setItem("startrails_use_mock", String(useMock))
     localStorage.setItem("startrails_ai_auto_run", String(allowAIAutoRun))
     localStorage.setItem("startrails_models", JSON.stringify(models))
@@ -146,7 +143,6 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
     if (useLocalOverride) {
       saveLocalProviderOverrides({
         baseUrl: apiBaseUrl || undefined,
-        apiKey: apiKey || undefined,
         defaultModel: defaultModel || undefined,
         imageModel: imageModel || undefined,
         videoModel: videoModel || undefined,
@@ -266,8 +262,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
               <div className="flex items-start gap-1.5">
                 <AlertCircle size={13} strokeWidth={1.5} style={{ color: "#f59e0b", marginTop: 1, flexShrink: 0 }} />
                 <p className="text-[10px] leading-relaxed" style={{ color: "#fbbf24" }}>
-                  API Key 将保存在浏览器 localStorage，任何能访问此设备的用户均可查看。
-                  不适合多用户环境或公共设备。本地开发/个人使用安全。
+                  本地覆盖只允许调整 Base URL、模型和超时。API Key 始终由服务端 .env 管理，不会写入浏览器。
                 </p>
               </div>
             </div>
@@ -293,37 +288,21 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
               />
             </div>
 
-            {/* API Key */}
+            {/* API Key status */}
             <div>
-              <div className="flex items-center justify-between mb-0.5">
-                <label style={{ ...labelStyle, marginBottom: 0 }}>
-                  API Key{useLocalOverride ? "" : "（.env 管理）"}
-                </label>
-                <button
-                  onClick={() => setShowApiKey(!showApiKey)}
-                  className="rounded p-0.5 hover:bg-white/10 transition-colors"
-                  title={showApiKey ? "隐藏" : "显示"}
-                >
-                  {showApiKey
-                    ? <EyeOff size={12} strokeWidth={1.5} style={{ color: T.textMuted }} />
-                    : <Eye size={12} strokeWidth={1.5} style={{ color: T.textMuted }} />
-                  }
-                </button>
-              </div>
-              <input
-                type={showApiKey ? "text" : "password"}
-                value={apiKey}
-                onChange={(e: ChangeEvent<HTMLInputElement>) => setApiKey(e.target.value)}
-                placeholder={useLocalOverride ? "sk-..." : "使用 .env 中的 AI_API_KEY"}
-                disabled={!useLocalOverride}
-                className={inputClass}
+              <label style={labelStyle}>API Key（服务端 .env 管理）</label>
+              <div
+                className="rounded-lg border px-3 py-2 text-xs"
                 style={{
-                  borderColor: T.border,
-                  opacity: useLocalOverride ? 1 : 0.5,
+                  borderColor: serverConfig?.hasApiKey ? "rgba(16,185,129,0.35)" : T.border,
+                  backgroundColor: serverConfig?.hasApiKey ? "rgba(16,185,129,0.08)" : "rgba(255,255,255,0.04)",
+                  color: serverConfig?.hasApiKey ? "#86efac" : T.textMuted,
                 }}
-                onFocus={(e) => { if (useLocalOverride) e.target.style.borderColor = T.accent }}
-                onBlur={(e) => (e.target.style.borderColor = T.border)}
-              />
+              >
+                {serverConfig?.hasApiKey
+                  ? "服务端已配置 AI_API_KEY，不会暴露到浏览器。"
+                  : "未检测到服务端 AI_API_KEY，请在 .env.local 中配置。"}
+              </div>
             </div>
 
             {/* Default Text Model */}

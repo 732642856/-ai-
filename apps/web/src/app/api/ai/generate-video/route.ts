@@ -21,10 +21,9 @@ interface VideoGenRequestBody {
   duration?: number
   motionStrength?: number
   size?: string
-  /** 局部覆盖配置 (P2-5B Lite) */
+  /** 局部覆盖配置 (P2-5B Lite)，只允许非敏感字段 */
   overrides?: {
     baseUrl?: string
-    apiKey?: string
     videoModel?: string
     timeoutMs?: number
   }
@@ -63,7 +62,6 @@ function getConfig(overrides?: VideoGenRequestBody["overrides"]) {
     "https://api.huiyan-ai.cn/v1"
 
   const apiKey =
-    overrides?.apiKey ??
     process.env.HUIYAN_API_KEY ??
     process.env.AI_API_KEY ??
     process.env.OPENAI_API_KEY ??

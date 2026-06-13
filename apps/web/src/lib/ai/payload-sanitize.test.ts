@@ -299,11 +299,11 @@ describe("sanitizeRunPayload", () => {
   })
 
   // --- 6h. _providerOverrides sanitization ---
-  it("sanitizes _providerOverrides (removes undefined/NaN, trims strings)", () => {
+  it("sanitizes _providerOverrides (removes secrets/undefined/NaN, trims strings)", () => {
     const result = sanitizeRunPayload(validPayload({
       _providerOverrides: {
         baseUrl: "  https://api.example.com  ",
-        apiKey: undefined,
+        apiKey: "sk-client-secret",
         timeoutMs: NaN,
         defaultModel: "gpt-5.5",
       },

@@ -58,26 +58,18 @@ function withAiEnv<T>(env: Record<string, string | undefined>, fn: () => T): T {
   }
 }
 
-test("mergeProviderConfig: accepts complete Local Override without server env", () => {
+test("mergeProviderConfig: rejects Local Override without server API key", () => {
   withAiEnv({}, () => {
-    const config = mergeProviderConfig({
-      baseUrl: "https://local.example/v1/",
-      apiKey: "sk-local-secret",
-      defaultModel: "local-text-model",
-      imageModel: "local-image-model",
-      videoModel: "local-video-model",
-      timeoutMs: 34567,
-    })
-
-    assert.deepStrictEqual(config, {
-      type: "openai-compatible",
-      baseUrl: "https://local.example/v1",
-      apiKey: "sk-local-secret",
-      defaultModel: "local-text-model",
-      defaultImageModel: "local-image-model",
-      videoModel: "local-video-model",
-      timeoutMs: 34567,
-    })
+    assert.throws(
+      () => mergeProviderConfig({
+        baseUrl: "https://local.example/v1/",
+        defaultModel: "local-text-model",
+        imageModel: "local-image-model",
+        videoModel: "local-video-model",
+        timeoutMs: 34567,
+      }),
+      /Missing required config/,
+    )
   })
 })
 
@@ -113,15 +105,19 @@ test("mergeProviderConfig: Local Override defaultModel overrides env defaultMode
   })
 })
 
-test("mergeProviderConfig: trims trailing slashes from baseUrl", () => {
-  withAiEnv({}, () => {
+test("mergeProviderConfig: trims trailing slashes from Local Override baseUrl while using env API key", () => {
+  withAiEnv({
+    AI_BASE_URL: "https://env.example/v1",
+    AI_API_KEY: "sk-env-secret",
+    AI_DEFAULT_MODEL: "env-text-model",
+  }, () => {
     const config = mergeProviderConfig({
       baseUrl: "https://proxy.example/v1///",
-      apiKey: "sk-local-secret",
       defaultModel: "local-text-model",
     })
 
     assert.strictEqual(config.baseUrl, "https://proxy.example/v1")
+    assert.strictEqual(config.apiKey, "sk-env-secret")
   })
 })
 

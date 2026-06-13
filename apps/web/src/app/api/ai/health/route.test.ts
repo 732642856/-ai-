@@ -34,10 +34,14 @@ function clearAiEnv() {
   for (const key of AI_ENV_KEYS) delete process.env[key]
 }
 
-test("POST /api/ai/health: uses Local Override and returns safe config without raw API key", async (t) => {
+test("POST /api/ai/health: uses non-secret Local Override and returns safe config without raw API key", async (t) => {
   const envSnapshot = snapshotEnv()
   const originalFetch = globalThis.fetch
   clearAiEnv()
+  process.env.AI_BASE_URL = "https://env.example/v1"
+  process.env.AI_API_KEY = "sk-env-secret"
+  process.env.AI_DEFAULT_MODEL = "env-text-model"
+  process.env.AI_DEFAULT_IMAGE_MODEL = "env-image-model"
 
   const upstreamCalls: Array<{ url: string; init: RequestInit }> = []
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -55,7 +59,6 @@ test("POST /api/ai/health: uses Local Override and returns safe config without r
 
   const result = await handleHealthPost({
     baseUrl: "https://override.example/v1/",
-    apiKey: "sk-override-secret",
     defaultModel: "override-text-model",
     imageModel: "override-image-model",
     videoModel: "override-video-model",
@@ -74,12 +77,12 @@ test("POST /api/ai/health: uses Local Override and returns safe config without r
   assert.strictEqual(data.config.videoModel, "override-video-model")
   assert.strictEqual(data.config.timeoutMs, 23456)
   assert.strictEqual(Object.hasOwn(data.config, "apiKey"), false)
-  assert.equal(serialized.includes("sk-override-secret"), false)
+  assert.equal(serialized.includes("sk-env-secret"), false)
 
   assert.strictEqual(upstreamCalls.length, 1)
   assert.strictEqual(upstreamCalls[0].url, "https://override.example/v1/chat/completions")
   assert.deepStrictEqual(upstreamCalls[0].init.headers, {
-    Authorization: "Bearer sk-override-secret",
+    Authorization: "Bearer sk-env-secret",
     "Content-Type": "application/json",
   })
 
@@ -96,6 +99,9 @@ test("POST /api/ai/health: returns safe config and no raw key when upstream fail
   const envSnapshot = snapshotEnv()
   const originalFetch = globalThis.fetch
   clearAiEnv()
+  process.env.AI_BASE_URL = "https://env.example/v1"
+  process.env.AI_API_KEY = "sk-env-failing-secret"
+  process.env.AI_DEFAULT_MODEL = "env-text-model"
 
   globalThis.fetch = async () => new Response("upstream says no", { status: 401 })
 
@@ -106,7 +112,6 @@ test("POST /api/ai/health: returns safe config and no raw key when upstream fail
 
   const result = await handleHealthPost({
     baseUrl: "https://override.example/v1",
-    apiKey: "sk-failing-secret",
     defaultModel: "override-text-model",
     imageModel: "override-image-model",
     timeoutMs: 34567,
@@ -123,13 +128,16 @@ test("POST /api/ai/health: returns safe config and no raw key when upstream fail
   assert.strictEqual(data.config.defaultImageModel, "override-image-model")
   assert.strictEqual(data.config.timeoutMs, 34567)
   assert.strictEqual(Object.hasOwn(data.config, "apiKey"), false)
-  assert.equal(serialized.includes("sk-failing-secret"), false)
+  assert.equal(serialized.includes("sk-env-failing-secret"), false)
 })
 
 test("POST /api/ai/health: returns merged safe config when fetch throws", async (t) => {
   const envSnapshot = snapshotEnv()
   const originalFetch = globalThis.fetch
   clearAiEnv()
+  process.env.AI_BASE_URL = "https://env.example/v1"
+  process.env.AI_API_KEY = "sk-env-e2e-secret"
+  process.env.AI_DEFAULT_MODEL = "env-text-model"
 
   globalThis.fetch = async () => {
     throw new TypeError("fetch failed")
@@ -142,7 +150,6 @@ test("POST /api/ai/health: returns merged safe config when fetch throws", async 
 
   const result = await handleHealthPost({
     baseUrl: "https://e2e.local/v1",
-    apiKey: "e2e-test-key",
     defaultModel: "e2e-text-model",
     imageModel: "e2e-image-model",
     timeoutMs: 120000,
@@ -160,10 +167,10 @@ test("POST /api/ai/health: returns merged safe config when fetch throws", async 
   assert.strictEqual(data.config.defaultImageModel, "e2e-image-model")
   assert.strictEqual(data.config.timeoutMs, 120000)
   assert.strictEqual(Object.hasOwn(data.config, "apiKey"), false)
-  assert.equal(serialized.includes("e2e-test-key"), false)
+  assert.equal(serialized.includes("sk-env-e2e-secret"), false)
 })
 
-test("POST /api/ai/health: Local Override wins over env config", async (t) => {
+test("POST /api/ai/health: Local Override wins over env config except API key", async (t) => {
   const envSnapshot = snapshotEnv()
   const originalFetch = globalThis.fetch
   clearAiEnv()
@@ -189,7 +196,6 @@ test("POST /api/ai/health: Local Override wins over env config", async (t) => {
 
   const result = await handleHealthPost({
     baseUrl: "https://override.example/v1",
-    apiKey: "sk-override-secret",
     defaultModel: "override-text-model",
     imageModel: "override-image-model",
     timeoutMs: 23456,
@@ -203,7 +209,7 @@ test("POST /api/ai/health: Local Override wins over env config", async (t) => {
   assert.strictEqual(upstreamCalls.length, 1)
   assert.strictEqual(upstreamCalls[0].url, "https://override.example/v1/chat/completions")
   assert.deepStrictEqual(upstreamCalls[0].init.headers, {
-    Authorization: "Bearer sk-override-secret",
+    Authorization: "Bearer sk-env-secret",
     "Content-Type": "application/json",
   })
 
@@ -216,5 +222,4 @@ test("POST /api/ai/health: Local Override wins over env config", async (t) => {
   assert.strictEqual(data.config.timeoutMs, 23456)
   assert.strictEqual(Object.hasOwn(data.config, "apiKey"), false)
   assert.equal(serialized.includes("sk-env-secret"), false)
-  assert.equal(serialized.includes("sk-override-secret"), false)
 })

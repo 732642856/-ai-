@@ -112,12 +112,12 @@ export function getAiProviderConfigSafe(): Omit<AiProviderConfig, "apiKey"> & {
 // Local Override Types (P2-5B)
 // ============================================================================
 
-/** 前端可通过请求体传入的局部覆盖项（P2-5B Lite） */
+/** 前端可通过请求体传入的局部覆盖项（P2-5B Lite）。
+ * 安全约束：API Key 只能来自服务端环境变量，绝不接受浏览器/localStorage/请求体覆盖。
+ */
 export interface AiProviderOverrides {
   /** 覆盖 Base URL（可选） */
   baseUrl?: string
-  /** 覆盖 API Key（可选，⚠️ 仅适合本地自用） */
-  apiKey?: string
   /** 覆盖默认文本模型（可选） */
   defaultModel?: string
   /** 覆盖图片生成模型（可选） */
@@ -129,9 +129,8 @@ export interface AiProviderOverrides {
 }
 
 /**
- * 合并服务端 .env 配置与请求传入的局部覆盖。
- * 覆盖项优先级高于 .env。
- * 当 .env 未配置（如纯 Local Override 模式）时，用 overrides 作为基础配置。
+ * 合并服务端 .env 配置与请求传入的非敏感局部覆盖。
+ * API Key 永远只从服务端 .env 读取，不允许前端请求体或 localStorage 覆盖。
  */
 export function mergeProviderConfig(
   overrides?: AiProviderOverrides,
@@ -143,20 +142,19 @@ export function mergeProviderConfig(
     env = getAiProviderConfig()
     envOk = true
   } catch {
-    // .env 未配置，依赖 overrides 提供必填项
+    // .env 未配置时仍继续合并非敏感覆盖，但 API Key 必须最终来自服务端环境变量。
   }
 
   if (!envOk && !overrides) {
     throw new Error(
       "No server .env config and no overrides provided. " +
-      "Set AI_BASE_URL / AI_API_KEY in .env.local, or use Local Override mode in SettingsPanel.",
+      "Set AI_BASE_URL / AI_API_KEY / AI_DEFAULT_MODEL in .env.local.",
     )
   }
 
   const baseUrl =
     overrides?.baseUrl ?? env.baseUrl ?? ""
-  const apiKey =
-    overrides?.apiKey ?? env.apiKey ?? ""
+  const apiKey = env.apiKey ?? ""
   const defaultModel =
     overrides?.defaultModel ?? env.defaultModel ?? "gpt-5.5"
   const defaultImageModel =
@@ -169,8 +167,8 @@ export function mergeProviderConfig(
   if (!baseUrl || !apiKey || !defaultModel) {
     throw new Error(
       "Missing required config. " +
-      "Provide AI_BASE_URL / AI_API_KEY / AI_DEFAULT_MODEL in .env.local, " +
-      "or fill them in SettingsPanel > Local Override mode.",
+      "Provide AI_BASE_URL / AI_API_KEY / AI_DEFAULT_MODEL in .env.local. " +
+      "Local Override can only change non-secret fields such as Base URL, model, and timeout.",
     )
   }
 
@@ -186,7 +184,7 @@ export function mergeProviderConfig(
 }
 
 /**
- * 检测请求是否携带了局部覆盖。供 route.ts 快速判断。
+ * 检测请求是否携带了非敏感局部覆盖。供 route.ts 快速判断。
  */
 export function hasLocalOverrides(
   overrides?: AiProviderOverrides,
@@ -194,9 +192,9 @@ export function hasLocalOverrides(
   if (!overrides) return false
   return Boolean(
     overrides.baseUrl ||
-    overrides.apiKey ||
     overrides.defaultModel ||
     overrides.imageModel ||
-    overrides.videoModel,
+    overrides.videoModel ||
+    overrides.timeoutMs,
   )
 }

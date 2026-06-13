@@ -10,7 +10,7 @@
 // c. prompt 长度截断（可配置 maxLen）
 // d. model 名称清理（trim + 空值防御）
 // e. context 中非 string 元素过滤
-// f. _providerOverrides 对象清理
+// f. _providerOverrides 对象清理，并丢弃 apiKey 等敏感字段
 // ============================================================================
 
 // ============================================================================
@@ -140,6 +140,7 @@ function sanitizeSystemOverride(value: unknown): string | undefined {
  * - 移除 undefined / NaN / null 值
  * - string 字段做 trim，空串转为 undefined（从而被移除）
  * - number 字段保留有效数字（过滤 NaN）
+ * - apiKey 等敏感字段一律丢弃，避免前端请求体把密钥送到服务端日志或网络面板
  */
 export function sanitizeProviderOverrides(
   raw: Record<string, unknown> | undefined,
@@ -150,6 +151,10 @@ export function sanitizeProviderOverrides(
   let hasKeys = false
 
   for (const [key, val] of Object.entries(raw)) {
+    if (key.toLowerCase().includes("apikey") || key.toLowerCase().includes("api_key")) {
+      continue
+    }
+
     // 跳过 undefined / null
     if (val === undefined || val === null) continue
 

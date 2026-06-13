@@ -140,7 +140,7 @@ export async function callAiChat(request: AiChatRequest): Promise<AiChatResponse
 export async function checkAiHealth(overrides?: AiProviderOverrides): Promise<AiHealthResponse> {
   // P2-5B fix: 有覆盖配置时用 POST 传 _providerOverrides，
   // 没有覆盖时用 GET 测试 .env 服务端配置
-  const hasOverrides = overrides && (overrides.baseUrl || overrides.apiKey || overrides.defaultModel || overrides.imageModel)
+  const hasOverrides = overrides && (overrides.baseUrl || overrides.defaultModel || overrides.imageModel || overrides.videoModel || overrides.timeoutMs)
 
   if (hasOverrides) {
     const res = await fetch("/api/ai/health", {
@@ -244,7 +244,7 @@ export function saveLocalProviderOverrides(overrides: AiProviderOverrides): void
   if (typeof window === "undefined") return
   try {
     localStorage.setItem(`${LS_PREFIX}baseUrl`, overrides.baseUrl ?? "")
-    localStorage.setItem(`${LS_PREFIX}apiKey`, overrides.apiKey ?? "")
+    localStorage.removeItem(`${LS_PREFIX}apiKey`)
     localStorage.setItem(`${LS_PREFIX}defaultModel`, overrides.defaultModel ?? "")
     localStorage.setItem(`${LS_PREFIX}imageModel`, overrides.imageModel ?? "")
     localStorage.setItem(`${LS_PREFIX}videoModel`, overrides.videoModel ?? "")
@@ -260,17 +260,19 @@ export function saveLocalProviderOverrides(overrides: AiProviderOverrides): void
 export function getLocalProviderOverrides(): AiProviderOverrides | null {
   if (typeof window === "undefined") return null
   try {
+    localStorage.removeItem(`${LS_PREFIX}apiKey`)
+    localStorage.removeItem("startrails_api_key")
+
     const baseUrl = localStorage.getItem(`${LS_PREFIX}baseUrl`) || undefined
-    const apiKey = localStorage.getItem(`${LS_PREFIX}apiKey`) || undefined
     const defaultModel = localStorage.getItem(`${LS_PREFIX}defaultModel`) || undefined
     const imageModel = localStorage.getItem(`${LS_PREFIX}imageModel`) || undefined
     const videoModel = localStorage.getItem(`${LS_PREFIX}videoModel`) || undefined
     const timeoutRaw = localStorage.getItem(`${LS_PREFIX}timeoutMs`)
     const timeoutMs = timeoutRaw ? Number(timeoutRaw) : undefined
 
-    if (!baseUrl && !apiKey && !defaultModel && !imageModel && !videoModel && !timeoutMs) return null
+    if (!baseUrl && !defaultModel && !imageModel && !videoModel && !timeoutMs) return null
 
-    return { baseUrl, apiKey, defaultModel, imageModel, videoModel, timeoutMs }
+    return { baseUrl, defaultModel, imageModel, videoModel, timeoutMs }
   } catch {
     return null
   }
