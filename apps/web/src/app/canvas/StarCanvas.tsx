@@ -161,6 +161,11 @@ import { ChainGeneratePanel } from "./components/panels/ChainGeneratePanel";
 import { ParamControlPanel } from "./components/panels/ParamControlPanel";
 import { StoryboardShotEditorPanel } from "./components/panels/StoryboardShotEditorPanel";
 import { BgmPanel } from "./components/nodes/BgmPanel";
+import { AngleControlPanel } from "./components/nodes/AngleControlPanel";
+import { BackgroundRemoverPanel } from "./components/canvas/BackgroundRemoverPanel";
+import { AudioWaveform } from "./components/nodes/AudioWaveform";
+import { CanvasDiagnosticsPanel } from "./components/canvas/CanvasDiagnosticsPanel";
+import { CinemaLabPanel } from "./components/nodes/CinemaLabPanel";
 import { ExportPreflightPanel } from "./components/panels/ExportPreflightPanel";
 import { FileUploadPanel } from "./components/panels/FileUploadPanel";
 import { WorkspaceHistoryPanel } from "./components/history/WorkspaceHistoryPanel";
@@ -810,6 +815,8 @@ function StarCanvasInner() {
   const [showShotEditor, setShowShotEditor] = useState(false);
   const [showBgRemover, setShowBgRemover] = useState(false);
   const [showBgm, setShowBgm] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [showCinemaLab, setShowCinemaLab] = useState(false);
   const [agentMode, setAgentMode] = useState<AgentMode>("ask");
   // 制片层面板
   const [showCharacterView, setShowCharacterView] = useState(false);
@@ -8689,7 +8696,39 @@ function StarCanvasInner() {
           document.body,
         )}
 
-        {/* Production Run Queue Panel */}
+        {/* === 恢复孤立组件 === */}
+      {/* 镜头角度/景别 (AngleControlPanel) */}
+      {showAngleControl && (
+        <AngleControlPanel
+          isOpen={showAngleControl}
+          onClose={() => setShowAngleControl(false)}
+          selectedNodeId={selectedNodeId}
+        />
+      )}
+
+      {/* Canvas 诊断面板 */}
+      {showDiagnostics && (
+        <CanvasDiagnosticsPanel
+          isOpen={showDiagnostics}
+          onClose={() => setShowDiagnostics(false)}
+          nodes={nodes as Node<CanvasNodeData>[]}
+          edges={edges}
+          isCanvasRestored={isCanvasRestored}
+          scriptImportOpen={showScriptImportPanel}
+          showRunPanel={showRunPanel}
+          runEventCount={nodes.filter((n: any) => n.data?.runMeta?.runStatus).length}
+        />
+      )}
+
+      {/* 影视实验室 (CinemaLabPanel) — 需要选中节点 */}
+      {showCinemaLab && selectedNode && (
+        <CinemaLabPanel
+          nodeId={selectedNode.id}
+          onChange={(cfg) => { /* 将通过 PropertyPanel 链路更新 */ }}
+        />
+      )}
+
+      {/* Production Run Queue Panel */}
       {showProductionQueue && productionRunQueue &&
         typeof document !== "undefined" &&
         createPortal(
