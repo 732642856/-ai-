@@ -166,6 +166,7 @@ import { BackgroundRemoverPanel } from "./components/canvas/BackgroundRemoverPan
 import { AudioWaveform } from "./components/nodes/AudioWaveform";
 import { CanvasDiagnosticsPanel } from "./components/canvas/CanvasDiagnosticsPanel";
 import { CinemaLabPanel } from "./components/nodes/CinemaLabPanel";
+import { TransitionPicker } from "./components/nodes/TransitionPicker";
 import { ExportPreflightPanel } from "./components/panels/ExportPreflightPanel";
 import { FileUploadPanel } from "./components/panels/FileUploadPanel";
 import { WorkspaceHistoryPanel } from "./components/history/WorkspaceHistoryPanel";
@@ -817,6 +818,11 @@ function StarCanvasInner() {
   const [showBgm, setShowBgm] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [showCinemaLab, setShowCinemaLab] = useState(false);
+  const [showTransitionPicker, setShowTransitionPicker] = useState(false);
+  const [transitionState, setTransitionState] = useState<{ effect: string; duration: number }>({
+    effect: "fade",
+    duration: 1.0,
+  });
   const [agentMode, setAgentMode] = useState<AgentMode>("ask");
   // 制片层面板
   const [showCharacterView, setShowCharacterView] = useState(false);
@@ -8725,6 +8731,15 @@ function StarCanvasInner() {
         <CinemaLabPanel
           nodeId={selectedNode.id}
           onChange={(cfg) => { /* 将通过 PropertyPanel 链路更新 */ }}
+        />
+      )}
+
+      {/* 分镜转场选择器 (TransitionPicker) — 最后孤儿的复活 */}
+      {showTransitionPicker && (
+        <TransitionPicker
+          transition={transitionState.effect as any}
+          transitionDuration={transitionState.duration}
+          onChange={(effect, duration) => setTransitionState({ effect, duration })}
         />
       )}
 

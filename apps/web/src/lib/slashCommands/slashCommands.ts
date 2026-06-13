@@ -217,6 +217,12 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     description: "导出FFmpeg视频合成脚本",
     targets: ["canvas"],
   },
+  {
+    id: "generate-storyboard-text",
+    label: "生成分镜文本",
+    description: "从文本/大纲生成完整分镜描述",
+    targets: ["text", "shot"],
+  },
 ];
 
 export function getSlashCommandsForTarget(
