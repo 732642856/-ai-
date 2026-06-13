@@ -1,8 +1,8 @@
 "use client"
 
 // ============================================================================
-// BibleDropdown — Bible 相关操作下拉菜单
-// 合并 Bible / 角色 / 场景 / 风格 / 情绪 5个按钮为一个下拉
+// BibleDropdown — 角色设定相关操作下拉菜单
+// 合并 项目设定 / 角色 / 场景 / 风格 / 情绪 5个按钮为一个下拉
 // ============================================================================
 
 import { useCallback, useRef, useState } from "react"
@@ -24,7 +24,7 @@ export function BibleDropdown(actions: BibleActions) {
   const ref = useRef<HTMLDivElement>(null)
 
   const items = [
-    { icon: BookOpen, label: `项目 Bible ${actions.characterLibraryCount}/${actions.sceneCount}`, action: actions.onOpenProjectBible },
+    { icon: BookOpen, label: `项目设定 ${actions.characterLibraryCount}/${actions.sceneCount}`, action: actions.onOpenProjectBible },
     { icon: UserRound, label: "角色设定", action: actions.onOpenCharacterBible },
     { icon: Clapperboard, label: "场景设定", action: actions.onOpenSceneBible },
     { icon: Palette, label: "视觉风格", action: actions.onOpenStyleBible },
@@ -50,7 +50,7 @@ export function BibleDropdown(actions: BibleActions) {
         data-testid="bible-dropdown-toggle"
       >
         <BookOpen size={14} strokeWidth={1.7} />
-        <span>Bible</span>
+        <span>角色设定</span>
         <ChevronDown size={11} strokeWidth={2} style={{ color: DESIGN_TOKENS.textMuted }} />
       </button>
 

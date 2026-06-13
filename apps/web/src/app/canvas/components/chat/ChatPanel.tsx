@@ -253,13 +253,13 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<Message[]>([])
-  const [conversationTitle, setConversationTitle] = useState("Greeting")
+  const [conversationTitle, setConversationTitle] = useState("新对话")
   const [selectedModel, setSelectedModel] = useState<string>("gpt-5.5")
   const [showHistory, setShowHistory] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const thinkingStartRef = useRef<number | null>(null)
 
-  // 生成画布节点摘要（用于 AI Greeting）
+  // 生成画布节点摘要
   const nodeSummary = useMemo(() => {
     if (!canvasNodes || canvasNodes.length === 0) return null
     const imageNodes = canvasNodes.filter((n) => n.type === "image")
@@ -288,7 +288,7 @@ export function ChatPanel({
 
   // 会话历史（模拟）
   const [conversations, setConversations] = useState([
-    { id: "1", title: "Greeting", timestamp: Date.now() - 1000 * 60 * 5 },
+    { id: "1", title: "新对话", timestamp: Date.now() - 1000 * 60 * 5 },
     { id: "2", title: "角色设计讨论", timestamp: Date.now() - 1000 * 60 * 60 * 2 },
     { id: "3", title: "分镜规划", timestamp: Date.now() - 1000 * 60 * 60 * 24 },
   ])
@@ -587,7 +587,7 @@ export function ChatPanel({
               }
               // 开始新会话
               setMessages([])
-              setConversationTitle("新会话")
+              setConversationTitle("新对话")
               setInput("")
             }}
             className="flex h-8 w-8 items-center justify-center rounded-lg transition-colors hover:bg-white/5"

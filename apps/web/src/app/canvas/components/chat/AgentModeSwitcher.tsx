@@ -30,7 +30,7 @@ export interface AgentModeOption {
 export const AGENT_MODE_OPTIONS: AgentModeOption[] = [
   {
     mode: "ask",
-    label: "Ask",
+    label: "确认执行",
     description: "AI 先出计划，你确认后再执行",
     icon: MessageCircle,
     color: "#60a5fa",
@@ -38,7 +38,7 @@ export const AGENT_MODE_OPTIONS: AgentModeOption[] = [
   },
   {
     mode: "max",
-    label: "Max",
+    label: "自动完成",
     description: "AI 自动创建节点、连线、执行所有操作",
     icon: Zap,
     color: "#f59e0b",
@@ -46,7 +46,7 @@ export const AGENT_MODE_OPTIONS: AgentModeOption[] = [
   },
   {
     mode: "preview",
-    label: "Preview",
+    label: "先预览",
     description: "AI 生成半透明草稿节点，你确认后落地",
     icon: Eye,
     color: "#a78bfa",

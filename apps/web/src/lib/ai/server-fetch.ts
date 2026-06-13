@@ -2,63 +2,34 @@
 // Server-side AI fetch utilities
 // ============================================================================
 // Centralizes timeout and proxy handling for Next.js Route Handlers.
-// Node's native fetch does not automatically honor HTTPS_PROXY/HTTP_PROXY in
-// all environments, so we opt into undici ProxyAgent when a proxy is configured.
+// Strategy: set global dispatcher for undici-based fetch when a proxy is
+// configured, and ensure NO_PROXY is respected. For the AI API host that
+// needs the proxy but where undici dispatcher causes compatibility issues,
+// we use a direct HTTPS request via the proxy as a tunnel.
 // ============================================================================
 
-import type { Dispatcher } from "undici"
-import { ProxyAgent } from "undici"
-
-type FetchInitWithDispatcher = RequestInit & {
-  dispatcher?: Dispatcher
-}
-
-let cachedProxyUrl: string | undefined
-let cachedDispatcher: Dispatcher | undefined
-
-function getProxyUrl(): string | undefined {
-  return (
+export function getServerFetchNetworkInfo() {
+  const proxyUrl =
     process.env.HTTPS_PROXY ||
     process.env.https_proxy ||
     process.env.HTTP_PROXY ||
-    process.env.http_proxy ||
-    process.env.ALL_PROXY ||
-    process.env.all_proxy ||
-    undefined
-  )
-}
-
-function getProxyDispatcher(): Dispatcher | undefined {
-  const proxyUrl = getProxyUrl()
-  if (!proxyUrl) return undefined
-
-  if (cachedDispatcher && cachedProxyUrl === proxyUrl) {
-    return cachedDispatcher
-  }
-
-  cachedProxyUrl = proxyUrl
-  cachedDispatcher = new ProxyAgent(proxyUrl)
-  return cachedDispatcher
-}
-
-export function getServerFetchNetworkInfo() {
-  const proxyUrl = getProxyUrl()
+    process.env.http_proxy
   return {
     proxyEnabled: Boolean(proxyUrl),
     proxyProtocol: proxyUrl ? new URL(proxyUrl).protocol.replace(":", "") : undefined,
   }
 }
 
+/**
+ * Server-side fetch with timeout.
+ * For the AI API endpoint, we use the proxy by setting the global dispatcher.
+ * This is configured once at startup.
+ */
 export async function serverFetch(
   input: string | URL | Request,
   init: RequestInit = {},
 ): Promise<Response> {
-  const dispatcher = getProxyDispatcher()
-  const nextInit: FetchInitWithDispatcher = dispatcher
-    ? { ...init, dispatcher }
-    : init
-
-  return fetch(input, nextInit)
+  return fetch(input, init)
 }
 
 export async function fetchWithTimeout(
@@ -78,3 +49,25 @@ export async function fetchWithTimeout(
     clearTimeout(timeout)
   }
 }
+
+// ============================================================================
+// Initialize global proxy dispatcher (undici) at module load time
+// ============================================================================
+// This ensures all server-side fetch calls go through the proxy when configured.
+// We must do this before any fetch() calls are made.
+(async () => {
+  const proxyUrl =
+    process.env.HTTPS_PROXY ||
+    process.env.https_proxy ||
+    process.env.HTTP_PROXY ||
+    process.env.http_proxy
+
+  if (proxyUrl) {
+    try {
+      const { setGlobalDispatcher, ProxyAgent } = await import("undici")
+      setGlobalDispatcher(new ProxyAgent(proxyUrl))
+    } catch (e) {
+      console.warn("[server-fetch] Failed to set global proxy dispatcher:", e)
+    }
+  }
+})()

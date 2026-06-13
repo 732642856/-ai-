@@ -625,6 +625,11 @@ async function handleImageGeneration(
 
 export async function POST(request: NextRequest) {
   try {
+    // Debug: log proxy state for diagnosing "fetch failed"
+    const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY
+    const noProxy = process.env.NO_PROXY || process.env.no_proxy
+    console.log(`[Chat SSE] Proxy: ${proxyUrl || "none"}, NO_PROXY: ${noProxy || "none"}, USE_MOCK: ${USE_MOCK}`)
+
     const body = await request.json()
     const { message, model: reqModel, context, _providerOverrides } = body
 
