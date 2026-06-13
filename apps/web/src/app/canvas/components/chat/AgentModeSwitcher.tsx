@@ -73,7 +73,7 @@ export const AgentModeSwitcher = memo(function AgentModeSwitcher({
   const IconComponent = activeOption?.icon ?? MessageCircle
 
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-0.5">
       {AGENT_MODE_OPTIONS.map((option) => {
         const isActive = activeMode === option.mode
         const Icon = option.icon
@@ -84,7 +84,7 @@ export const AgentModeSwitcher = memo(function AgentModeSwitcher({
             type="button"
             disabled={disabled}
             onClick={() => onChange(option.mode)}
-            className="flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-medium transition disabled:opacity-40"
+            className="flex items-center gap-0.5 rounded-full border px-2 py-0.5 text-[10px] font-medium transition disabled:opacity-40"
             title={`${option.label}: ${option.description}`}
             style={{
               borderColor: isActive ? option.color : DESIGN_TOKENS.border,
@@ -92,21 +92,13 @@ export const AgentModeSwitcher = memo(function AgentModeSwitcher({
               color: isActive ? option.color : DESIGN_TOKENS.textMuted,
             }}
           >
-            <Icon size={11} strokeWidth={2} />
+            <Icon size={10} strokeWidth={2} />
             {option.label}
           </button>
         )
       })}
 
-      {/* Description tooltip on hover */}
-      {activeOption && (
-        <span
-          className="hidden text-[10px] sm:inline"
-          style={{ color: DESIGN_TOKENS.textMuted, marginLeft: 4 }}
-        >
-          · {activeOption.description}
-        </span>
-      )}
+      {/* 描述文字已移除 — 在 header 内联时不占用额外空间 */}
     </div>
   )
 })

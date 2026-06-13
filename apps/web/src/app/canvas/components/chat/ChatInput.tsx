@@ -286,16 +286,16 @@ export function ChatInput({
       onDragOver={onAttachmentsChange.handleDragOver}
       onDrop={onAttachmentsChange.handleDrop}
     >
-      {/* 附件预览 */}
-      <ChatAttachmentPreview
-        attachments={attachments}
-        onRemove={onAttachmentsChange.removeAttachment}
-        onAddToCanvas={onAddAttachmentToCanvas}
-        showAddToCanvas={true}
-      />
-
-      {/* 文本输入框 */}
-      <div className="relative">
+      {/* ===== 主输入区：textarea 是绝对视觉中心 ===== */}
+      <div
+        className="relative rounded-xl border"
+        style={{
+          backgroundColor: "rgba(15,15,22,0.8)",
+          borderColor: DESIGN_TOKENS.border,
+          margin: "10px",
+          marginBottom: "4px",
+        }}
+      >
         <textarea
           ref={textareaRef}
           value={value}
@@ -303,12 +303,12 @@ export function ChatInput({
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           disabled={disabled || isGenerating}
-          rows={1}
-          className="w-full resize-none border-0 bg-transparent px-4 py-3 text-sm outline-none"
+          rows={3}
+          className="w-full resize-none border-0 bg-transparent px-4 py-3 text-sm leading-relaxed outline-none"
           style={{
             color: DESIGN_TOKENS.text,
-            maxHeight: "160px",
-            minHeight: "56px",
+            maxHeight: "180px",
+            minHeight: "72px",
           }}
         />
 
@@ -379,19 +379,27 @@ export function ChatInput({
         )}
       </div>
 
-      {/* 底部工具栏 */}
-      <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-1">
-        {/* 左侧工具 */}
-        <div className="flex min-w-0 items-center gap-2">
+      {/* 附件预览 — 紧贴在输入框下方 */}
+      <ChatAttachmentPreview
+        attachments={attachments}
+        onRemove={onAttachmentsChange.removeAttachment}
+        onAddToCanvas={onAddAttachmentToCanvas}
+        showAddToCanvas={true}
+      />
+
+      {/* 底部工具栏 — 精简为单行小字 */}
+      <div className="flex items-center justify-between px-4 pb-3 pt-1">
+        {/* 左侧：精简工具 */}
+        <div className="flex min-w-0 items-center gap-1.5">
           {/* 附件按钮 */}
           <button
             onClick={handlePaperclipClick}
             disabled={disabled || isGenerating}
-            className="flex h-8 w-8 items-center justify-center rounded-lg transition-colors hover:bg-white/5"
+            className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/5"
             style={{ color: DESIGN_TOKENS.textMuted }}
             title="添加附件"
           >
-            <Paperclip size={16} strokeWidth={1.5} />
+            <Paperclip size={14} strokeWidth={1.5} />
           </button>
 
           {/* 隐藏的文件输入 */}
@@ -404,8 +412,8 @@ export function ChatInput({
             className="hidden"
           />
 
-          {/* 任务模式：用户先选用途，系统自动匹配模型 */}
-          <div className="flex h-9 items-center gap-1 rounded-full p-1" style={{ backgroundColor: "rgba(255,255,255,0.06)" }}>
+          {/* 任务模式：紧凑胶囊 */}
+          <div className="flex h-7 items-center gap-0.5 rounded-full p-0.5" style={{ backgroundColor: "rgba(255,255,255,0.05)" }}>
             {TASK_MODE_OPTIONS.map((option) => {
               const Icon = option.icon
               const active = taskMode === option.value
@@ -417,14 +425,14 @@ export function ChatInput({
                     setTaskMode(option.value)
                     onModelChange(option.defaultModel)
                   }}
-                  className="flex h-7 items-center gap-1.5 rounded-full px-3 text-xs font-medium leading-none whitespace-nowrap transition-colors"
+                  className="flex h-6 items-center gap-1 rounded-full px-2 text-[11px] font-medium leading-none whitespace-nowrap transition-colors"
                   style={{
-                    backgroundColor: active ? "rgba(255,255,255,0.14)" : "transparent",
+                    backgroundColor: active ? "rgba(255,255,255,0.12)" : "transparent",
                     color: active ? DESIGN_TOKENS.text : DESIGN_TOKENS.textMuted,
                   }}
                   title={option.desc}
                 >
-                  <Icon size={14} strokeWidth={1.7} />
+                  <Icon size={12} strokeWidth={1.7} />
                   <span>{option.label}</span>
                 </button>
               )
@@ -432,9 +440,9 @@ export function ChatInput({
           </div>
         </div>
 
-        {/* 右侧工具 */}
+        {/* 右侧：发送为主 */}
         <div className="flex items-center gap-1">
-          {/* 麦克风 - 使用 Web Speech API */}
+          {/* 麦克风 */}
           <button
             onClick={() => {
               if ("webkitSpeechRecognition" in window || "SpeechRecognition" in window) {
@@ -451,47 +459,46 @@ export function ChatInput({
               }
             }}
             disabled={disabled || isGenerating}
-            className="flex h-8 w-8 items-center justify-center rounded-lg transition-colors hover:bg-white/5"
+            className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/5"
             style={{ color: DESIGN_TOKENS.textMuted }}
             title="语音输入"
           >
-            <Mic size={16} strokeWidth={1.5} />
+            <Mic size={14} strokeWidth={1.5} />
           </button>
 
-          {/* 设置 - 打开设置面板 */}
+          {/* 设置 */}
           <button
             onClick={() => {
-              // 触发打开设置面板（通过 CustomEvent）
               if (typeof window !== "undefined") {
                 window.dispatchEvent(new CustomEvent("startrails-open-settings"))
               }
             }}
             disabled={disabled || isGenerating}
-            className="flex h-8 w-8 items-center justify-center rounded-lg transition-colors hover:bg-white/5"
+            className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/5"
             style={{ color: DESIGN_TOKENS.textMuted }}
             title="设置"
           >
-            <Settings size={16} strokeWidth={1.5} />
+            <Settings size={14} strokeWidth={1.5} />
           </button>
 
           {/* 发送/停止按钮 */}
           {isGenerating ? (
             <button
               onClick={onStop}
-              className="flex h-9 w-9 items-center justify-center rounded-full transition-colors"
+              className="flex h-8 w-8 items-center justify-center rounded-full transition-colors"
               style={{
                 backgroundColor: "rgba(239, 68, 68, 0.2)",
                 color: "#ef4444",
               }}
               title="停止生成"
             >
-              <Square size={16} strokeWidth={2} />
+              <Square size={14} strokeWidth={2} />
             </button>
           ) : (
             <button
               onClick={() => onSend(selectedModelForMode, taskMode)}
               disabled={disabled || (!value.trim() && attachments.length === 0)}
-              className="flex h-9 w-9 items-center justify-center rounded-full transition-all"
+              className="flex h-8 w-8 items-center justify-center rounded-full transition-all"
               style={{
                 backgroundColor:
                   value.trim() || attachments.length > 0
@@ -501,7 +508,7 @@ export function ChatInput({
               }}
               title="发送"
             >
-              <ArrowUp size={18} strokeWidth={2.5} />
+              <ArrowUp size={16} strokeWidth={2.5} />
             </button>
           )}
         </div>
