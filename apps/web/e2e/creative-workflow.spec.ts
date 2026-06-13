@@ -18,7 +18,7 @@ test("完整创作流水线 — 剧本→分镜→生图→生视频→导出", 
   // Phase 1: 进入画布
   // ═══════════════════════════════════════════
   await page.goto(`${BASE}/canvas`, { timeout: 120000, waitUntil: "domcontentloaded" })
-  await page.waitForTimeout(35000) // 等 Webpack 编译
+  await page.waitForTimeout(5000) // 生产构建已预编译；开发模式下仅保留短暂等待
 
   // ═══════════════════════════════════════════
   // Phase 2: 空白写作 - 创建文本节点
@@ -61,17 +61,20 @@ test("完整创作流水线 — 剧本→分镜→生图→生视频→导出", 
   // ═══════════════════════════════════════════
   // Phase 5: 选中一个 Shot 节点，生成图片
   // ═══════════════════════════════════════════
-  // 尝试点击画布上的节点
-  const node = page.locator('.react-flow__node').first()
+  // 右侧 ChatPanel 会覆盖画布右侧节点，先关闭避免拦截 Playwright 点击
+  const closeChat = page.getByTitle("关闭").last()
+  if (await closeChat.isVisible({ timeout: 3000 }).catch(() => false)) {
+    await closeChat.click()
+    await page.waitForTimeout(1000)
+  }
+
+  const node = page.locator(".react-flow__node").first()
   if (await node.isVisible({ timeout: 5000 })) {
     await node.click()
     await page.waitForTimeout(2000)
-    // 右键菜单
-    await node.click({ button: "right" })
-    await page.waitForTimeout(2000)
-      // 点击"生成图片" — 使用 first() 避免 strict mode
-      const genImg = page.getByText("生成图片").first()
-      if (await genImg.isVisible({ timeout: 3000 })) {
+
+    const genImg = page.getByRole("button", { name: /^生成图片$/ }).first()
+    if (await genImg.isVisible({ timeout: 5000 }).catch(() => false)) {
       await genImg.click()
       await page.waitForTimeout(10000)
     }
@@ -85,8 +88,8 @@ test("完整创作流水线 — 剧本→分镜→生图→生视频→导出", 
   // ═══════════════════════════════════════════
   // Phase 7: 查看分镜列表
   // ═══════════════════════════════════════════
-  const shotBtn = page.getByRole("button", { name: "分镜" })
-  if (await shotBtn.isVisible({ timeout: 5000 })) {
+  const shotBtn = page.getByTestId("shot-list-toggle")
+  if (await shotBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
     await shotBtn.click()
     await page.waitForTimeout(3000)
   }

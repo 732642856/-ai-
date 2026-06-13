@@ -23,184 +23,13 @@ import {
   Bot,
   type LucideIcon,
 } from "lucide-react"
-import type { SlashCommand, SlashCommandCategory, SlashCommandGroup } from "../../types/slash-commands"
+import {
+  SLASH_COMMANDS as ALL_COMMANDS,
+  type SlashCommand,
+  type SlashCommandCategory,
+  type SlashCommandGroup,
+} from "@/lib/slashCommands/slashCommands"
 import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
-
-// ============================================================================
-// Command Definitions — Master List
-// ============================================================================
-
-const ALL_COMMANDS: SlashCommand[] = [
-  // --- Generation ---
-  {
-    id: "创建Agent工作流",
-    label: "创建Agent工作流",
-    description: "创建 ArcReel/FilmAgent 式多智能体视频创作流水线",
-    icon: "Bot",
-    category: "workflow",
-    modelType: "text",
-  },
-  {
-    id: "一键视频流水线",
-    label: "一键视频流水线",
-    description: "创建剧本、分镜、首帧、视频、音频、字幕和交付包节点",
-    icon: "Video",
-    category: "workflow",
-    modelType: "text",
-  },
-  {
-    id: "生成文本",
-    label: "生成文本",
-    description: "基于选中节点或提示词生成文本内容",
-    icon: "FileText",
-    category: "generation",
-    modelType: "text",
-  },
-  {
-    id: "生成图片",
-    label: "生成图片",
-    description: "根据文本或图片生成 AI 图片",
-    icon: "Image",
-    category: "generation",
-    modelType: "image",
-  },
-  {
-    id: "生成视频",
-    label: "生成视频",
-    description: "根据图片或文本生成视频（高成本）",
-    icon: "Video",
-    category: "generation",
-    modelType: "video",
-    isCostly: true,
-  },
-  {
-    id: "生成分镜",
-    label: "生成分镜",
-    description: "根据文本/脚本自动生成分镜镜头序列",
-    icon: "LayoutGrid",
-    category: "storyboard",
-    modelType: "text",
-  },
-  {
-    id: "生成镜头表",
-    label: "生成镜头表",
-    description: "将分镜整理为 Shot List 表格",
-    icon: "List",
-    category: "storyboard",
-    modelType: "text",
-  },
-  {
-    id: "生成角色",
-    label: "生成角色",
-    description: "创建角色设定节点",
-    icon: "Sparkles",
-    category: "generation",
-    modelType: "text",
-  },
-  {
-    id: "生成场景",
-    label: "生成场景",
-    description: "创建场景设定节点",
-    icon: "Sun",
-    category: "generation",
-    modelType: "text",
-  },
-  {
-    id: "生成提示词",
-    label: "生成提示词",
-    description: "为当前节点内容生成优化后的 AI 提示词",
-    icon: "Wand2",
-    category: "generation",
-    modelType: "text",
-  },
-  {
-    id: "生成摄影方案",
-    label: "生成摄影方案",
-    description: "根据场景/分镜生成机位、焦段、光线方案",
-    icon: "Camera",
-    category: "storyboard",
-    modelType: "text",
-  },
-
-  // --- Editing ---
-  {
-    id: "扩写",
-    label: "扩写",
-    description: "基于选中节点内容扩展写作",
-    icon: "Pencil",
-    category: "editing",
-    modelType: "text",
-  },
-  {
-    id: "总结",
-    label: "总结",
-    description: "总结选中节点内容",
-    icon: "FileText",
-    category: "editing",
-    modelType: "text",
-  },
-  {
-    id: "改写",
-    label: "改写",
-    description: "用不同风格重新表述选中内容",
-    icon: "Pencil",
-    category: "editing",
-    modelType: "text",
-  },
-  {
-    id: "翻译",
-    label: "翻译",
-    description: "将选中内容翻译为目标语言",
-    icon: "Text",
-    category: "editing",
-    modelType: "text",
-  },
-  {
-    id: "拆分为节点",
-    label: "拆分为节点",
-    description: "将长文本拆分为多个子节点",
-    icon: "LayoutGrid",
-    category: "canvas",
-    modelType: "text",
-  },
-
-  // --- Canvas Operations ---
-  {
-    id: "保存为资产",
-    label: "保存为资产",
-    description: "将选中节点保存到资产库",
-    icon: "FolderHeart",
-    category: "asset",
-    modelType: "none",
-    minSelection: 1,
-  },
-  {
-    id: "合并节点",
-    label: "合并节点",
-    description: "将多个选中节点合并为一个",
-    icon: "Copy",
-    category: "canvas",
-    modelType: "none",
-    minSelection: 2,
-  },
-  {
-    id: "删除节点",
-    label: "删除节点",
-    description: "删除选中节点（不可撤销）",
-    icon: "Trash2",
-    category: "canvas",
-    modelType: "none",
-    minSelection: 1,
-  },
-  {
-    id: "自动布局",
-    label: "自动布局",
-    description: "自动排列选中节点或全画布节点",
-    icon: "LayoutGrid",
-    category: "canvas",
-    modelType: "none",
-  },
-]
 
 // ============================================================================
 // Icon mapping
@@ -238,6 +67,24 @@ const CATEGORY_LABELS: Record<SlashCommandCategory, string> = {
   workflow: "工作流",
 }
 
+function getCommandCategory(command: SlashCommand): SlashCommandCategory {
+  if (command.category) return command.category
+  if (command.targets.includes("canvas")) return "canvas"
+  if (command.targets.includes("video")) return "workflow"
+  if (command.targets.includes("shot") && !command.targets.includes("text")) return "generation"
+  if (command.id.includes("storyboard") || command.id.includes("shot")) return "storyboard"
+  return "editing"
+}
+
+function getCommandIcon(command: SlashCommand): string {
+  if (command.icon) return command.icon
+  if (command.targets.includes("video")) return "Video"
+  if (command.targets.includes("image")) return "Image"
+  if (command.targets.includes("canvas")) return "LayoutGrid"
+  if (command.id.includes("storyboard")) return "List"
+  return "FileText"
+}
+
 // ============================================================================
 // Component
 // ============================================================================
@@ -267,9 +114,9 @@ export function SlashCommandMenu({
   const filteredGroups = useMemo<SlashCommandGroup[]>(() => {
     const q = query.toLowerCase().trim()
     const matched = ALL_COMMANDS.filter((cmd) => {
-      // Filter by selection requirement
+      // Chat 面板只显示对全局入口有意义的命令：文本、分镜、画布、视频流水线。
+      if (!cmd.targets.some((target) => ["text", "shot", "canvas", "video"].includes(target))) return false
       if ((cmd.minSelection ?? 0) > selectedCount) return false
-      // Filter by query
       if (!q) return true
       return (
         cmd.label.toLowerCase().includes(q) ||
@@ -281,7 +128,7 @@ export function SlashCommandMenu({
     // Group by category
     const groupMap = new Map<string, SlashCommand[]>()
     for (const cmd of matched) {
-      const cat = cmd.category
+      const cat = getCommandCategory(cmd)
       if (!groupMap.has(cat)) groupMap.set(cat, [])
       groupMap.get(cat)!.push(cmd)
     }
@@ -367,7 +214,7 @@ export function SlashCommandMenu({
           {group.commands.map((cmd, i) => {
             const globalIdx = flatCommands.indexOf(cmd)
             const isActive = globalIdx === activeIndex
-            const Icon = ICON_MAP[cmd.icon] ?? FileText
+            const Icon = ICON_MAP[getCommandIcon(cmd)] ?? FileText
             return (
               <button
                 key={cmd.id}

@@ -33,12 +33,25 @@ export type SlashCommandId =
   | "generate-with-pose";     // 姿态参考生图
 
 export type SlashCommandTargetType = "text" | "shot" | "image" | "video" | "canvas";
+export type SlashCommandCategory = "generation" | "editing" | "canvas" | "storyboard" | "asset" | "workflow";
+export type SlashCommandModelType = "text" | "image" | "video" | "none";
 
 export type SlashCommand = {
   id: SlashCommandId;
   label: string;
   description: string;
   targets: SlashCommandTargetType[];
+  icon?: string;
+  category?: SlashCommandCategory;
+  modelType?: SlashCommandModelType;
+  minSelection?: number;
+  isCostly?: boolean;
+};
+
+export type SlashCommandGroup = {
+  category: SlashCommandCategory;
+  label: string;
+  commands: SlashCommand[];
 };
 
 export type SlashQueryRange = {

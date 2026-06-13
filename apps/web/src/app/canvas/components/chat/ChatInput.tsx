@@ -9,7 +9,7 @@ import { DESIGN_TOKENS, ICON_CONFIG } from "../../styles/designSystem"
 import { ChatAttachmentPreview } from "./ChatAttachmentPreview"
 import { SlashCommandMenu } from "./SlashCommandMenu"
 import type { ChatAttachment } from "../../hooks/useChatAttachments"
-import type { SlashCommand } from "../../types/slash-commands"
+import type { SlashCommand } from "@/lib/slashCommands/slashCommands"
 import type { AssetItem } from "../canvas/types"
 import { getCachedDefaultImageModel } from "@/lib/ai/client"
 import { getModelOptions } from "@/lib/ai/imageProviderCapabilities"
@@ -266,8 +266,8 @@ export function ChatInput({
   const handleSlashSelect = (command: SlashCommand) => {
     setShowSlashMenu(false)
     setSlashQuery("")
-    // Replace the "/" and query with the command id
-    const newValue = value.replace(/\/[^\s]*$/, command.id)
+    // Chat 输入统一使用核心 SlashCommand 注册表，插入 /id 便于 AI/日志稳定识别。
+    const newValue = value.replace(/\/[^\s]*$/, `/${command.id}`)
     onChange(newValue + " ")
     textareaRef.current?.focus()
   }
